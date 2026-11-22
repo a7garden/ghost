@@ -5,7 +5,7 @@ import { routeLabels, uiTerms } from '../uiText';
 export interface Crumb { label: string; path: string | null }
 
 const settingsTabs: Record<string, string> = {
-  team: 'Ghost', models: '모델', vault: '금고', devices: '기기', schedules: uiTerms.schedules,
+  team: 'Ghost', models: '모델', approvals: '승인과 언어', duty: '근무 시간', update: '업데이트', vault: '금고', devices: '기기', schedules: uiTerms.schedules,
   activities: uiTerms.activities, connections: uiTerms.connections,
   slots: '모델 자리', limits: '한도', mcp: 'MCP 서버', rules: '정책 규칙', history: '구성 기록', metrics: '계측',
   host: routeLabels.host, coding: routeLabels.coding, desktop: '데스크톱 아바타', appearance: '화면',
@@ -38,7 +38,7 @@ export function crumbsFor(route: string, state: State | null): Crumb[] {
     case 'conversations':
       return [{ label: routeLabels.conversations, path: null }];
     case 'workspace':
-      return [{ label: '대화', path: null }];
+      return [{ label: routeLabels.conversations, path: '/conversations' }, { label: '작업실', path: null }];
     case 'inbox':
       return [{ label: uiTerms.inbox, path: null }];
     case 'mail':

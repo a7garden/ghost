@@ -5,8 +5,8 @@ import { pendingDecisions, toneFor } from '../features/ghostState';
 import { decisionChip, decisionHeading } from '../features/decisionText';
 import { relativeTime } from '../features/time';
 
-/** Lines shown before the rest fold into one 「나머지」 line. */
-const SHOWN = 3;
+/** Preview lines; the rest move through the heading route. One line keeps the handoff composer within a glance. */
+const SHOWN = 1;
 
 /** Pending decisions, oldest first: the one that has waited longest leads. Pure; tests pin it. */
 export function waitingDecisions(state: State): Decision[] {
@@ -19,6 +19,8 @@ export function waitingDecisions(state: State): Decision[] {
  * Tapping a line opens that question in 확인할 일, where it is answered.
  * 2026.11.11 : 홈이 확인 카드를 통째로 다시 깔아 「확인할 일」 탭과 같은 것을 두 번 보였다.
  * 홈은 「답할 것이 있나」만 말하고, 답은 확인할 일에서 한다.
+ * 2026.11.22 : 미리보기는 한 줄로 접고, 나머지는 제목 행 오른쪽의 경로로 보낸다 — 맡기기 입력이
+ * 긴 줄 아래에 묻히지 않게. 기다림이 없으면 이 band 를 비우고, 총 건수는 제목에 그대로 둔다.
  */
 export function WaitingLine({ state, now, navigate, className }: { state: State; now: number; navigate(path: string): void; className?: string }) {
   const waiting = waitingDecisions(state);
@@ -26,7 +28,11 @@ export function WaitingLine({ state, now, navigate, className }: { state: State;
   const names = new Map(state.ghosts.map(ghost => [ghost.id, ghost.name]));
   const rest = waiting.length - SHOWN;
   return <section className={['waiting-line', className].filter(Boolean).join(' ')} aria-labelledby="waiting-line-title">
-    <h2 id="waiting-line-title" className="section-title">답을 기다림<span className="count">{waiting.length}</span></h2>
+    <header className="home__band-head">
+      <h2 id="waiting-line-title" className="section-title">답을 기다림<span className="count">{waiting.length}</span></h2>
+      {rest > 0 && <button type="button" className="link-quiet" aria-label={`확인할 일에서 나머지 ${rest}건 보기`}
+        onClick={() => navigate('/inbox')}>나머지 {rest}건<ArrowRight size={13} aria-hidden="true"/></button>}
+    </header>
     <ul>
       {waiting.slice(0, SHOWN).map(decision => <li key={decision.id}>
         <button type="button" onClick={() => navigate(`/inbox?decision=${encodeURIComponent(decision.id)}`)}>
@@ -38,7 +44,6 @@ export function WaitingLine({ state, now, navigate, className }: { state: State;
           <ArrowRight aria-hidden="true"/>
         </button>
       </li>)}
-      {rest > 0 && <li><button type="button" className="waiting-line__rest" onClick={() => navigate('/inbox')}>나머지 {rest}건<ArrowRight aria-hidden="true"/></button></li>}
     </ul>
   </section>;
 }

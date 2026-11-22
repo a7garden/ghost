@@ -57,7 +57,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
       const back = page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true });
-      if (screen.name === 'devices') {
+      if (screen.name === 'devices' || screen.name === 'workspace') {
         await expect(back).toBeEnabled();
         await expect(page.getByRole('button', { name: '‹ 설정', exact: true })).toHaveCount(0);
       } else await expect(back).toHaveCount(0);
@@ -70,13 +70,38 @@ for (const theme of ['light', 'dark'] as const) {
         const assignBounds = await assign.boundingBox();
         expect(Math.abs(segmentBounds!.y + segmentBounds!.height / 2 - assignBounds!.y - assignBounds!.height / 2)).toBeLessThan(1);
         expect(assignBounds!.x).toBeGreaterThan(segmentBounds!.x + segmentBounds!.width);
-        const chips = await page.locator('.ghost-filter > button').evaluateAll(buttons => buttons.map(button => ({
-          hitHeight: button.clientHeight,
-          pillHeight: parseFloat(getComputedStyle(button, '::before').height),
-        })));
-        expect(chips.every(chip => chip.hitHeight >= 44 && chip.pillHeight === 28)).toBe(true);
+        const assignee = page.getByRole('combobox', { name: '담당 Ghost', exact: true });
+        await assignee.selectOption({ label: '연구원' });
+        await expect(page).toHaveURL(/\/work\?ghost=/);
+        await expect(page.getByText('진행 중인 일 없음')).toBeVisible();
+        await assignee.selectOption('');
+        await expect(page.locator('.work-board').getByText('회의 메모 요약', { exact: true })).toBeVisible();
       }
       await screenshot(page, `${screen.name}-${theme}-iphone.png`);
+      if (screen.name === 'home') {
+        await page.setViewportSize({ width: 320, height: 568 });
+        const preview = page.locator('.waiting-line');
+        await expect(page.locator('#handoff-message')).toBeInViewport();
+        await preview.getByRole('button', { name: /나머지/ }).tap();
+        await expect(page).toHaveURL(/#\/inbox$/);
+        await page.getByRole('navigation', { name: '주요 화면' }).getByRole('button', { name: '홈', exact: true }).tap();
+        await preview.getByRole('list').getByRole('button').tap();
+        await expect(page).toHaveURL(/#\/inbox\?decision=/);
+        await expect(page.locator('.queue__card .decision')).toBeVisible();
+      }
+      if (screen.name === 'settings') {
+        await page.setViewportSize({ width: 320, height: 640 });
+        await page.getByRole('searchbox', { name: '설정 찾기' }).fill('승인');
+        await expect(page.locator('.settings-index-row')).toHaveCount(1);
+        await page.getByRole('button', { name: '승인과 언어' }).tap();
+        await expect(page.getByRole('navigation', { name: '위치' })).toContainText('승인과 언어');
+      }
+      if (screen.name === 'workspace') {
+        await page.locator('.workspace-shortcuts').getByRole('button', { name: '메일' }).tap();
+        await expect(page).toHaveURL(/#\/mail$/);
+        await back.tap();
+        await expect(page.locator('.workspace-page')).toBeVisible();
+      }
       if (screen.name === 'devices') {
         await back.click();
         await expect(page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true })).toHaveCount(0);

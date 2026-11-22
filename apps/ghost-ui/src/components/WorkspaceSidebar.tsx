@@ -94,11 +94,20 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
     </ContextMenu>;
   };
 
+  const projects = <NavigationGroup label="프로젝트"
+    action={<button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/scopes?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>}>
+    {scopes.map(space => <NavigationItem key={space.id} current={section === 'scopes' && space.id === selectedScope} onClick={() => navigate(`/scopes/${space.id}`)}>
+      <Folder/><span className="truncate">{space.name}</span>
+    </NavigationItem>)}
+  </NavigationGroup>;
+
   return <>
     <Navigation label="작업실" className="ghost-sidebar min-h-0 flex-1">
-      {section === 'workspace' && <NavigationItem onClick={() => navigate('/goals')}>
-        <Compass/><span className="flex-1">{uiTerms.goals}</span>
-      </NavigationItem>}
+      {section === 'workspace' && <div className="workspace-shortcuts">
+        <NavigationItem onClick={() => navigate('/work')}><LayoutList/>{uiTerms.work}</NavigationItem>
+        <NavigationItem onClick={() => navigate('/goals')}><Compass/>{uiTerms.goals}</NavigationItem>
+        <NavigationItem onClick={() => navigate('/mail')}><Mail/>{routeLabels.mail}</NavigationItem>
+      </div>}
       <div className="sidebar-primary">
         <NavigationItem current={section === 'home'} onClick={() => navigate('/')}>
           <Home/><span className="flex-1">{routeLabels.home}</span>
@@ -124,6 +133,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
       </div>
       <div className="sidebar-scroll-frame">
         <div ref={scrollRef} className="sidebar-scroll">
+          {section === 'workspace' && projects}
           {roster.length > 0 && <NavigationGroup label="고정">{fixed.map(ghost => row(ghost))}</NavigationGroup>}
           {roster.length > 0 && <NavigationGroup label="Ghost"
             action={<button type="button" className="sidebar-pool-toggle" aria-expanded={expanded}
@@ -137,12 +147,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
               onKeyDown={event => { blurTouchSearchOnEnter(event); if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
             {filteredPool.map(ghost => row(ghost, true))}
           </NavigationGroup>}
-          <NavigationGroup label="프로젝트"
-            action={<button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/scopes?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>}>
-            {scopes.map(space => <NavigationItem key={space.id} current={section === 'scopes' && space.id === selectedScope} onClick={() => navigate(`/scopes/${space.id}`)}>
-              <Folder/><span className="truncate">{space.name}</span>
-            </NavigationItem>)}
-          </NavigationGroup>
+          {section !== 'workspace' && projects}
         </div>
         <ScrollRail viewportRef={scrollRef} contentRef={scrollRef}/>
       </div>

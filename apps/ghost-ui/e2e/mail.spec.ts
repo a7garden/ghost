@@ -264,6 +264,24 @@ test('known validation refusal preserves an editable draft', async ({ page }) =>
   await expect(page.getByRole('button', { name: '전송 상태 확인', exact: true })).toHaveCount(0);
 });
 
+test('phone can change account and mailbox without pushing the message list down another row', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await mailApi(page); await openMail(page);
+  const account = page.getByRole('combobox', { name: '메일 계정' });
+  const folder = page.getByRole('combobox', { name: '메일함', exact: true });
+  await account.selectOption('B');
+  await folder.selectOption('Archive');
+  const mail = row(page, 'B Archive #1');
+  await expect(mail).toBeInViewport();
+  const a = (await account.boundingBox())!, b = (await folder.boundingBox())!;
+  expect(b.y).toBe(a.y);
+  expect(b.x).toBeGreaterThanOrEqual(a.x + a.width);
+  await mail.click();
+  await expect(page.getByRole('article', { name: '메일 읽기: B read' })).toBeVisible();
+  await page.getByRole('button', { name: '목록', exact: true }).click();
+  await expect(folder).toHaveValue('Archive');
+});
+
 test('a narrow native Mac window retains mailbox selection, compose, and reader back controls', async ({ page }) => {
   await page.setViewportSize({ width: 800, height: 900 });
   await page.addInitScript(() => {

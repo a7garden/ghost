@@ -282,6 +282,8 @@ function Shell() {
           location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
             compactBack={section === 'settings' && params.has('tab') ? '/settings'
               : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? '/conversations'
+              : section === 'workspace' ? '/conversations'
+              : section === 'goals' || section === 'mail' ? '/workspace'
               : section === 'work' && path.split('/')[2] ? '/work'
               : codingDetail ? '/coding'
               : section === 'scopes' && selectedScope ? '/workspace' : undefined}

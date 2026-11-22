@@ -1,0 +1,16 @@
+@layer components {
+  /* 확인할 일 on the phone (inbox rows live in app.css; these rules only tighten the compact frame).
+     Desktop reads the same DOM — data-lone marks a bundle whose name is already said above it. */
+  @media (max-width: 55.999rem) {
+    /* A lone unnamed (전체) bundle repeats the section title, so its name yields the space here. */
+    .inbox .infra-scope-group[data-lone] > h3 { display: none; }
+    .inbox .infra-scope-group[data-lone] { margin-block: 0; }
+    .inbox .infra-scope-group { margin-block: .375rem; }
+    /* 추천 · 메인에게 · 나중에 stay beside the text when they fit; a set too wide for the line still
+       wraps below as one block (its own buttons re-wrap inside the row's width), and the unfolded
+       card keeps its own place under the row. */
+    .inbox .queue__row { flex-wrap: wrap; }
+    .inbox .queue__main { flex: 1 1 10rem; }
+    .inbox .queue__actions { padding-left: 0; max-width: 100%; }
+  }
+}

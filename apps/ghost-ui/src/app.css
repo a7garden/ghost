@@ -117,19 +117,18 @@ body {
 .deck__top { min-width: 0; animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .deck__ack { margin: 0; color: var(--ghost-ink2); font-size: var(--text-caption); }
 
-/* 기다림 줄 (휴대폰 홈) — 답할 것이 있나를 한 줄씩. 상자 없이 정렬과 간격으로 묶는다. */
+/* 기다림 줄 (휴대폰 홈) — 답할 것이 있나를 한 줄씩. 상자 없이 정렬과 간격으로 묶는다.
+   줄 규칙은 목록 안으로 한정한다 — 제목 행의 「나머지」 경로는 다른 band 들과 같은 link-quiet 을 입는다. */
 .waiting-line { display: grid; gap: 6px; }
-.waiting-line > h2 { padding-inline: 4px; }
 .waiting-line ul { display: grid; margin: 0; padding: 0; list-style: none; }
-.waiting-line button { display: flex; width: 100%; min-height: 56px; align-items: center; gap: 12px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--ghost-line); background: none; color: var(--ghost-ink); text-align: left; font: inherit; cursor: pointer; }
+.waiting-line ul button { display: flex; width: 100%; min-height: 56px; align-items: center; gap: 12px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--ghost-line); background: none; color: var(--ghost-ink); text-align: left; font: inherit; cursor: pointer; }
 .waiting-line li:last-child button { border-bottom: 0; }
-.waiting-line button:active { background: var(--ghost-hover); }
-.waiting-line button > svg { width: 16px; height: 16px; flex: none; color: var(--ghost-ink3); }
+.waiting-line ul button:active { background: var(--ghost-hover); }
+.waiting-line ul button > svg { width: 16px; height: 16px; flex: none; color: var(--ghost-ink3); }
 .waiting-line .dot-avatar { flex: none; }
 .waiting-line__copy { display: grid; flex: 1; min-width: 0; gap: 2px; }
 .waiting-line__question { overflow: hidden; font-size: var(--text-bodyLg); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .waiting-line__meta { overflow: hidden; color: var(--ghost-ink3); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
-.waiting-line__rest { min-height: 44px !important; justify-content: flex-start; color: var(--ghost-ink2) !important; font-size: var(--text-ui) !important; }
 .deck__ack:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .deck__index { display: flex; min-width: 0; gap: 4px; margin: 0; padding: 0 0 4px; overflow-x: auto; list-style: none; }
 .deck__index li { flex: 0 0 auto; max-width: 240px; }

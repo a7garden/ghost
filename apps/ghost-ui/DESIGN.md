@@ -140,8 +140,10 @@ Feature-level compositions:
   back. 소식 and 처리한 결정 fold below. A row with an automatic deadline shows 마감 N분;
   a short left swipe (touch) or `L` on a focused row sends it to 나중에. Deferring folds,
   never hides: every count stays.
-  Chat docks the same component above the composer; long evidence scrolls separately
-  from the title and answer controls. Automatic-settlement conditions stay beside the
+  In phone chat, one row above the composer shows the pending count, first request and
+  its deadline. Tapping it opens the same decision deck; expanding does not approve.
+  Desktop chat keeps the deck open. Long evidence scrolls separately from the title
+  and answer controls. Automatic-settlement conditions stay beside the
   response. Exceptionally short windows can scroll the whole request; secure forms
   pin their action row inside the evidence scroller. Work detail and thread panels
   use the same component in place. Secure inputs still submit only to the vault route.
@@ -284,6 +286,14 @@ label toggles its tools. State, default designation, the PC 직접 실행 grant 
 separate 운영 group; the main Ghost shows its locked active state instead of disabled
 choices. The sandbox keeps its two-step reset. New Ghosts start on the same sheet.
 There is no avatar library: stored sprite avatars stay selectable in 꾸미기, nothing creates new ones.
+
+## Phone navigation
+
+대화 keeps 작업실 next to Ghost search, above the roster. 작업실 opens 맡긴 일, 목표
+and 메일 directly and lists projects before Ghosts. On the Work board, the assignee
+picker shares the state and create row; on the mail list, account and mailbox share one row.
+The settings index groups destinations and searches their visible titles. A selected
+setting opens a separate page with a back button instead of sharing width with the index.
 
 ## Settings
 

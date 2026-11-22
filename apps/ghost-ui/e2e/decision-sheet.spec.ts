@@ -25,19 +25,35 @@ test('docked decisions keep choices and direct answers reachable with long evide
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${baseUrl}/#/ghosts/${defaultGhostId}`);
+  // Compact folds the dock to one summary row; the deck unfolds on that single tap.
+  const fold = page.locator('.chat-decisions__row');
+  await expect(fold).toHaveText(/확인 필요 1건/);
+  await expect(fold).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('.decision')).toHaveCount(0);
+  await fold.click();
+  await expect(fold).toHaveAttribute('aria-expanded', 'true');
   const decision = page.locator('.decision');
   const first = decision.getByRole('button', { name: /안전하게 진행/ });
   await expect(first).toBeVisible();
   await expect(first).toBeInViewport();
   await first.click();
   await expect.poll(() => commands).toEqual([{ type: 'decision.resolve', decisionId: 'long-question', outcome: 'answer', answer: '안전하게 진행' }]);
+  // A reload folds again: reviewing the deck is always one explicit tap away, never a state that approves.
   await page.reload();
+  await expect(page.locator('.decision')).toHaveCount(0);
+  await page.locator('.chat-decisions__row').click();
   await decision.locator('summary').filter({ hasText: '직접 답하기' }).click();
   await decision.getByLabel('답변', { exact: true }).fill('이번에는 범위를 줄여 주세요');
+  await fold.click();
+  await expect(decision.getByLabel('답변', { exact: true })).toBeHidden();
+  await fold.click();
+  await expect(decision.getByLabel('답변', { exact: true })).toHaveValue('이번에는 범위를 줄여 주세요');
   await decision.getByRole('button', { name: '답변 보내기' }).click();
   await expect.poll(() => commands.at(-1)).toEqual({ type: 'decision.resolve', decisionId: 'long-question', outcome: 'answer', answer: '이번에는 범위를 줄여 주세요' });
   await page.setViewportSize({ width: 1024, height: 640 });
   await page.reload();
+  // Desktop keeps the deck expanded, with no fold row at all.
+  await expect(page.locator('.chat-decisions__row')).toHaveCount(0);
   await expect(first).toBeInViewport();
   const body = decision.locator('.decision__body');
   expect(await body.evaluate(element => element.clientHeight > 0 && element.scrollHeight > element.clientHeight)).toBe(true);

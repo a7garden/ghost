@@ -197,6 +197,8 @@ test('scope, document, slot, MCP, policy and conflict-aware history use the real
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.screenshot({ path: info.outputPath('infrastructure-phone.png'), fullPage: true });
   await page.goto(`${host.baseUrl}/#/scopes/${scope.id}`);
+  // At phone width deletion lives in the compact 프로젝트 관리 disclosure.
+  await page.getByRole('button', { name: '프로젝트 관리', exact: true }).click();
   await page.getByRole('button', { name: '프로젝트 삭제', exact: true }).click();
   await page.getByRole('button', { name: '삭제', exact: true }).dispatchEvent('click', { detail: 0 });
   await page.getByRole('button', { name: '한 번 더 눌러 삭제', exact: true }).dispatchEvent('click', { detail: 0 });

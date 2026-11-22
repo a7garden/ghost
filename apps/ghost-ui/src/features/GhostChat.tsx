@@ -9,7 +9,8 @@ import { LiveReply, Transcript, type TranscriptExtra } from '../components/Trans
 import { OutgoingMessage } from '../components/OutgoingMessage';
 import { quoteForReply } from '../components/MessageMenu';
 import { ChatComposer } from './ChatComposer';
-import { DecisionDeck, chatDecisions } from './Decision';
+import { chatDecisions } from './Decision';
+import { ChatDecisions } from './ChatDecisions';
 import { BrowserLiveView } from './BrowserLiveView';
 import { BrowserPaneContext } from './BrowserPaneContext';
 import { GhostDesignEditor } from './GhostDesign';
@@ -176,7 +177,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
       </>}
       composer={<>
         <BrowserPaneContext.Provider value={conversationId ? { conversationId, open: () => setBrowserOpen(true) } : null}>
-          <DecisionDeck state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread} docked/>
+          <ChatDecisions state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread}/>
         </BrowserPaneContext.Provider>
         <ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft}
           recoveredMessage={recoveredMessage} setRecoveredMessage={setRecoveredMessage} inputRef={inputRef} initialScopeIds={initialScopeIds}

@@ -74,10 +74,37 @@
 .hold-btn__fill { position: absolute; inset: 0; background: var(--ghost-danger-ink); transform-origin: left; transform: scaleX(var(--hold-progress, 0)); }
 .hold-btn__label { position: relative; }
 
-/* Below 34rem the place header stacks --------------------------------------- */
-@media (max-width: 34rem) {
-  .place__title { flex-wrap: wrap; }
-  .place__crumb { order: 3; max-width: 100%; }
+/* Place top: header and status row grouped for the compact shell. Transparent on
+   desktop, so the page grid keeps its original children and spacing. ------------- */
+.place-top { display: contents; }
+.place-details { display: none; }
+.place-tabs__select { display: none; }
+.place-controls { display: none; }
+
+/* Compact shell: inline identity and state, one platform section select, and a
+   managed details disclosure carrying the path, the editor and the deletion. ---- */
+@media (max-width: 55.999rem) {
+  .place-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; align-items: center; }
+  .place-top { display: grid; gap: 6px; }
+  .place { gap: 3px; }
+  .place__name, .place__name-input { font-size: var(--text-headingSm); letter-spacing: -.021em; }
+  .place__crumb { display: none; }
+  .place__meta { gap: 2px 8px; }
+  .place-status { gap: 6px 12px; }
+  .place-status__meta { flex: 1 1 auto; }
+  .place-status__edit { display: none; }
+  .place-tabs { display: none; }
+  .place-tabs__select { display: block; width: 100%; min-height: 44px; }
+  .place-end { display: none; }
+  .place-details { display: contents; }
+  .place-details__toggle { display: inline-flex; width: fit-content; align-items: center; gap: 6px; min-height: 44px; padding: 4px 8px; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink2); background: none; font: 550 var(--text-ui)/1.2 var(--font-sans); cursor: pointer; }
+  .place-details__toggle:hover { background: var(--ghost-hover); }
+  .place-details__toggle > svg { transition: transform var(--duration-base) var(--ease-enter); }
+  .place-details__toggle[aria-expanded="true"] > svg { transform: rotate(90deg); }
+  .place-details__panel { grid-column: 1 / -1; display: grid; gap: 12px; justify-items: start; padding: 12px 4px; }
+  .place-details__path { display: inline-flex; }
+  .place-details__delete { display: grid; gap: 10px; justify-items: start; width: 100%; }
+  .place-details__delete .place-end__strip { width: 100%; }
 }
 
 }

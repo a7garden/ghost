@@ -1,10 +1,10 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronRight, Cpu, Palette, ShieldCheck, type LucideIcon } from 'lucide-react';
 import { SettingsLayout, InlineError, Switch } from '../ui'
 import type { Preferences } from './preferences';
 import { ModelSettings } from './ModelSettings';
 import { ApprovalSettings } from './ApprovalSettings';
-import { useCompact } from '../ui/adaptive';
+import { blurTouchSearchOnEnter, useCompact } from '../ui/adaptive';
 
 export interface SettingsSection { id: string; label: string; icon: LucideIcon; content: ReactNode }
 
@@ -12,6 +12,31 @@ const themes: { value: Preferences['theme']; label: string }[] = [
   { value: 'system', label: '시스템' }, { value: 'light', label: '밝게' }, { value: 'dark', label: '어둡게' },
 ];
 
+const settingsGroups = [
+  { label: 'Ghost와 실행', ids: ['team', 'models', 'approvals', 'duty', 'schedules', 'activities'] },
+  { label: '연결과 기기', ids: ['devices', 'connections', 'vault', 'coding', 'mcp'] },
+  { label: '화면과 앱', ids: ['appearance', 'desktop', 'update'] },
+  { label: '호스트 운영', ids: ['slots', 'limits', 'rules', 'history', 'metrics', 'host'] },
+];
+
+function SettingsIndex({ items, select }: { items: { id: string; label: string; icon: LucideIcon }[]; select(id: string): void }) {
+  const [query, setQuery] = useState('');
+  const needle = query.trim().toLocaleLowerCase();
+  const matches = items.filter(item => item.label.toLocaleLowerCase().includes(needle));
+  const row = (item: typeof items[number]) => <button type="button" className="settings-index-row" key={item.id} onClick={() => select(item.id)}>
+    <item.icon size={18} aria-hidden="true"/><span>{item.label}</span><ChevronRight size={15} aria-hidden="true"/>
+  </button>;
+  const ungrouped = items.filter(item => !settingsGroups.some(group => group.ids.includes(item.id)));
+  return <section className="compact-settings-list" aria-label="설정 항목">
+    <input className="mobile-list-search" type="search" aria-label="설정 찾기" placeholder="설정 찾기" enterKeyHint="search"
+      value={query} onChange={event => setQuery(event.target.value)} onKeyDown={blurTouchSearchOnEnter}/>
+    {needle ? matches.length ? matches.map(row) : <p className="conversations__empty" role="status">일치하는 설정이 없습니다.</p>
+      : <>{settingsGroups.map(group => {
+        const entries = items.filter(item => group.ids.includes(item.id));
+        return entries.length > 0 && <section key={group.label}><h2>{group.label}</h2>{entries.map(row)}</section>;
+      })}{ungrouped.map(row)}</>}
+  </section>;
+}
 /** 설정 창 틀. 탭 내용은 섹션(team · devices · schedules · desktop)은 App이, 모델·화면은 여기서 그린다. */
 export function Settings({ route, navigate, preferences, updatePreferences, storageError, sections }: {
   route: string;
@@ -29,11 +54,7 @@ export function Settings({ route, navigate, preferences, updatePreferences, stor
   const ghost = params.get('ghost');
   const changeTab = (next: string) => navigate(`/settings?tab=${next}${ghost && next === 'team' ? `&ghost=${encodeURIComponent(ghost)}` : ''}`);
   const shellSection = sections.find(section => section.id === tab);
-  if (compact && !requested) return <section className="compact-settings-list" aria-label="설정 항목">
-    {items.map(item => <button type="button" key={item.id} onClick={() => changeTab(item.id)}>
-      <item.icon size={20} aria-hidden="true"/><span>{item.label}</span><ChevronRight size={16} aria-hidden="true"/>
-    </button>)}
-  </section>;
+  if (compact && !requested) return <SettingsIndex items={items} select={changeTab}/>;
   return <SettingsLayout title="설정" compactDetail={compact} strings={{ navigationLabel: '설정 항목', contentLabel: '설정 내용' }}
     sections={items.map(item => ({ id: item.id, label: item.label, icon: <item.icon aria-hidden="true"/> }))}
     activeSection={tab} onSectionChange={changeTab}>

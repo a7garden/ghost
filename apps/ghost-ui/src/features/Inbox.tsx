@@ -15,6 +15,7 @@ import { relativeTime, useNow } from './time';
 import { notificationRoute } from './notificationRoute';
 import { decisionScopeId, groupDecisionsByScope } from './scopeState';
 import './infrastructure.css';
+import './inbox-mobile.css';
 
 const SETTLED_PREVIEW = 8;
 const NOTIFICATION_PAGE = 20;
@@ -25,6 +26,8 @@ const settledLabel: Record<Decision['state'], string> = { pending: '', approved:
  * 확인할 일: 기다리는 결정을 한 줄씩 — 제목 · 추천 · 빠른 처리만 보이고, 줄을 누르면 그 자리에서 카드가 펼쳐진다.
  * 2026.11.11 : 카드 한 장씩 넘기던 화면을 빨리 훑고 넘기는 목록으로 바꿨다. 추천대로 한꺼번에 · 메인에게 맡기기 ·
  * 나중에(이 기기에서 뒤로)를 둔다. 소식과 처리한 결정은 접어서 아래에 둔다.
+ * 2026.11.22 : 좁은 화면에서 줄을 옆으로 압축한다 — 이름 없는(전체) 묶음 하나는 위 섹션 제목을 되풀이하지 않고,
+ * 빠른 처리는 폭이 허락할 때 본문 옆에 붙는다. 묶음 사이도 좁힌다 (inbox-mobile.css).
  */
 export function InboxView({ state, navigate, focusDecisionId, codingSession }: {
   state: State;
@@ -128,7 +131,7 @@ export function InboxView({ state, navigate, focusDecisionId, codingSession }: {
     onResolved={outcome => { setOpen(null); setAck(`${decisionHeading(decision, state)} · ${resolvedText(decision.kind, outcome)}`); }}
     navigate={navigate}/>;
 
-  return <Page className="grid content-start gap-10">
+  return <Page className="inbox grid content-start gap-10">
     <PageHeader title={uiTerms.inbox} className="mb-0" actions={quick.length > 0 && !batch
       ? <Button size="sm" onClick={() => setBatch(new Set(quick.map(decision => decision.id)))}>추천대로 처리 {quick.length}</Button> : undefined}/>
     {error && <InlineError>{error}</InlineError>}
@@ -153,19 +156,29 @@ export function InboxView({ state, navigate, focusDecisionId, codingSession }: {
     <section className="grid gap-2" aria-labelledby="queue-now">
       <h2 id="queue-now" className="section-title">확인 필요{waiting.length > 0 && <span className="count">{waiting.length}</span>}</h2>
       {upNow.length > 0
-        ? groupDecisionsByScope(upNow, state).map(group => <section className="infra-scope-group" key={group.id ?? 'global'} aria-label={`${group.name} 확인할 일`}><h3>{group.name}</h3><ul className="queue">{group.decisions.map(decision => row(decision, 'now'))}</ul></section>)
+        ? groupDecisionsByScope(upNow, state).map((group, _, groups) => {
+          // 묶음이 하나뿐이고 이름이 없으면(전체) 섹션 제목이 이미 말한다 — 좁은 화면에서 이름을 되풀이하지 않는다.
+          const lone = groups.length === 1 && group.id === null;
+          return <section className="infra-scope-group" key={group.id ?? 'global'} data-lone={lone || undefined}
+            aria-label={lone ? undefined : `${group.name} 확인할 일`}><h3>{group.name}</h3><ul className="queue">{group.decisions.map(decision => row(decision, 'now'))}</ul></section>;
+        })
         : <div className="calm"><CheckCheck aria-hidden="true"/><p>{deferred.length ? '지금 볼 항목 없음 · 미뤄 둔 것만 남았습니다' : '확인이 필요한 항목 없음'}</p></div>}
       <p className="deck__ack" role="status" aria-live="polite">{ack}</p>
     </section>
 
     {deferred.length > 0 && <section className="grid gap-2" aria-labelledby="queue-later">
       <h2 id="queue-later" className="section-title">나중에<span className="count">{deferred.length}</span></h2>
-      {groupDecisionsByScope(deferred, state).map(group => <section className="infra-scope-group" key={group.id ?? 'global'} aria-label={`${group.name} 나중에`}><h3>{group.name}</h3><ul className="queue" data-quiet>{group.decisions.map(decision => row(decision, 'later'))}</ul></section>)}
+      {groupDecisionsByScope(deferred, state).map((group, _, groups) => {
+        const lone = groups.length === 1 && group.id === null;
+        return <section className="infra-scope-group" key={group.id ?? 'global'} data-lone={lone || undefined}
+          aria-label={lone ? undefined : `${group.name} 나중에`}><h3>{group.name}</h3><ul className="queue" data-quiet>{group.decisions.map(decision => row(decision, 'later'))}</ul></section>;
+      })}
     </section>}
 
     {withMain.length > 0 && <section className="grid gap-2" aria-labelledby="queue-main">
       <h2 id="queue-main" className="section-title">메인 Ghost가 판단 중<span className="count">{withMain.length}</span></h2>
-      {groupDecisionsByScope(withMain, state).map(group => <section className="infra-scope-group" key={group.id ?? 'global'}><h3>{group.name}</h3><ul className="feed" data-quiet>{group.decisions.map(decision => <li key={decision.id}>
+      {groupDecisionsByScope(withMain, state).map((group, _, groups) => <section className="infra-scope-group" key={group.id ?? 'global'}
+        data-lone={groups.length === 1 && group.id === null || undefined}><h3>{group.name}</h3><ul className="feed" data-quiet>{group.decisions.map(decision => <li key={decision.id}>
         <div className="feed__row" data-inbox-kind="handed-over">
           <span className="feed__mark"><DotAvatar profileId={decision.ghostId} tone={toneFor(decision.ghostId)} size={18}/></span>
           <span className="feed__copy"><span className="feed__title">{decisionHeading(decision, state)}</span>
@@ -177,7 +190,8 @@ export function InboxView({ state, navigate, focusDecisionId, codingSession }: {
     {notifications.length > 0 && <details className="queue-fold" open={unread.length > 0}>
       <summary><span className="section-title">소식{unread.length > 0 && <span className="count">새 소식 {unread.length}</span>}</span><ChevronDown aria-hidden="true"/></summary>
       {unread.length > 0 && <Button variant="ghost" size="sm" className="justify-self-start" onClick={() => markRead(unreadAll.map(item => item.id))}>모두 읽음 표시</Button>}
-      {[...notificationGroups].map(([id, items]) => <section className="infra-scope-group" key={id ?? 'global'}><h3>{id === null ? '전체' : state.scopes.find(scope => scope.id === id)?.name ?? '삭제된 프로젝트'}</h3><ul className="feed">{items.map(item => {
+      {[...notificationGroups].map(([id, items], _, groups) => <section className="infra-scope-group" key={id ?? 'global'}
+        data-lone={groups.length === 1 && id === null || undefined}><h3>{id === null ? '전체' : state.scopes.find(scope => scope.id === id)?.name ?? '삭제된 프로젝트'}</h3><ul className="feed">{items.map(item => {
         const navigable = Boolean(item.workId || item.decisionId || item.conversationId);
         return <NotificationRow key={item.id} item={item} ghostName={ghostName(item.ghostId)} now={now}
           disabled={!navigable && Boolean(item.readAt)} onOpen={() => navigable ? openNotification(item) : markRead([item.id])}/>;
@@ -188,7 +202,8 @@ export function InboxView({ state, navigate, focusDecisionId, codingSession }: {
 
     {settled.length > 0 && <details className="queue-fold">
       <summary><span className="section-title">처리한 결정<span className="count">{settled.length}</span></span><ChevronDown aria-hidden="true"/></summary>
-      {groupDecisionsByScope(shownSettled, state).map(group => <section className="infra-scope-group" key={group.id ?? 'global'}><h3>{group.name}</h3><ul className="feed" data-quiet>{group.decisions.map(decision => {
+      {groupDecisionsByScope(shownSettled, state).map((group, _, groups) => <section className="infra-scope-group" key={group.id ?? 'global'}
+        data-lone={groups.length === 1 && group.id === null || undefined}><h3>{group.name}</h3><ul className="feed" data-quiet>{group.decisions.map(decision => {
         const by = reviewOf(decision.proposal)?.resolvedBy;
         return <li key={decision.id}>
           <button type="button" className="feed__row" data-inbox-kind="settled" disabled={!decision.workId} onClick={() => decision.workId && navigate(`/work/${encodeURIComponent(decision.workId)}`)}>

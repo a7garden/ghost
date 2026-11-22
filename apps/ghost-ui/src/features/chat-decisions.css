@@ -1,0 +1,25 @@
+/* The conversation's decision dock fold (ChatDecisions). The deck itself stays app.css's;
+   only the summary row and the compact height cap live here. The row renders on the compact
+   layout only, so its rules need no media query of their own. */
+.chat-decisions { display: grid; min-width: 0; gap: 6px; }
+/* Folded with nothing to unfold (the deck renders nothing), the body takes no room. */
+.chat-decisions__body:empty { display: none; }
+.chat-decisions__row {
+  display: flex; min-width: 0; min-height: 48px; align-items: center; gap: 8px;
+  padding: 8px 12px; border: 1px solid var(--ghost-line-strong); border-radius: var(--radius-control);
+  background: var(--ghost-surface); color: var(--ghost-ink); font: inherit; text-align: left; cursor: pointer;
+}
+.chat-decisions__row:hover { background: var(--ghost-hover); }
+.chat-decisions__row:active { background: var(--ghost-hover2); }
+.chat-decisions__row > svg:first-child { flex: none; color: var(--ghost-amber-ink); }
+.chat-decisions__count { flex: none; font-size: 15px; font-weight: 650; }
+.chat-decisions__lead { flex: 1; min-width: 0; overflow: hidden; color: var(--ghost-ink2); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.chat-decisions__due { flex: none; color: var(--ghost-amber-ink); font-size: var(--text-caption); font-weight: 550; }
+.chat-decisions__chevron { flex: none; color: var(--ghost-ink3); transition: transform var(--duration-fast) var(--ease-enter); }
+.chat-decisions__row[aria-expanded="true"] .chat-decisions__chevron { transform: rotate(180deg); }
+
+/* Unfolded beside the composer, the card gives the transcript room back: the desktop cap
+   (65dvh) assumes the deck is the only dock content. */
+@media (max-width: 55.999rem) {
+  :root:not([data-desktop-shell]) .chat-decisions[data-open] .deck[data-docked] .decision { max-height: min(46dvh, 380px); }
+}

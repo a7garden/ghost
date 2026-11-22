@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { ChevronDown, Plus } from 'lucide-react';
 import { Button, FormField, Page, PageHeader, InlineError, Input, SegmentedControl, SelectField, Textarea } from '../ui'
 import type { ExecutionTarget, State, Work } from '@ghost/contract';
 import { TERMINAL_WORK_STATES } from '@ghost/contract';
@@ -55,15 +55,23 @@ export function WorkView({ state, navigate, filterGhostId, createRequested = fal
       branch={children.length > 0 ? children.map(lane) : undefined}/>;
   };
   const ghosts = visibleGhosts(state.ghosts);
-  const createAction = <Button onClick={() => setCreating(true)} disabled={!state.ghosts.length}><Plus/>일 맡기기</Button>;
+  const createAction = <Button aria-label="일 맡기기" onClick={() => setCreating(true)} disabled={!state.ghosts.length}><Plus/><span>일 맡기기</span></Button>;
   return <Page className="work-board grid content-start gap-6">
     {!compact && <PageHeader title={uiTerms.work} className="work-board__header mb-2" actions={createAction}/>}
     <div className="board-bar">
       <SegmentedControl aria-label="맡긴 일 상태" value={tab} onValueChange={setTab}
         options={[{ value: 'active', label: '진행 중', count: counts.active }, { value: 'finished', label: '끝난 일', count: counts.finished }]}/>
+      {compact && (ghosts.length > 1 || filterGhostId) && <label className="board-assignee" data-filtered={Boolean(filterGhostId) || undefined}>
+        <span aria-hidden="true">{(filterGhostId && names.get(filterGhostId)) || '담당'}</span><ChevronDown size={14} aria-hidden="true"/>
+        <select aria-label="담당 Ghost" value={filterGhostId ?? ''} onChange={event =>
+          navigate(event.target.value ? `/work?ghost=${encodeURIComponent(event.target.value)}` : '/work')}>
+          <option value="">모든 Ghost</option>
+          {filterGhostId && !ghosts.some(ghost => ghost.id === filterGhostId) && <option value={filterGhostId}>{names.get(filterGhostId) ?? '이전 Ghost'}</option>}
+          {ghosts.map(ghost => <option key={ghost.id} value={ghost.id}>{ghost.name}</option>)}
+        </select>
+      </label>}
       {compact && createAction}
-      {/* A small team shows presence chips; past six Ghosts the row becomes a select. */}
-      {ghosts.length > 6
+      {!compact && (ghosts.length > 6
         ? <SelectField label="담당 Ghost" value={filterGhostId ?? ''} disabled={!ghosts.length}
           onValueChange={value => navigate(value ? `/work?ghost=${encodeURIComponent(value)}` : '/work')}
           options={[{ value: '', label: '모든 Ghost' }, ...ghosts.map(ghost => ({ value: ghost.id, label: ghost.name }))]}
@@ -74,7 +82,7 @@ export function WorkView({ state, navigate, filterGhostId, createRequested = fal
             onClick={() => navigate(filterGhostId === ghost.id ? '/work' : `/work?ghost=${encodeURIComponent(ghost.id)}`)}>
             <PresenceAvatar ghostId={ghost.id} state={ghostPresence(ghost, state).state} size={18}/><span>{ghost.name}</span>
           </button>)}
-        </div>}
+        </div>)}
     </div>
     {roots.length > 0
       ? <div className="lanes">{roots.map(lane)}</div>
