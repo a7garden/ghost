@@ -203,22 +203,23 @@
   .coding-compose textarea:focus { box-shadow: none; }
   .coding-compose:focus-within { box-shadow: inset 0 0 0 1px var(--ghost-ink3); }
   .coding-compose button { flex: none; min-height: 40px; min-width: 40px; border-radius: 12px; }
-  .herdr-keypad { display: flex; min-width: 0; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .herdr-keys { display: flex; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: none; }
-  .herdr-keys-group { display: flex; flex: none; gap: 4px; padding: 4px; border-radius: 12px; background: var(--ghost-inset); box-shadow: var(--shadow-inset-field); }
+  .herdr-keypad { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; max-width: 23rem; margin-bottom: 8px; }
+  .herdr-key-palette { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 6px;
+    width: min(17rem, calc(100vw - 16px)); max-height: var(--radix-popover-content-available-height); overflow-y: auto;
+    border: 1px solid var(--ghost-line); border-radius: 12px; background: var(--ghost-surface); box-shadow: var(--shadow-overlay); }
   .herdr-key {
-    display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 38px; min-height: 36px;
-    padding: 0 9px; border: 1px solid var(--ghost-line); border-radius: 9px; background: var(--ghost-surface);
+    display: inline-flex; align-items: center; justify-content: center; min-width: 0; min-height: 36px;
+    padding: 0 2px; border: 0; border-radius: 8px; background: var(--ghost-inset);
     color: var(--ghost-ink); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-caption); cursor: pointer;
   }
   .herdr-key:hover { background: var(--ghost-hover); }
   .herdr-key:active { background: var(--ghost-hover); box-shadow: inset 0 1px 2px rgb(0 0 0 / 14%); transform: translateY(1px); }
   .herdr-key:focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: 1px; }
-  .herdr-key[aria-pressed='true'] {
-    background: var(--ghost-signal-tint); color: var(--ghost-signal-ink); border-color: color-mix(in srgb, var(--ghost-signal) 45%, transparent);
+  .herdr-key[aria-pressed='true'], .herdr-more[data-armed] {
+    background: var(--ghost-signal-tint); color: var(--ghost-signal-ink);
   }
-  .herdr-keyboard-dismiss { border-inline-start: 1px solid var(--ghost-line); color: var(--ghost-ink2); }
-  .herdr-keyboard-dismiss svg { width: 16px; height: 16px; }
+  .herdr-keyboard-dismiss { grid-column: 1 / -1; gap: 6px; font-family: inherit; color: var(--ghost-ink2); background: none; }
+  .herdr-keypad [data-radix-popper-content-wrapper] { z-index: 10; }
   .herdr-type-menu { width: max-content; display: flex; align-items: center; gap: 6px; padding: 4px; }
   .herdr-type-menu output { min-width: 36px; text-align: center; font-size: var(--text-caption); color: var(--ghost-ink3); }
 
@@ -334,7 +335,7 @@
   .coding-page[data-compact] .herdr-live { padding: 8px 16px; }
   .coding-page[data-compact] .herdr-pane-row a { min-height: 44px; align-content: center; }
   .coding-page[data-compact] .coding-pane-setup { padding: 12px 16px; }
-  .coding-page[data-compact] .herdr-key { min-width: 44px; min-height: 44px; }
+  .coding-page[data-compact] .herdr-key { min-height: 44px; }
   .coding-page[data-compact] .herdr-terminal-latest { inset-inline-end: 16px; width: 44px; height: 44px; }
   .coding-page[data-compact] .herdr-changes-head { padding-inline: 16px; }
   .coding-page[data-compact] .herdr-change-work { grid-template-columns: minmax(0, 1fr); }

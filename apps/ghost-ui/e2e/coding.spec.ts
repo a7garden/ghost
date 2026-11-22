@@ -155,7 +155,7 @@ for (const { name, width, height, touch } of sizes) {
         await page.getByRole('radio', { name: '터미널', exact: true }).click();
         await expect(terminal(page)).toContainText('Do you want to proceed?');
         await expect(composer).toBeDisabled();
-        await expect(keys.getByRole('button')).toHaveCount(21);
+        await expect(keys.getByRole('button', { name: '추가 키' })).toBeVisible();
         if (touch) {
           const bounds = await keys.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().toJSON()));
           expect(bounds.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
@@ -776,7 +776,9 @@ test.describe('mobile pane controls', () => {
       expect((await resized).postDataJSON().rows).toBeLessThan(originalRows);
     } finally { await cdp.detach(); }
 
+    await page.getByRole('button', { name: '추가 키' }).tap();
     await page.getByRole('button', { name: '키보드 닫기' }).tap();
+    await expect(input(page)).not.toBeFocused();
     await page.evaluate(() => {
       Reflect.deleteProperty(window.visualViewport!, 'height');
       window.visualViewport!.dispatchEvent(new Event('resize'));
@@ -813,26 +815,43 @@ test.describe('mobile pane controls', () => {
     await expect(latest(page)).toBeHidden();
   });
   test('sends sticky shortcuts, file bytes and an IME-safe shell command', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
     await openScreen(page, { ...coding, route: () => paneRoute(visualCodingIds.shell), waits: () => [] }, 'light');
     const bar = page.getByRole('group', { name: '터미널 키', exact: true });
+    const more = bar.getByRole('button', { name: '추가 키' });
     const ctrl = bar.getByRole('button', { name: 'Ctrl', exact: true });
     const alt = bar.getByRole('button', { name: 'Alt', exact: true });
     const composer = page.getByRole('textbox', { name: '셸 명령' });
     await expect(terminal(page)).toContainText('git status --short');
     await composer.fill('printf 안녕');
+    await expect(ctrl).toBeHidden();
+    const row = await bar.getByRole('button').evaluateAll(keys => keys.map(k => k.getBoundingClientRect().toJSON()));
+    expect(row.every(k => k.y === row[0].y && k.width >= 44 && k.x >= 0 && k.right <= 320)).toBe(true);
+    const viewport = await liveScreen(page).boundingBox();
+    await more.tap();
+    await expect(composer).toBeFocused();
+    expect(await liveScreen(page).boundingBox()).toEqual(viewport);
+    await captureCoding(page, 'extra-keys-light-320.png');
+    await page.keyboard.press('Escape');
+    await expect(ctrl).toBeHidden();
+    await expect(composer).toBeFocused();
+    await more.tap();
     await ctrl.click();
-    await expect(ctrl).toHaveAttribute('aria-pressed', 'true');
+    await expect(ctrl).toBeHidden();
+    await expect(more).toHaveText('Ctrl');
+    await expect(composer).toBeFocused();
     const ctrlInput = post(page, '/api/herdr/input');
     await composer.press('l');
     expect((await ctrlInput).postDataJSON()).toEqual({ pane: visualCodingIds.shell, text: '\x0c' });
     await expect(composer).toHaveValue('printf 안녕');
-    await expect(ctrl).toHaveAttribute('aria-pressed', 'false');
+    await expect(more).not.toHaveText('Ctrl');
     await input(page).focus();
+    await more.tap();
     await alt.click();
     const altInput = post(page, '/api/herdr/input');
     await input(page).press('b');
     expect((await altInput).postDataJSON()).toEqual({ pane: visualCodingIds.shell, text: '\x1bb' });
-    expect(await bar.evaluate(node => node.scrollWidth > node.clientWidth)).toBe(true);
+    await more.tap();
     const extendedInput = post(page, '/api/herdr/input');
     await bar.getByRole('button', { name: 'Ctrl+D' }).click();
     expect((await extendedInput).postDataJSON()).toEqual({ pane: visualCodingIds.shell, text: '\x04' });
@@ -957,9 +976,11 @@ test.describe('mobile pane controls', () => {
     await expect(latest(page)).toBeHidden();
     await expect.poll(liveTop).toBe(liveEnd);
     const rail = page.getByRole('group', { name: '터미널 키', exact: true });
+    await rail.getByRole('button', { name: '추가 키' }).tap();
     await rail.getByRole('button', { name: 'Page Up', exact: true }).tap();
     await expect.poll(liveTop).toBe(0);
     await expect(history(page)).toHaveCount(0);
+    await rail.getByRole('button', { name: '추가 키' }).tap();
     await rail.getByRole('button', { name: 'Page Up', exact: true }).tap();
     await expect(screen).toBeVisible();
     await expect(latest(page)).toBeVisible();
@@ -1191,6 +1212,7 @@ test.describe('mobile pane navigation', () => {
     await expect(page.getByRole('radio', { name: '대화' })).toHaveCount(0);
     await expect(terminal(page)).toContainText('git status --short');
     await input(page).focus();
+    await page.getByRole('button', { name: '추가 키' }).click();
     await page.getByRole('button', { name: '키보드 닫기' }).click();
     await expect(input(page)).not.toBeFocused();
     await page.getByRole('button', { name: '터미널 글자 크기' }).click();

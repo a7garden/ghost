@@ -163,8 +163,8 @@ Feature-level compositions:
   path, branch, linked Work and sibling panes; swipe the title to switch siblings.
   The view switch stays directly above the content. A selected diff has one file
   toolbar, and a blocking request replaces the disabled chat composer.
-  In the terminal, arrow keys, Esc, Tab and Enter lead a horizontally scrollable touch
-  strip. Ghost-owned panes fit automatically. Watching someone else's pane does not
+  In the terminal, Esc, Tab, ↑, ↓ and Enter share one stationary row with an extra-key
+  pad that opens above it without displacing the terminal. Ghost-owned panes fit automatically. Watching someone else's pane does not
   resize it; 직접 조작 requests control for this visit only. Taking another device's
   active lease requires confirmation. New spaces default to an isolated worktree;
   direct writes and approval bypass stay visible even when options are folded.

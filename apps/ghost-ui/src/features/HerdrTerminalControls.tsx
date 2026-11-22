@@ -1,50 +1,51 @@
-import { KeyboardOff, Type } from 'lucide-react';
+import { useState } from 'react';
+import * as KeyPopover from '@radix-ui/react-popover';
+import { Ellipsis, KeyboardOff, Type } from 'lucide-react';
 import { Button, Popover, PopoverContent, PopoverTrigger } from '../ui';
 import { extendedTerminalKeys, type TerminalModifiers } from './herdrMobileInput';
 import { readCodingValue, writeCodingValue } from './herdrInboxModel';
 
-const arrows = [
-  { key: 'left', label: '←', name: '왼쪽 화살표' }, { key: 'up', label: '↑', name: '위쪽 화살표' },
-  { key: 'down', label: '↓', name: '아래쪽 화살표' }, { key: 'right', label: '→', name: '오른쪽 화살표' },
+const primary = [
+  ['esc', 'Esc', '중단 (Esc)'], ['tab', 'Tab', 'Tab'], ['up', '↑', '위쪽 화살표'],
+  ['down', '↓', '아래쪽 화살표'], ['enter', 'Enter', 'Enter'],
 ] as const;
-const acted = extendedTerminalKeys.filter(key => key.name === 'Shift+Tab' || key.name === 'Ctrl+D' || key.name === 'Ctrl+L');
-const moved = extendedTerminalKeys.filter(key => key.name === 'Home' || key.name === 'End' || key.name === 'Page Up' || key.name === 'Page Down');
+const lateral = [['left', '←', '왼쪽 화살표'], ['right', '→', '오른쪽 화살표']] as const;
 const symbols = ['|', '~', '/', '-'] as const;
 
-/** One accessory strip beside the composer: the everyday keys lead, rarer moves and compositions trail. */
 export function TerminalKeyRail({ compact, modifiers, onModifier, onKey, onText, onPageUp, onDismiss }: {
   compact: boolean; modifiers: TerminalModifiers; onModifier(key: keyof TerminalModifiers): void;
   onKey(key: string): void; onText(text: string): void; onPageUp(text: string): void; onDismiss(): void;
 }) {
-  return <div className="herdr-keypad" onPointerDown={event => {
+  const [open, setOpen] = useState(false);
+  const chord = [modifiers.ctrl && 'Ctrl', modifiers.alt && 'Alt'].filter(Boolean).join('+');
+  return <div className="herdr-keypad" role="group" aria-label="터미널 키" onPointerDown={event => {
     if ((event.target as HTMLElement).closest('button') && document.activeElement instanceof HTMLTextAreaElement) event.preventDefault();
   }}>
-    <div className="herdr-keys" role="group" aria-label="터미널 키">
-      <div className="herdr-keys-group" role="group" aria-label="이동">
-        {arrows.map(key => <button key={key.key} type="button" className="herdr-key" aria-label={key.name}
-          onClick={() => onKey(key.key)}>{key.label}</button>)}
-      </div>
-      <div className="herdr-keys-group" role="group" aria-label="동작">
-        <button type="button" className="herdr-key" aria-label="중단 (Esc)" onClick={() => onKey('esc')}>Esc</button>
-        <button type="button" className="herdr-key" onClick={() => onKey('tab')}>Tab</button>
-        <button type="button" className="herdr-key" aria-label="Enter" onClick={() => onKey('enter')}>Enter</button>
-        <button type="button" className="herdr-key" aria-label="Ctrl+C" onClick={() => onKey('ctrl+c')}>Ctrl+C</button>
-        {acted.map(key => <button key={key.name} type="button" className="herdr-key" aria-label={key.name}
-          onClick={() => onText(key.text)}>{key.label}</button>)}
-      </div>
-      <div className="herdr-keys-group" role="group" aria-label="조합">
-        {(['ctrl', 'alt'] as const).map(key => <button key={key} type="button" className="herdr-key"
-          aria-pressed={modifiers[key]} onClick={() => onModifier(key)}>{key === 'ctrl' ? 'Ctrl' : 'Alt'}</button>)}
-        {symbols.map(key => <button key={key} type="button" className="herdr-key" onClick={() => onText(key)}>{key}</button>)}
-      </div>
-      <div className="herdr-keys-group" role="group" aria-label="추가 이동">
-        {moved.map(key => <button key={key.name} type="button" className="herdr-key" aria-label={key.name}
+    {primary.map(([key, label, name]) => <button type="button" key={key} className="herdr-key" aria-label={name}
+      onClick={() => onKey(key)}>{label}</button>)}
+    {/* A nonmodal keypad keeps the software keyboard and terminal geometry intact. */}
+    <KeyPopover.Root open={open} onOpenChange={setOpen}>
+      <KeyPopover.Trigger asChild><button type="button" className="herdr-key herdr-more" aria-label="추가 키"
+        aria-description={chord ? `${chord} 조합 대기` : undefined} data-armed={chord ? '' : undefined}>
+        {chord || <Ellipsis size={18} aria-hidden="true"/>}
+      </button></KeyPopover.Trigger>
+      <KeyPopover.Content className="herdr-key-palette" aria-label="추가 키" side="top" align="end" sideOffset={6} collisionPadding={8}
+        onOpenAutoFocus={event => { if (document.activeElement instanceof HTMLTextAreaElement) event.preventDefault(); }}
+        onCloseAutoFocus={event => { if (document.activeElement instanceof HTMLTextAreaElement) event.preventDefault(); }}
+        onClick={event => { if ((event.target as Element).closest('button')) setOpen(false); }}>
+        {lateral.map(([key, label, name]) => <button key={key} type="button" className="herdr-key" aria-label={name}
+          onClick={() => onKey(key)}>{label}</button>)}
+        {extendedTerminalKeys.map(key => <button key={key.name} type="button" className="herdr-key" aria-label={key.name}
           onClick={() => (key.name === 'Page Up' ? onPageUp : onText)(key.text)}>{key.label}</button>)}
-      </div>
-    </div>
-    {compact && <button type="button" className="herdr-key herdr-keyboard-dismiss" aria-label="키보드 닫기" onClick={onDismiss}>
-      <KeyboardOff aria-hidden="true"/>
-    </button>}
+        <button type="button" className="herdr-key" onClick={() => onKey('ctrl+c')}>Ctrl+C</button>
+        {(['ctrl', 'alt'] as const).map(key => <button key={key} type="button" className="herdr-key" aria-pressed={modifiers[key]}
+          onClick={() => onModifier(key)}>{key === 'ctrl' ? 'Ctrl' : 'Alt'}</button>)}
+        {symbols.map(key => <button key={key} type="button" className="herdr-key" onClick={() => onText(key)}>{key}</button>)}
+        {compact && <button type="button" className="herdr-key herdr-keyboard-dismiss" onClick={onDismiss}>
+          <KeyboardOff size={16} aria-hidden="true"/>키보드 닫기
+        </button>}
+      </KeyPopover.Content>
+    </KeyPopover.Root>
   </div>;
 }
 

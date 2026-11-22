@@ -19,11 +19,11 @@ export function shellCommand(draft: string): string {
 }
 
 export const extendedTerminalKeys = [
-  { label: '⇧Tab', name: 'Shift+Tab', text: '\x1b[Z' },
-  { label: 'PgUp', name: 'Page Up', text: '\x1b[5~' },
-  { label: 'PgDn', name: 'Page Down', text: '\x1b[6~' },
   { label: 'Home', name: 'Home', text: '\x1b[H' },
   { label: 'End', name: 'End', text: '\x1b[F' },
+  { label: 'PgUp', name: 'Page Up', text: '\x1b[5~' },
+  { label: 'PgDn', name: 'Page Down', text: '\x1b[6~' },
+  { label: '⇧Tab', name: 'Shift+Tab', text: '\x1b[Z' },
   { label: 'Ctrl+D', name: 'Ctrl+D', text: '\x04' },
   { label: 'Ctrl+L', name: 'Ctrl+L', text: '\x0c' },
 ] as const;

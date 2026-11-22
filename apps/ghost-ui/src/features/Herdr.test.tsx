@@ -104,16 +104,8 @@ describe('herdr pane', () => {
     expect(markup.match(/<textarea[^>]+>/)?.[0].includes('disabled=""')).toBe(disabled);
   });
 
-  it('groups the touch keys into one accessory strip that leads with the everyday keys', () => {
+  it('offers a shell command field without an agent follow-up', () => {
     const markup = body('idle', false, true, null);
-    const keys = markup.slice(markup.indexOf('aria-label="터미널 키"'), markup.indexOf('aria-label="셸 명령"'));
-    for (const group of ['이동', '동작', '조합', '추가 이동']) expect(keys).toContain(`aria-label="${group}"`);
-    expect(keys.indexOf('>←</button>')).toBeLessThan(keys.indexOf('aria-label="중단 (Esc)"'));
-    expect(keys.indexOf('aria-label="중단 (Esc)"')).toBeLessThan(keys.indexOf('aria-label="Home"'));
-    for (const label of ['Esc', 'Tab', '↑', '↓', '←', '→', 'Enter', 'Ctrl+C']) expect(keys).toContain(`>${label}</button>`);
-    expect(keys).toContain('class="herdr-key"');
-    expect(markup).toContain('aria-label="키보드 닫기"');
-    expect(markup).toContain('aria-label="Shift+Tab"');
     expect(markup).toContain('aria-label="셸 명령"');
     expect(markup).not.toContain('후속 지시');
     expect(body('idle', true).match(/<textarea[^>]+>/)?.[0]).toContain('disabled=""');
