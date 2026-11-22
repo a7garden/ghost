@@ -115,7 +115,10 @@ function setup(fetch?: ActivitySourceFetch): Setup {
   const requests: Setup["requests"] = [];
   const writes: Setup["writes"] = [];
   const ledger = new Ledger(":memory:");
-  const sources = new SourceConnections({ root, fetch: fetch ?? notionFetch(requests, writes), currentConnection: (id) => ledger.findConnection(id) });
+  const sources = new SourceConnections({ root, fetch: fetch ?? notionFetch(requests, writes), currentConnection: (id) => ledger.findConnection(id),
+    // Registration persists the credential before probing it. Never send the fixture password to an external mail server.
+    imap: () => { throw new Error("fixture mailbox offline"); },
+  });
   const core = new Core({ ledger, artifacts: new MemoryArtifacts(), sandbox: noSandbox, secrets: new MemorySecrets(), activitySources: sources, log: () => {} });
   const engine = new FakeEngine();
   core.attach(engine);
@@ -352,12 +355,12 @@ describe("connection tools", () => {
     try {
       s.browser.url = "https://myaccount.google.com/apppasswords";
       const register = toolOf(s, s.ledger.conversation(s.ghost.directConversationId), s.ghost, "connection_register");
-      const mailConfig = { kind: "mail" as const, host: "imap.gmail.com", port: 993, username: "owner@gmail.com", mailbox: "INBOX", smtpHost: "smtp.gmail.com", smtpPort: 465, smtpSecure: true, authType: "password" as const };
+      const mailConfig = { kind: "mail" as const, host: "198.51.100.10", port: 993, username: "owner@gmail.com", mailbox: "INBOX", smtpHost: "198.51.100.11", smtpPort: 465, smtpSecure: true, authType: "password" as const };
       const proposed = await call(register, { name: "Gmail", config: mailConfig, secret: { source: "browser", ref: "@e3", credential_origin: "https://myaccount.google.com" } }, apiOf(s.pi, "reg-mail"));
       expect(proposed.isError).toBeFalsy();
       const decision = s.ledger.pendingDecisions({ conversationId: s.ghost.directConversationId }).at(-1)!;
-      expect(decision.detail).toContain("imap.gmail.com:993");
-      expect(decision.detail).toContain("smtp.gmail.com:465");
+      expect(decision.detail).toContain("198.51.100.10:993");
+      expect(decision.detail).toContain("198.51.100.11:465");
       expect(decision.detail).toContain("https://myaccount.google.com");
       expect(JSON.stringify(decision)).not.toContain(TOKEN);
       await resolveOwner(s, decision.effectId!, "approve");
