@@ -15,8 +15,6 @@
 .chat-decisions__count { flex: none; font-size: 15px; font-weight: 650; }
 .chat-decisions__lead { flex: 1; min-width: 0; overflow: hidden; color: var(--ghost-ink2); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-decisions__due { flex: none; color: var(--ghost-amber-ink); font-size: var(--text-caption); font-weight: 550; }
-.chat-decisions__chevron { flex: none; color: var(--ghost-ink3); transition: transform var(--duration-fast) var(--ease-enter); }
-.chat-decisions__row[aria-expanded="true"] .chat-decisions__chevron { transform: rotate(180deg); }
 
 /* Unfolded beside the composer, the card gives the transcript room back: the desktop cap
    (65dvh) assumes the deck is the only dock content. */

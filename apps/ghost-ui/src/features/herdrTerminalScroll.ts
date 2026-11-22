@@ -1,5 +1,10 @@
 export const OBSERVED_TERMINAL_ROWS = 120;
 
+/** The observer's responsive grid: as many columns as the phone viewport holds at the current cell size. */
+export function terminalObserverCols(viewportWidth: number, cellWidth: number): number {
+  return Math.min(300, Math.max(20, Math.floor(viewportWidth / cellWidth)));
+}
+
 /** Ignore observer padding, but keep room for the cursor on an otherwise empty prompt. */
 export function terminalUsedRows(rows: number, cursorRow: number, textAt: (row: number) => string | undefined): number {
   for (let row = rows - 1; row > cursorRow; row--) {
@@ -7,7 +12,6 @@ export function terminalUsedRows(rows: number, cursorRow: number, textAt: (row: 
   }
   return cursorRow + 1;
 }
-
 export function followingTerminalTop(top: number, end: number, following: boolean): number {
   return following ? end : Math.min(top, end);
 }

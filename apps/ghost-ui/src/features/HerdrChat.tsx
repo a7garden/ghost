@@ -1,12 +1,12 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Braces, ChevronRight, CircleAlert, FilePenLine, FileSearch, Globe2, SquareTerminal } from 'lucide-react';
+import { ArrowDown, Braces, CircleAlert, FilePenLine, FileSearch, Globe2, SquareTerminal } from 'lucide-react';
 import type { HerdrChat as Chat, HerdrChatItem, HerdrPaneView } from '@ghost/contract';
 import { MessageBody } from '../components/MessageBody';
 import { useHost } from '../host/context';
 import { Button, InlineError } from '../ui';
 import { HerdrState } from './herdrDisplay';
 import { WorkingTime } from './HerdrParts';
-import { elapsedLabel, foldChat, mergeChat, type ChatRow } from './herdrInboxModel';
+import { elapsedLabel, foldChat, mergeChat, stepLines, type ChatRow } from './herdrInboxModel';
 
 type ChatSnapshot = { items: readonly HerdrChatItem[]; source?: Chat['source']; title?: string | null };
 const emptyItems: readonly HerdrChatItem[] = [];
@@ -55,13 +55,16 @@ function stepIcon(name: string) {
 
 function Steps({ row }: { row: Extract<ChatRow, { kind: 'steps' }> }) {
   const duration = row.from !== null && row.to !== null ? elapsedLabel(row.from, row.to) : '';
+  const failed = row.steps.reduce((count, step) => count + (step.kind === 'tool' && step.ok === false ? 1 : 0), 0);
   return <details className="herdr-chat-steps">
-    <summary><ChevronRight size={15} aria-hidden="true"/>{row.steps.length}단계{duration && ` · ${duration}`}</summary>
-    <ul>{row.steps.map(item => {
-      const Icon = item.kind === 'thinking' ? Braces : item.ok === false ? CircleAlert : stepIcon(item.name);
-      return <li key={item.id} data-failed={item.kind === 'tool' && item.ok === false || undefined}>
+    <summary><span>{row.steps.length}단계{duration && ` · ${duration}`}{failed > 0 && <span className="herdr-chat-steps-failed"> · 실패 {failed}</span>}</span></summary>
+    <ul>{stepLines(row.steps).map(({ step, count }) => {
+      const failed = step.kind === 'tool' && step.ok === false;
+      const Icon = step.kind === 'thinking' ? Braces : failed ? CircleAlert : stepIcon(step.name);
+      const label = step.kind === 'thinking' ? '생각' : step.summary || step.name;
+      return <li key={step.id} data-failed={failed || undefined}>
         <Icon size={15} aria-hidden="true"/>
-        {item.kind === 'thinking' ? <span>생각</span> : <span title={item.summary || item.name}>{item.summary || item.name}</span>}
+        <span>{step.kind === 'tool' && step.summary && <small>{step.name} </small>}<span>{label}</span>{count > 1 && <em> {count}번</em>}</span>
       </li>;
     })}</ul>
   </details>;
@@ -89,7 +92,15 @@ export function HerdrConversation({ items, busy, since, error }: {
       pinned.current = scrollHeight - Math.max(0, scrollTop) - clientHeight < 40;
       setFollowing(pinned.current);
     }}>
-      <div className="herdr-chat-body" ref={body}>
+      <div className="herdr-chat-body" ref={body} onClickCapture={event => {
+        if ((event.target as Element).closest('summary')) {
+          pinned.current = false;
+          requestAnimationFrame(() => {
+            const el = scroll.current;
+            if (el) setFollowing(pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40);
+          });
+        }
+      }}>
         {rows.map(row => {
           if (row.kind === 'steps') return <Steps key={row.id} row={row}/>;
           if (row.kind === 'note') return <div key={row.id} className="herdr-chat-note">{row.text}</div>;

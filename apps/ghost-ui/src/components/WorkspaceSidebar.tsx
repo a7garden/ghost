@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
-import { ChevronDown, ChevronUp, Compass, Folder, Home, Inbox, LayoutList, Mail, MessageCircle, Pin, Plus, Settings2, SquareTerminal } from 'lucide-react';
+import { Compass, Folder, Home, Inbox, LayoutList, Mail, MessageCircle, Pin, Plus, Settings2, SquareTerminal } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Navigation, NavigationGroup, NavigationItem, ScrollRail } from '../ui'
 import type { Ghost, State } from '@ghost/contract';
 import { ghostLiveWork, ghostPresence, liveWorks, visibleGhosts, type Presence } from '../features/ghostState';
@@ -139,7 +139,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
             action={<button type="button" className="sidebar-pool-toggle" aria-expanded={expanded}
               aria-label={expanded ? 'Ghost 목록 접기' : `Ghost 목록 펼치기${pool.length ? ` (${pool.length})` : ''}`}
               onClick={() => { setQuery(''); setExpanded(!expanded); }}>
-              {expanded ? <ChevronUp size={13} aria-hidden="true"/> : <ChevronDown size={13} aria-hidden="true"/>}
+              <span aria-hidden="true" className="fold-mark"/>
               {!expanded && pool.length > 0 && <span className="tabular">{pool.length}</span>}
             </button>}>
             {expanded && pool.length > SEARCH_LIMIT && <input type="text" enterKeyHint="search" className="sidebar-search" aria-label="Ghost 찾기"

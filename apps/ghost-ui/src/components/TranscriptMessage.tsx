@@ -1,7 +1,6 @@
 import { Fragment, type ReactNode } from 'react';
 import type { Live } from '@ghost/contract';
 import { OutcomeLine, PresenceAvatar } from './agent';
-import { ChevronRight } from 'lucide-react';
 import { ConversationMessage } from '../ui'
 import { INTERACTIVE_UI_TOOL, QUIET_REPLY, readInteractiveUi, type GhostTool, type LiveTool, type Message } from '@ghost/contract';
 import { ArtifactPreview } from './ArtifactPreview';
@@ -62,7 +61,6 @@ export function ToolTrail({ results, running = [] }: { results: Message[]; runni
   const summary = running.length ? trailSummary(running.map(tool => tool.name), true) : trailSummary(names.map(item => item.name), false);
   return <details className="trail" data-kind="trail" data-live={running.length > 0 || undefined}>
     <summary className="trail__summary">
-      <ChevronRight className="trail__chevron" aria-hidden="true"/>
       <span className="trail__count">{summary}{failed > 0 && <span className="trail__failed"> · 실패 {failed}</span>}</span>
       <span className="trail__chips" aria-hidden="true">
         {names.slice(-6).map(item => <span key={item.id} className="trail__chip" data-error={item.error || undefined} data-live={item.live || undefined}>{item.name}</span>)}
@@ -93,7 +91,6 @@ export function Reasoning({ text, live = false }: { text: string; live?: boolean
   const now = headings.at(-1) ?? lines.at(-1)?.replace(/\*\*/g, '');
   return <details className="reasoning" data-live={live || undefined} open={live || undefined}>
     <summary className="reasoning__summary">
-      <ChevronRight className="trail__chevron" aria-hidden="true"/>
       <span className="reasoning__label">{live ? '생각 중' : '생각 과정'}</span>
       {live && now && <span className="reasoning__now">{now}</span>}
     </summary>
@@ -115,7 +112,7 @@ function WakeEvent({ message, label }: { message: Message & { origin: Exclude<Me
   </>;
   if (!view.detail) return <div className="transcript-event" data-kind="note" data-origin={message.origin} role="note" aria-label={label}>{head}</div>;
   return <details className="transcript-event" data-kind="note" data-origin={message.origin} aria-label={label}>
-    <summary>{head}<ChevronRight className="transcript-event__chevron" aria-hidden="true"/></summary>
+    <summary>{head}</summary>
     <div className="transcript-event__detail">{view.detail}</div>
   </details>;
 }

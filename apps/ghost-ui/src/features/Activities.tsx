@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react';
-import { ChevronDown, FlaskConical, Pause, Pencil, Play, Plus, Square, Trash2 } from 'lucide-react';
+import { FlaskConical, Pause, Pencil, Play, Plus, Square, Trash2 } from 'lucide-react';
 import { Badge, Button, InlineError, SettingsGroup, SettingsRow } from '../ui';
 import { TERMINAL_WORK_STATES, type Activity, type ActivityRun, type Connection } from '@ghost/contract';
 import { useHost } from '../host/context';
@@ -121,7 +121,7 @@ export function Activities({ navigate, scopeId }: { navigate(path: string): void
                 </Button>}
               <Button variant="ghost" size="icon" type="button" aria-label={`${activity.name} 실행 기록`} aria-expanded={historyOpen}
                 onClick={() => setOpenHistory(historyOpen ? null : activity.id)}>
-                <ChevronDown size={15} className={historyOpen ? 'rotate-180 transition-transform' : 'transition-transform'}/>
+                <span aria-hidden="true" className="fold-mark"/>
               </Button>
               <Button variant="ghost" size="icon" type="button" aria-label={`${activity.name} 편집`} disabled={pending !== ''}
                 onClick={() => { setError(''); setEditing(activity); }}><Pencil size={15}/></Button>

@@ -1,15 +1,16 @@
 import { HerdrControlError, HostError } from '../host/client';
 
 export type TerminalSize = { cols: number; rows: number };
-export type TerminalConsent = 'fit' | 'watch' | null;
-export type TerminalProblem = 'fit' | 'held' | 'gone' | 'retry';
+export type TerminalConsent = 'control' | 'watch' | null;
+export type TerminalProblem = 'confirm' | 'held' | 'gone' | 'retry';
 
+/** A pane the app owns drives itself; a borrowed pane only ever drives after an explicit 직접 조작. */
 export function shouldControlTerminal(owned: boolean, consent: TerminalConsent): boolean {
-  return consent === 'fit' || (consent !== 'watch' && owned);
+  return consent !== 'watch' && (owned || consent === 'control');
 }
 
 export function terminalProblem(error: unknown): TerminalProblem {
-  if (error instanceof HerdrControlError) return error.code === 'held' ? 'held' : 'fit';
+  if (error instanceof HerdrControlError) return error.code === 'held' ? 'held' : 'confirm';
   if (error instanceof HostError && error.code === 'not_found') return 'gone';
   return 'retry';
 }
@@ -118,59 +119,58 @@ export function controlComposerText(text: string, bracketedPaste: boolean): stri
   return bracketedPaste ? `\x1b[200~${normalized}\x1b[201~\r` : `${normalized}\r`;
 }
 
-/** One lease lifecycle for the terminal: who may drive it, what needs the owner's yes, and what to tell them. */
+/** One lease lifecycle for the terminal: who may drive it, what still needs the owner's yes, and what to tell them. */
 export type TerminalLease = {
-  /** The owner's remembered "fit to phone" yes. */
-  consent: 'fit' | null;
-  /** Explicit read-only choice; overrides consent and ownership until the owner fits again. */
+  /** The explicit 직접 조작 ask for a pane the app does not own; it never outlives the live view. */
+  control: boolean;
+  /** Read-only fallback after a problem, or while a takeover question is pending. */
   watch: boolean;
   leased: boolean;
   takeover: boolean;
-  confirmation: 'fit' | 'held' | null;
+  confirmation: 'held' | null;
   note: string;
 };
 
 export type TerminalLeaseAction =
+  | { type: 'control' }
   | { type: 'watch'; note?: string }
-  | { type: 'fit'; owned: boolean }
   | { type: 'confirm' }
   | { type: 'cancel' }
   | { type: 'ready' }
   | { type: 'leave' }
-  | { type: 'problem'; reason: 'fit' | 'held' | 'taken' | 'released' };
+  | { type: 'problem'; reason: 'confirm' | 'held' | 'taken' | 'released' };
 
 export const takenNote = '다른 곳에서 이 패널을 가져갔어요.';
 
-export function initialTerminalLease(remembered: boolean): TerminalLease {
-  return { consent: remembered ? 'fit' : null, watch: false, leased: false, takeover: false, confirmation: null, note: '' };
+export function initialTerminalLease(): TerminalLease {
+  return { control: false, watch: false, leased: false, takeover: false, confirmation: null, note: '' };
 }
 
 export function terminalLeaseConsent(lease: TerminalLease): TerminalConsent {
-  return lease.watch ? 'watch' : lease.consent;
+  return lease.watch ? 'watch' : lease.control ? 'control' : null;
 }
 
 export function terminalLeaseReducer(state: TerminalLease, action: TerminalLeaseAction): TerminalLease {
   switch (action.type) {
+    case 'control':
+      // The single intentional entry into direct control; the press itself is the consent to fit.
+      return { ...state, control: true, watch: false, note: '' };
     case 'watch':
-      return { ...state, watch: true, leased: false, takeover: false, note: action.note ?? '' };
-    case 'fit':
-      // An owned pane or an earlier "fit" yes needs no new question.
-      if (action.owned || state.consent === 'fit') return { ...state, watch: false, note: '' };
-      return { ...state, confirmation: 'fit' };
+      return { ...state, control: false, watch: true, leased: false, takeover: false, confirmation: null, note: action.note ?? '' };
     case 'confirm':
-      return {
-        ...state, consent: state.confirmation === 'fit' ? 'fit' : state.consent,
-        watch: false, takeover: state.confirmation === 'held', confirmation: null, note: '',
-      };
+      // Only the held question reaches here: the approved retry is itself an explicit ask to take direct control.
+      return { ...state, control: true, watch: false, takeover: state.confirmation === 'held', confirmation: null, note: '' };
     case 'cancel':
       return { ...state, confirmation: null };
     case 'ready':
       return { ...state, leased: true };
     case 'leave':
-      return { ...state, leased: false, takeover: false, confirmation: null };
+      // Leaving the live view drops everything: a borrowed pane is resized only on a fresh explicit ask.
+      return initialTerminalLease();
     case 'problem': {
       const watching = terminalLeaseReducer(state, { type: 'watch', note: action.reason === 'taken' ? takenNote : '' });
-      return action.reason === 'fit' || action.reason === 'held' ? { ...watching, confirmation: action.reason } : watching;
+      // Someone else holds the pane: ask once, explicitly, before any takeover. Everything else just watches.
+      return action.reason === 'held' ? { ...watching, confirmation: 'held' } : watching;
     }
   }
 }

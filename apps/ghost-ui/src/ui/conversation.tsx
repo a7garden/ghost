@@ -1,6 +1,6 @@
 // App-owned UI. Retained-source notices: ./LICENSE.
 import * as React from "react"
-import { ArrowDown, ChevronRight } from "lucide-react"
+import { ArrowDown } from "lucide-react"
 
 import { Button } from "./button"
 import { ScrollRail } from "./scroll-rail"
@@ -232,7 +232,6 @@ export function ConversationActivity({
       open={defaultOpen}
     >
       <summary className="ghost-conversation-activity__summary">
-        <ChevronRight aria-hidden="true" className="ghost-conversation-activity__chevron" />
         <span>{summary}</span>
       </summary>
       <div className="ghost-conversation-activity__content">{children}</div>

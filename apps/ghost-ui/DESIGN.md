@@ -155,12 +155,19 @@ Feature-level compositions:
   composer edge carries a travelling signal while the Ghost responds: a comet on the edge,
   a soft glow behind it and a faint steady ring.
 - **Coding inbox**: blocked agents come first, then active work and unread completions.
-  The same inline approval sits above the pane composer. Chats group a run's tool
-  steps into one disclosure; the space tree and terminal remain alternate views.
+  The same inline approval sits above the pane composer. Consecutive tools and thinking
+  fold in place; a reply ends that group, so later actions never move above the reply.
+  Repeated identical operations share a count, and failures remain visible in the summary.
+  The space tree and terminal remain alternate views.
   On phones, the pane title and state share the back bar. Tap the title for the full
   path, branch, linked Work and sibling panes; swipe the title to switch siblings.
   The view switch stays directly above the content. A selected diff has one file
   toolbar, and a blocking request replaces the disabled chat composer.
+  In the terminal, arrow keys, Esc, Tab and Enter lead a horizontally scrollable touch
+  strip. Ghost-owned panes fit automatically. Watching someone else's pane does not
+  resize it; 직접 조작 requests control for this visit only. Taking another device's
+  active lease requires confirmation. New spaces default to an isolated worktree;
+  direct writes and approval bypass stay visible even when options are folded.
 - **Collaboration**: a `delegate` result reads as a 위임 event line (Ghost · title), and a
   child's report as 위임 결과. Thread cards list every Ghost working under the thread with
   its live state; a waiting Work reads 응답 대기, whether it waits on delegated Work, a question
@@ -202,8 +209,9 @@ signaling through a gentle opacity pulse instead of rotation.
 ## Conversation — 2026-11-07
 
 Each Ghost keeps one durable conversation, like Dots: there is no "new conversation" action.
-The Ghost floats as a round button at the top center (its presence ring; it opens the
-profile and look editor) and content fades beneath it. Work the conversation spins off
+On desktop the Ghost's portrait floats over the transcript. On phones the back button,
+title, profile, threads, browser (when available) and agenda share the title bar.
+No controls or fade cover the first message. Work the conversation spins off
 appears as **thread cards** at the moment it started, kept live (state glyph, carrier,
 lifecycle); a card waiting on the owner is answered from the decision deck above the composer.
 A settled thread folds to one quiet line — its OutcomeLine returns beneath it, so the
@@ -216,7 +224,7 @@ carrier's work conversation streaming live. Editing and cancelling stay on the f
 맡긴 일 page. The panel opens by growing its width so the conversation eases aside while its
 content slides in from the edge, and closes the same way in reverse (over the conversation it
 slides). Direct conversations kept from before stay reachable as 이전 대화. An empty
-conversation shows the Ghost's name and starters only; its portrait already floats above.
+conversation shows the Ghost's name and starters only; its portrait is already in view.
 Host wakes (reports, child results, decision answers, schedules, verdicts) render as quiet
 event lines, never as the owner's bubble. The host writes them for the receiving Ghost; the
 transcript reads them for the owner (`src/components/wake.ts`): one Korean line, the Ghost's
@@ -294,6 +302,11 @@ and 메일 directly and lists projects before Ghosts. On the Work board, the ass
 picker shares the state and create row; on the mail list, account and mailbox share one row.
 The settings index groups destinations and searches their visible titles. A selected
 setting opens a separate page with a back button instead of sharing width with the index.
+
+Across the app, expanding content in place uses **+** when closed and **−** when open,
+not a triangle or rotating chevron. Native `details` retains keyboard behavior; an
+explicit disclosure button exposes `aria-expanded`. Navigation arrows and option pickers
+are not folds.
 
 ## Settings
 

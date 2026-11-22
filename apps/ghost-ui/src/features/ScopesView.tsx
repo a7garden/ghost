@@ -99,7 +99,7 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
         </select>
         <section className="place-details" aria-label="프로젝트 관리">
           <button type="button" className="place-details__toggle" aria-expanded={details} aria-controls="place-details-panel" onClick={() => setDetails(value => !value)}>
-            <ChevronRight size={14} aria-hidden="true"/>프로젝트 관리
+            <span aria-hidden="true" className="fold-mark"/>프로젝트 관리
           </button>
           {details && <div id="place-details-panel" className="place-details__panel">
             {path && <span className="place__crumb place-details__path" title={path} aria-label={`폴더 ${path}`}>

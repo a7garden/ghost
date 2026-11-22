@@ -5,8 +5,8 @@ import { Modal } from '../components/Modal';
 import { useHost } from '../host/context';
 import { Button, FormField, InlineError, Input } from '../ui';
 import type { HerdrNode, RosterAction } from './HerdrRoster';
-import { AgentFields } from './HerdrStart';
-import { useAgentLaunch } from './HerdrAgentOptions';
+import { AgentFields, TaskField } from './HerdrStart';
+import { AgentOptionsSection, useAgentLaunch } from './HerdrAgentOptions';
 
 const targetName: Record<HerdrNode['target'], string> = { workspace: '스페이스', tab: '탭', pane: '패널' };
 
@@ -77,7 +77,11 @@ export function HerdrActionDialog({ action, setup, onDismiss, onChanged, onClose
           <Input {...props} name="label" maxLength={80} defaultValue={kind === 'rename' ? node.label : undefined}/>}</FormField>}
         {kind === 'tab' && <FormField label="디렉터리 (선택)">{props => <Input {...props} name="cwd" maxLength={4096} placeholder={node.cwd ?? '/Users/…'}
           value={cwd} onChange={event => setCwd(event.currentTarget.value)} autoCapitalize="none" autoCorrect="off" spellCheck={false}/>}</FormField>}
-        {kind !== 'rename' && <AgentFields setup={setup} value={agent} onChange={setAgent} required={kind === 'agent'} pending={pending} optionsDisclosure={launch.disclosure}/>}
+        {kind !== 'rename' && <>
+          <AgentFields setup={setup} value={agent} onChange={setAgent} required={kind === 'agent'} pending={pending}/>
+          {agent && <TaskField/>}
+          <AgentOptionsSection launch={launch}/>
+        </>}
       </fieldset>
       {error && <InlineError>{error}</InlineError>}
       <div className="coding-new-actions">

@@ -1,10 +1,10 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { FolderOpen, Plus } from 'lucide-react';
-import { HERDR_AGENT_KINDS, type CodingSetup, type HerdrAgentKind, type HerdrPaneView, type HerdrWorkspaceCreate, type Scope } from '@ghost/contract';
+import { type CodingSetup, type HerdrAgentKind, type HerdrPaneView, type HerdrWorkspaceCreate, type Scope } from '@ghost/contract';
 import { Button, FormField, InlineError, Input, Popover, PopoverContent, PopoverTrigger, SelectField, Switch, Textarea } from '../ui';
 import { useHost } from '../host/context';
 import { submitCodingOnShortcut } from './herdrDisplay';
-import { useAgentLaunch } from './HerdrAgentOptions';
+import { AgentOptionsSection, useAgentLaunch } from './HerdrAgentOptions';
 
 const kindNames: Record<HerdrAgentKind, string> = {
   omp: 'omp', claude: 'Claude Code', codex: 'Codex', pi: 'Pi', gemini: 'Gemini CLI', cursor: 'Cursor',
@@ -13,26 +13,24 @@ const kindNames: Record<HerdrAgentKind, string> = {
   hermes: 'Hermes Agent', kilo: 'Kilo Code CLI', qodercli: 'Qoder CLI', qwen: 'Qwen Code', letta: 'Letta Code', maki: 'Maki', muse: 'Muse Agent',
 };
 
+/** The routine picker offers only what runs on this Mac; uninstalled kinds live in the 연동 checklist. */
 export function herdrAgentOptions(installed: readonly HerdrAgentKind[]) {
-  const enabled: { value: HerdrAgentKind; label: string; disabled: boolean }[] = [];
-  const unavailable: typeof enabled = [];
-  for (const kind of HERDR_AGENT_KINDS) {
-    const ready = installed.includes(kind);
-    (ready ? enabled : unavailable).push({ value: kind, label: ready ? kindNames[kind] : `${kindNames[kind]} · 설치 안 됨`, disabled: !ready });
-  }
-  return [...enabled, ...unavailable];
+  return installed.map(kind => ({ value: kind, label: kindNames[kind] }));
 }
 
-export function workspaceInput(data: FormData, agent?: HerdrAgentKind): HerdrWorkspaceCreate {
+/** `label`, `branch` and `worktree` live in the collapsible options section, so they arrive as values, not form fields. */
+export function workspaceInput(data: FormData, agent: HerdrAgentKind | undefined,
+  section: { worktree: boolean; label?: string; branch?: string }): HerdrWorkspaceCreate {
   const field = (name: string) => String(data.get(name) ?? '').trim();
-  const worktree = data.has('worktree'), label = field('label'), task = agent ? field('task') : '';
-  const branch = worktree ? field('branch') : '';
-  return { cwd: field('cwd'), worktree, ...(label && { label }), ...(branch && { branch }), ...(agent && { agent }), ...(task && { task }) };
+  const label = section.label?.trim() ?? '';
+  const branch = section.worktree ? section.branch?.trim() ?? '' : '';
+  const task = agent ? field('task') : '';
+  return { cwd: field('cwd'), worktree: section.worktree, ...(label && { label }), ...(branch && { branch }), ...(agent && { agent }), ...(task && { task }) };
 }
 
-export function AgentFields({ setup, value, onChange, required = false, pending, optionsDisclosure }: {
+export function AgentFields({ setup, value, onChange, required = false, pending }: {
   setup: CodingSetup | null; value: HerdrAgentKind | undefined; onChange(value: HerdrAgentKind | undefined): void;
-  required?: boolean; pending: boolean; optionsDisclosure: React.ReactNode;
+  required?: boolean; pending: boolean;
 }) {
   const installed = setup?.kinds ?? [];
   const options = [...(required ? [] : [{ value: 'shell', label: '셸' }]), ...herdrAgentOptions(installed)];
@@ -41,10 +39,12 @@ export function AgentFields({ setup, value, onChange, required = false, pending,
       value={value ?? (required ? '' : 'shell')} onValueChange={next => onChange(installed.find(kind => kind === next))}
       disabled={!setup || pending || (required && installed.length === 0)} options={options}/>}</FormField>
     {required && installed.length === 0 && <p className="coding-hint">설치된 에이전트가 없습니다.</p>}
-    {optionsDisclosure}
-    {value && <FormField label="첫 지시 (선택)">{props => <Textarea {...props} name="task" rows={3} maxLength={24_000}
-      className="field-sizing-fixed min-h-20 resize-y" aria-keyshortcuts="Meta+Enter Control+Enter" onKeyDown={submitCodingOnShortcut}/>}</FormField>}
   </>;
+}
+
+export function TaskField() {
+  return <FormField label="첫 지시 (선택)">{props => <Textarea {...props} name="task" rows={3} maxLength={24_000}
+    className="field-sizing-fixed min-h-20 resize-y" aria-keyshortcuts="Meta+Enter Control+Enter" onKeyDown={submitCodingOnShortcut}/>}</FormField>;
 }
 
 function RepositoryField({ scopes, repo, onChange }: { scopes: Scope[]; repo: string; onChange(path: string): void }) {
@@ -71,6 +71,7 @@ export function NewHerdrWorkspace({ scopes, setup, onStarted, onCancel }: {
   const { client } = useHost();
   const [agent, setAgent] = useState<HerdrAgentKind | 'shell'>();
   const [repo, setRepo] = useState('');
+  const [label, setLabel] = useState('');
   const [branch, setBranch] = useState('');
   const [worktree, setWorktree] = useState(true);
   const [pending, setPending] = useState(false);
@@ -86,7 +87,7 @@ export function NewHerdrWorkspace({ scopes, setup, onStarted, onCancel }: {
   async function start(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pendingRef.current || !canStart) return;
-    const input = workspaceInput(new FormData(event.currentTarget), selected);
+    const input = workspaceInput(new FormData(event.currentTarget), selected, { worktree, label, branch });
     if (!input.cwd.startsWith('/')) { setError('경로는 /로 시작하는 절대 경로를 입력하세요.'); return; }
     const args = launch.prepare();
     if (!args) return;
@@ -107,12 +108,17 @@ export function NewHerdrWorkspace({ scopes, setup, onStarted, onCancel }: {
       <h2 id={titleId}>새 스페이스</h2>
       <fieldset disabled={pending}>
         <RepositoryField scopes={scopes} repo={repo} onChange={setRepo}/>
-        <FormField label="이름 (선택)">{props => <Input {...props} name="label" maxLength={80}/>}</FormField>
-        <div className="coding-worktree"><label htmlFor={worktreeId}>새 워크트리에서 작업</label>
-          <Switch id={worktreeId} name="worktree" checked={worktree} onCheckedChange={setWorktree}/>
-        </div>
-        {worktree && <FormField label="브랜치 이름 (선택)">{props => <Input {...props} name="branch" value={branch} onChange={event => setBranch(event.currentTarget.value)} maxLength={80} autoCapitalize="none" spellCheck={false}/>}</FormField>}
-        <AgentFields setup={setup} value={selected} pending={pending} onChange={value => setAgent(value ?? 'shell')} optionsDisclosure={launch.disclosure}/>
+        <AgentFields setup={setup} value={selected} pending={pending} onChange={value => setAgent(value ?? 'shell')}/>
+        {selected && <TaskField/>}
+        <AgentOptionsSection launch={launch} risks={worktree ? [] : [{ label: '직접 쓰기', danger: true }]}>
+          <FormField label="이름 (선택)">{props => <Input {...props} name="label" value={label}
+            onChange={event => setLabel(event.currentTarget.value)} maxLength={80}/>}</FormField>
+          <div className="coding-worktree"><label htmlFor={worktreeId}>새 워크트리에서 작업</label>
+            <Switch id={worktreeId} checked={worktree} onCheckedChange={setWorktree}/>
+          </div>
+          {worktree && <FormField label="브랜치 이름 (선택)">{props => <Input {...props} name="branch" value={branch}
+            onChange={event => setBranch(event.currentTarget.value)} maxLength={80} autoCapitalize="none" spellCheck={false}/>}</FormField>}
+        </AgentOptionsSection>
       </fieldset>
       {error && <InlineError>{error}</InlineError>}
       <div className="coding-new-actions">

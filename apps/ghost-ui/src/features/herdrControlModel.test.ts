@@ -2,15 +2,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HerdrControlError, HostError } from '../host/client';
 import { controlComposerText, controlRailKey, initialTerminalLease, shouldControlTerminal, takenNote, terminalLeaseConsent, terminalLeaseReducer, TerminalResize, TerminalScrollLines, terminalProblem, type TerminalLeaseAction, type TerminalSize } from './herdrControlModel';
 
-it('controls owned panes by default, respecting explicit Watch or a fit consent', () => {
+it('drives owned panes themselves; borrowed panes only after an explicit 직접 조작', () => {
   expect(shouldControlTerminal(true, null)).toBe(true);
   expect(shouldControlTerminal(false, null)).toBe(false);
-  expect(shouldControlTerminal(false, 'fit')).toBe(true);
+  expect(shouldControlTerminal(false, 'control')).toBe(true);
   expect(shouldControlTerminal(true, 'watch')).toBe(false);
+  expect(shouldControlTerminal(false, 'watch')).toBe(false);
 });
 
 it('maps Host control refusals to their distinct UI outcomes', () => {
-  expect(terminalProblem(new HerdrControlError('confirm_required', 'fit'))).toBe('fit');
+  expect(terminalProblem(new HerdrControlError('confirm_required', 'fit'))).toBe('confirm');
   expect(terminalProblem(new HerdrControlError('held', 'held'))).toBe('held');
   expect(terminalProblem(new HostError('not_found', 'closed'))).toBe('gone');
   expect(terminalProblem(new HostError('unavailable', 'reconnect'))).toBe('retry');
@@ -80,28 +81,24 @@ describe('controlled terminal resizing', () => {
 });
 
 describe('terminal lease', () => {
-  const fresh = () => initialTerminalLease(false);
-  const run = (...actions: TerminalLeaseAction[]) => actions.reduce(terminalLeaseReducer, fresh());
+  const run = (...actions: TerminalLeaseAction[]) => actions.reduce(terminalLeaseReducer, initialTerminalLease());
 
-  it('asks before fitting a pane the owner does not control, and remembers the yes', () => {
-    const asked = run({ type: 'fit', owned: false });
-    expect(asked.confirmation).toBe('fit');
-    const fitted = terminalLeaseReducer(asked, { type: 'confirm' });
-    expect(terminalLeaseConsent(fitted)).toBe('fit');
-    expect(terminalLeaseConsent(terminalLeaseReducer(fitted, { type: 'watch' }))).toBe('watch');
-    // A remembered yes returns to the lease without asking again.
-    expect(terminalLeaseConsent(terminalLeaseReducer(terminalLeaseReducer(fitted, { type: 'watch' }), { type: 'fit', owned: false }))).toBe('fit');
+  it('never remembers direct control past the live view, so a borrowed pane is asked every time', () => {
+    expect(terminalLeaseConsent(run({ type: 'control' }))).toBe('control');
+    expect(terminalLeaseConsent(run({ type: 'control' }, { type: 'ready' }, { type: 'leave' }))).toBeNull();
+    expect(terminalLeaseConsent(run({ type: 'control' }, { type: 'leave' }, { type: 'control' }))).toBe('control');
   });
 
   it('falls back to watching with a note when another client takes the pane, and asks again when held', () => {
     expect(run({ type: 'ready' }, { type: 'problem', reason: 'taken' })).toMatchObject({ watch: true, leased: false, note: takenNote });
-    const held = run({ type: 'problem', reason: 'held' });
+    const held = run({ type: 'control' }, { type: 'problem', reason: 'held' });
     expect(held).toMatchObject({ watch: true, confirmation: 'held' });
-    expect(terminalLeaseReducer(held, { type: 'confirm' })).toMatchObject({ watch: false, takeover: true, confirmation: null });
+    // The approved takeover is itself the explicit ask, so a borrowed pane retries without another press.
+    expect(terminalLeaseReducer(held, { type: 'confirm' })).toMatchObject({ control: true, watch: false, takeover: true, confirmation: null });
   });
 
   it('drops the lease, takeover and any question when leaving the live view', () => {
     expect(run({ type: 'problem', reason: 'held' }, { type: 'confirm' }, { type: 'ready' }, { type: 'leave' }))
-      .toMatchObject({ leased: false, takeover: false, confirmation: null });
+      .toMatchObject({ control: false, watch: false, leased: false, takeover: false, confirmation: null });
   });
 });

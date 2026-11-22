@@ -37,6 +37,7 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar,
   const [menuOpen, setMenuOpen] = useState(false);
   const compact = useCompact();
   const focusedCoding = compact && section === 'coding' && hideDock;
+  const focusedChat = compact && section === 'ghosts';
   const [titleSlot, setTitleSlot] = useState<HTMLDivElement | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const search = <button type="button" className="shell-search" aria-label="명령 검색" title={`명령 검색 · ${shortcut('K')}`} onClick={() => onPaletteOpenChange(true)}>
@@ -57,13 +58,14 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar,
   return <div className="shell" data-fill={fill || undefined}>
     {desktop
       ? <TitleBar aria-label="Ghost" macOSInset={macOSInset} left={left} center={island} right={right}/>
-      : <header className="ghost-titlebar shell-header" data-focused-coding={focusedCoding || undefined}>
+      : <header className="ghost-titlebar shell-header" data-focused-coding={focusedCoding || undefined} data-focused-chat={focusedChat || undefined}>
         <div className="ghost-titlebar__slot ghost-titlebar__slot--left">{left}{focusedCoding && <div className="compact-title-slot" ref={setTitleSlot}/>}</div>
-        <div className="ghost-titlebar__slot ghost-titlebar__slot--center">{island}</div>
-        <div className="ghost-titlebar__slot ghost-titlebar__slot--right">{focusedCoding
+        <div className="ghost-titlebar__slot ghost-titlebar__slot--center">{focusedChat ? <div ref={setTitleSlot} className="chat-title-tools"/> : island}</div>
+        <div className="ghost-titlebar__slot ghost-titlebar__slot--right">{focusedCoding || focusedChat
           ? <Popover open={toolsOpen} onOpenChange={setToolsOpen}>
             <PopoverTrigger asChild><button type="button" className="shell-icon-button" aria-label="작업실 메뉴"><Ellipsis aria-hidden="true"/></button></PopoverTrigger>
             <PopoverContent aria-label="작업실 메뉴" className="coding-shell-menu">
+              {focusedChat && island}
               {duty}
               <button type="button" onClick={() => { setToolsOpen(false); onPaletteOpenChange(true); }}><Search/>명령 검색</button>
               <button type="button" onClick={() => { setToolsOpen(false); navigate('/settings'); }}><Settings/>설정</button>

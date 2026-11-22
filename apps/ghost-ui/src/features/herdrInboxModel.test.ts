@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HerdrChat, HerdrChatItem, HerdrPaneView, HerdrWorkspaceView } from '@ghost/contract';
-import { agentGroups, choiceVariant, elapsedLabel, foldChat, groupAgents, isUnread, mergeChat, trackActivity } from './herdrInboxModel';
+import { agentGroups, choiceVariant, elapsedLabel, foldChat, groupAgents, isUnread, mergeChat, stepLines, trackActivity } from './herdrInboxModel';
 
 const pane: HerdrPaneView = { id: 'w1:p1', workspaceId: 'w1', tabId: 'w1:t1', workspace: 'ghost', tab: 'coding', agent: 'omp', status: 'working', cwd: '/dev/trees/coding', title: '코딩 화면', focused: true, owned: false };
 const tree = (...panes: HerdrPaneView[]): HerdrWorkspaceView[] => [
@@ -54,11 +54,22 @@ describe('Coding transcript', () => {
     expect(mergeChat(existing, delta([note], true))).toEqual([note]);
     expect(mergeChat(existing, delta([]))).toBe(existing);
   });
-  it('folds all steps in a run together and starts a new fold on the next user or divider', () => {
+  it('keeps actions taken after a reply below that reply', () => {
     const extra = { ...call, id: 'tool2', at: 3000 };
     const final = { ...agent, id: 'a2', at: 4000 };
     const rows = foldChat([user, thinking, call, agent, extra, final, note, { ...thinking, id: 't2' }]);
-    expect(rows.map(row => row.kind)).toEqual(['user', 'steps', 'agent', 'agent', 'note', 'steps']);
-    expect(rows[1]).toMatchObject({ steps: [thinking, call, extra], from: 100, to: 4000 });
+    expect(rows.map(row => row.kind)).toEqual(['user', 'steps', 'agent', 'steps', 'agent', 'note', 'steps']);
+    expect(rows[1]).toMatchObject({ steps: [thinking, call], from: 100, to: 2000 });
+    expect(rows[3]).toMatchObject({ steps: [extra], from: 2000, to: 4000 });
+  });
+  it('counts consecutive steps that read the same into one line, and never folds a failure into successes', () => {
+    const think = (id: string) => ({ kind: 'thinking', id, at: 1 } as const);
+    const run = (id: string, ok: boolean | null, summary = 'bun test', name = 'bash') =>
+      ({ kind: 'tool', id, at: 2, name, summary, ok } as const);
+    const lines = stepLines([think('t1'), think('t2'), run('a', true), run('b', true), run('c', false),
+      run('d', null), run('e', true), run('f', true, 'file.ts', 'read'), run('g', true, 'file.ts', 'edit')]);
+    expect(lines.map(({ step, count }) => [step.id, count])).toEqual([
+      ['t1', 2], ['a', 2], ['c', 1], ['d', 1], ['e', 1], ['f', 1], ['g', 1],
+    ]);
   });
 });

@@ -30,14 +30,18 @@ body {
 .calm p { margin: 0; }
 /* Keys read the same wherever a shortcut is shown: a canvas key on a hairline, mono 11px. */
 :is(.decision__option, .shell-search) kbd { border-radius: 6px; color: var(--ghost-ink2); background: var(--ghost-canvas); box-shadow: 0 0 0 1px var(--ghost-line-strong); font: 500 var(--text-micro)/1 var(--font-mono); }
-/* Disclosures fold with the same chevron as the tool trail, not the browser's triangle. */
-:is(.verdict details, .timeline__result, .decision__request-more) > summary { display: inline-flex; align-items: center; gap: 6px; list-style: none; }
-:is(.verdict details, .timeline__result, .decision__request-more) > summary::-webkit-details-marker { display: none; }
-:is(.verdict details, .timeline__result, .decision__request-more) > summary::before {
-  content: ''; width: 5px; height: 5px; margin: 0 1px 0 2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg); transition: transform var(--duration-base) var(--ease-enter);
+/* Native disclosures keep their keyboard/AT behavior. The visible mark is + or −, never a triangle. */
+details > summary { list-style: none; cursor: pointer; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before, .fold-mark {
+  content: ''; display: inline-block; flex: none; width: 12px; height: 12px; vertical-align: -.04em;
+  background: linear-gradient(currentColor, currentColor) center / 10px 1.5px no-repeat,
+              linear-gradient(currentColor, currentColor) center / 1.5px var(--fold-stem, 10px) no-repeat;
 }
-:is(.verdict details, .timeline__result, .decision__request-more)[open] > summary::before { transform: rotate(45deg); }
+details > summary::before { margin-inline-end: .35em; }
+details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-stem: 0px; }
+@media (forced-colors: active) { details > summary::before, .fold-mark { color: ButtonText; forced-color-adjust: none; } }
+:is(.verdict details, .timeline__result, .decision__request-more) > summary { display: inline-flex; align-items: center; }
 /* Small icon buttons keep their drawn size; under a finger the hit area grows to 44px. */
 @media (pointer: coarse) {
   :is(.title-nav__step, .shell-icon-button, .deck__nav button, .sidebar-group-action, .sidebar-pool-toggle) { position: relative; }
@@ -180,9 +184,6 @@ body {
 .decision__summary { min-width: 0; color: var(--ghost-ink); font-size: var(--text-body); line-height: 1.6; overflow-wrap: anywhere; }
 .decision__full { min-width: 0; }
 .decision__full > summary { display: inline-flex; min-height: 36px; align-items: center; gap: 6px; color: var(--ghost-ink2); font-size: var(--text-ui); list-style: none; cursor: pointer; }
-.decision__full > summary::-webkit-details-marker { display: none; }
-.decision__full > summary > svg { flex: none; transition: transform var(--duration-fast) var(--ease-enter); }
-.decision__full[open] > summary > svg { transform: rotate(180deg); }
 .decision__full > summary:hover { color: var(--ghost-ink); }
 .decision__full-count { color: var(--ghost-ink3); font-size: var(--text-caption); }
 .decision__full-count::before { content: '·'; margin-right: 6px; }
@@ -403,9 +404,6 @@ body {
 .queue-batch__actions { display: flex; justify-content: flex-end; gap: 8px; }
 .queue-fold { display: grid; gap: 8px; }
 .queue-fold > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; }
-.queue-fold > summary::-webkit-details-marker { display: none; }
-.queue-fold > summary svg { width: 15px; height: 15px; color: var(--ghost-ink3); transition: transform var(--duration-base) var(--ease-enter); }
-.queue-fold[open] > summary svg { transform: rotate(180deg); }
 .feed__dot { position: absolute; top: 18px; left: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--ghost-signal); }
 .feed li:not([data-unread]) .feed__title { color: var(--ghost-ink2); font-weight: 500; }
 @media (max-width: 34rem) { .feed__meta > span { display: none; } }
@@ -447,7 +445,6 @@ body {
 .reasoning__summary { display: inline-flex; max-width: 100%; min-width: 0; align-items: center; gap: 8px; padding: 3px 10px 3px 6px; margin-left: -6px; border-radius: var(--radius-pill); list-style: none; cursor: pointer; }
 .reasoning__summary::-webkit-details-marker { display: none; }
 .reasoning__summary:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
-.reasoning[open] .trail__chevron { transform: rotate(90deg); }
 .reasoning__label { flex: none; font-weight: 500; }
 .reasoning[data-live] .reasoning__label { background: linear-gradient(90deg, var(--ghost-ink3), var(--ghost-ink), var(--ghost-ink3)); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer-text 1.8s linear infinite; }
 .reasoning__now { overflow: hidden; color: var(--ghost-ink2); text-overflow: ellipsis; white-space: nowrap; }
@@ -507,8 +504,6 @@ details.transcript-event > summary:focus-visible { outline: 2px solid var(--ghos
 details.transcript-event[open] { background: var(--ghost-hover); }
 .transcript-event__kind { flex: none; color: var(--ghost-ink3); font-weight: 600; }
 .transcript-event__text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.transcript-event__chevron { flex: none; align-self: center; width: 13px; height: 13px; color: var(--ghost-ink3); opacity: .7; transition: transform var(--duration-base) var(--ease-enter); }
-details.transcript-event[open] .transcript-event__chevron { transform: rotate(90deg); }
 .transcript-event__detail { max-height: 280px; margin: 0 10px; padding: 8px 0 10px; overflow: auto; border-top: 1px solid var(--ghost-line); color: var(--ghost-ink3); white-space: pre-wrap; overflow-wrap: anywhere; animation: fade-in var(--duration-base) var(--ease-enter); }
 
 /* A thread opens beside the conversation on wide sheets and over it on narrow ones. */
@@ -551,8 +546,6 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .trail__summary { display: inline-flex; max-width: calc(100% + 6px); min-width: 0; align-items: center; gap: 8px; margin-left: -6px; padding: 4px 10px 4px 6px; border-radius: var(--radius-pill); list-style: none; cursor: pointer; transition: background-color var(--duration-fast) ease; }
 .trail__summary::-webkit-details-marker { display: none; }
 .trail__summary:hover { background: var(--ghost-hover); }
-.trail__chevron { width: 14px; height: 14px; flex: none; color: var(--ghost-ink3); transition: transform var(--duration-base) var(--ease-enter); }
-.trail[open] .trail__chevron { transform: rotate(90deg); }
 /* Opened disclosures unfold their content instead of snapping in. */
 .trail[open] > .trail__steps, .reasoning[open]:not([data-live]) > .reasoning__body { animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .trail__count { min-width: 0; overflow: hidden; color: var(--ghost-ink2); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
@@ -637,8 +630,6 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .work-bar__toggle { display: inline-flex; min-height: 28px; align-items: center; gap: 4px; padding: 4px 9px 4px 5px; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink2); background: none; font: 500 var(--text-caption)/1.3 var(--font-sans); cursor: pointer; }
 .work-bar__actions > .work-bar__toggle:first-child { margin-left: -5px; }
 .work-bar__toggle:hover, .work-bar__toggle[aria-expanded="true"] { color: var(--ghost-ink); background: var(--ghost-hover); }
-.work-bar__toggle > svg { width: 14px; height: 14px; flex: none; color: var(--ghost-ink3); transition: transform var(--duration-base) var(--ease-enter); }
-.work-bar__toggle[aria-expanded="true"] > svg { transform: rotate(90deg); }
 .work-bar :is(.work-bar__pending, .work-bar__toggle):focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
 .work-bar__panel { min-width: 0; animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .work-pending:focus:not(:focus-visible) { outline: none; }
@@ -660,8 +651,6 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .work-aside__empty { margin: 0; color: var(--ghost-ink3); font-size: var(--text-caption); }
 .work-disclosure { display: inline-flex; width: fit-content; align-items: center; gap: 6px; margin-left: -6px; padding: 4px 8px 4px 6px; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink3); background: none; cursor: pointer; }
 .work-disclosure:hover { background: var(--ghost-hover); }
-.work-disclosure > svg { transition: transform var(--duration-base) var(--ease-enter); }
-.work-disclosure[aria-expanded="true"] > svg { transform: rotate(90deg); }
 /* min-width 0 keeps a wide row from widening the section's grid track; clip keeps any stray overflow inside the card. */
 .work-transcript { min-width: 0; max-width: var(--ghost-layout-document-max); overflow-x: clip; padding: 20px; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
 /* A work conversation (page and thread panel) reads as a record: the owner's turns hang on a rule at the left
@@ -673,12 +662,9 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 /* On a phone 위임 and 실행 기록 fold to their title line under the work. */
 .work-fold { display: block; }
 .work-fold > summary { display: flex; width: fit-content; align-items: center; gap: 6px; list-style: none; cursor: pointer; }
-.work-fold > summary::-webkit-details-marker { display: none; }
-.work-fold > summary::before { content: ''; width: 5px; height: 5px; margin: 0 2px; border-right: 1.5px solid var(--ghost-ink3); border-bottom: 1.5px solid var(--ghost-ink3); transform: rotate(-45deg); transition: transform var(--duration-base) var(--ease-enter); }
-.work-fold[open] > summary::before { transform: rotate(45deg); }
 .work-fold[open] > summary { margin-bottom: 12px; }
 .work-fold > summary:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; border-radius: var(--radius-chip); }
-@media (prefers-reduced-motion: reduce) { .work-bar__toggle > svg, .work-fold > summary::before { transition: none; } .work-bar__panel { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .work-bar__panel { animation: none; } }
 
 .verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-bottom: 12px; border-bottom: 1px dashed var(--ghost-line-strong); font-size: var(--text-caption); }
 .verdict strong { font-size: var(--text-ui); font-weight: 650; }

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { CompactTitleSlot } from '../components/AppFrame';
 import { ArrowRight, CircleAlert, GitBranch, Monitor, X } from 'lucide-react';
 import { Button, Conversation, Popover, PopoverContent, PopoverTrigger, Row } from '../ui'
 import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
@@ -25,7 +27,7 @@ import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { useHost } from '../host/context';
 import type { BrowserSession } from '../host/client';
-import { useTouch } from '../ui/adaptive';
+import { useCompact, useTouch } from '../ui/adaptive';
 import { recoverMessage, type RecoveredMessage } from './composerRecovery';
 
 /** How often the conversation re-checks whether the Ghost's browser session is still there. */
@@ -82,6 +84,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
 }) {
   const { client } = useHost();
   const touch = useTouch();
+  const compact = useCompact();
+  const titleSlot = useContext(CompactTitleSlot);
   const now = useNow();
   const conversations = state.conversations
     .filter(conversation => conversation.ghostId === ghost.id && conversation.kind === 'direct')
@@ -151,10 +155,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         onOpen={() => openThread(work.id)} onOpenPage={() => openWork(work.id)}/> };
     }) : [];
 
-  return <OpenWorkProvider value={openThread}><div className="chat-layout" data-thread={threadId ? '' : undefined}>
-    <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
-      scrollKey={`${page.messages.length}:${outbox.rows.length}:${live?.running ? 1 : 0}:${live?.partial ? 1 : 0}`} followKey={followKey}
-      overlay={<>
+  const tools = <>
         <div className="chat-float">
           <GhostProfile ghostID={ghost.id} name={ghost.name} summary={profileSummary(ghost.persona)} presence={ghostPresence(ghost, state).state}
             activity={{ model: projectGhostActivity(ghost, state), onInspectWork: openWork, onCancelTurn: () => stop() }}
@@ -174,7 +175,13 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
             onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
         </div>
         <GhostAgenda ghost={ghost} state={state} navigate={navigate}/>
-      </>}
+      </>;
+  return <OpenWorkProvider value={openThread}><div className="chat-layout" data-thread={threadId ? '' : undefined}>
+    {compact && titleSlot && createPortal(tools, titleSlot)}
+    <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
+      scrollKey={`${page.messages.length}:${outbox.rows.length}:${live?.running ? 1 : 0}:${live?.partial ? 1 : 0}`} followKey={followKey}
+      overlay={compact ? null : tools}
+      header={compact && !titleSlot ? <div className="chat-title-tools">{tools}</div> : null}
       composer={<>
         <BrowserPaneContext.Provider value={conversationId ? { conversationId, open: () => setBrowserOpen(true) } : null}>
           <ChatDecisions state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread}/>

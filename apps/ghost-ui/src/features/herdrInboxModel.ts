@@ -81,7 +81,22 @@ type Step = Extract<HerdrChatItem, { kind: 'thinking' | 'tool' }>;
 type Message = Exclude<HerdrChatItem, Step>;
 export type ChatRow = Message | { id: string; kind: 'steps'; steps: Step[]; from: number | null; to: number | null };
 
-/** One fold for the tools/thought across a run, at the first step, even if chat arrives between steps. */
+/** Repeated observations can share a line, but not across tool, result or message boundaries. */
+type StepLine = { step: Step; count: number };
+
+export function stepLines(steps: readonly Step[]): StepLine[] {
+  const lines: StepLine[] = [];
+  for (const step of steps) {
+    const last = lines.at(-1);
+    const prev = last?.step;
+    if (last && prev && (step.kind === 'thinking' ? prev.kind === 'thinking'
+      : prev.kind === 'tool' && prev.name === step.name && prev.summary === step.summary && prev.ok === step.ok)) last.count++;
+    else lines.push({ step, count: 1 });
+  }
+  return lines;
+}
+
+/** Fold only adjacent steps, leaving speech and dividers where they actually occurred. */
 export function foldChat(items: readonly HerdrChatItem[]): ChatRow[] {
   const rows: ChatRow[] = [];
   let start: number | null = null;
@@ -101,6 +116,7 @@ export function foldChat(items: readonly HerdrChatItem[]): ChatRow[] {
         break;
       case 'agent':
         if (fold && item.at != null) fold.to = item.at;
+        fold = null; start = item.at;
         rows.push(item);
         break;
     }

@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { followingTerminalTop, isHistoryPageKey, OBSERVED_TERMINAL_ROWS, terminalDragOffset, terminalHistoryBoundary,
-  terminalUsedRows, terminalWheelOffset } from './herdrTerminalScroll';
+  terminalObserverCols, terminalUsedRows, terminalWheelOffset } from './herdrTerminalScroll';
 
 describe('terminal scroll intent', () => {
+  it('sizes the observer grid to the phone viewport and clamps it to the protocol range', () => {
+    expect(terminalObserverCols(358, 8.1)).toBe(44);
+    expect(terminalObserverCols(358, 4.2)).toBe(85);
+    expect(terminalObserverCols(100, 40)).toBe(20);  // A huge cell still keeps a readable floor of columns.
+    expect(terminalObserverCols(4000, 4)).toBe(300);
+  });
+
   it('keeps signed wheel displacement and normalizes line and page deltas', () => {
     expect(terminalWheelOffset(3, -184, 0, 16, 480)).toBe(-184);
     expect(terminalWheelOffset(0, -3, 1, 16, 480)).toBe(-48);

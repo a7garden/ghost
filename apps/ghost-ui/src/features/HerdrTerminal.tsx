@@ -7,7 +7,7 @@ import { decodeHerdrFrame } from './herdrTerminalProtocol';
 import { openHerdrXterm } from './herdrXterm';
 import { CodingSkeleton } from './HerdrParts';
 import HerdrHistory, { type HistoryViewport } from './HerdrHistory';
-import { followingTerminalTop, isHistoryPageKey, OBSERVED_TERMINAL_ROWS, terminalDragOffset,
+import { followingTerminalTop, isHistoryPageKey, OBSERVED_TERMINAL_ROWS, terminalDragOffset, terminalObserverCols,
   terminalUsedRows, terminalWheelOffset, type TerminalAnchor } from './herdrTerminalScroll';
 
 type LiveViewport = {
@@ -206,7 +206,7 @@ function ObservedTerminal({ pane, onData, onModifiedKey, onGone, fontSize, contr
     const node = mount.current!;
     const viewport = scrollport.current!;
     const content = clip.current!;
-    const { terminal, fit, dispose } = openHerdrXterm(node, { scrollback: 0, rows: OBSERVED_TERMINAL_ROWS, fontSize: initialSize() });
+    const { terminal, dispose } = openHerdrXterm(node, { scrollback: 0, rows: OBSERVED_TERMINAL_ROWS, fontSize: initialSize() });
     const screen = node.querySelector<HTMLElement>('.xterm-screen')!;
     let usedRows = 1, rowHeight = 0, projectedTop = 0;
     let following = true;
@@ -320,8 +320,13 @@ function ObservedTerminal({ pane, onData, onModifiedKey, onGone, fontSize, contr
       void (async () => {
         try {
           const result = await client.herdrTerminal(pane, width, height, frame => {
-            if (cursor.signal.aborted || frame.width !== width || frame.height !== height || frame.seq <= sequence) return;
+            if (cursor.signal.aborted || frame.seq <= sequence) return;
             if (!painted && !frame.full) return;
+            // An inherently 2D TUI keeps its own width: adopt the server's grid and let the viewport pan sideways.
+            if (frame.width !== terminal.cols || frame.height !== terminal.rows) {
+              if (!frame.full) return;
+              terminal.resize(frame.width, frame.height);
+            }
             const first = !painted;
             painted = true;
             sequence = frame.seq;
@@ -359,11 +364,13 @@ function ObservedTerminal({ pane, onData, onModifiedKey, onGone, fontSize, contr
     }
 
     function resize() {
-      if (closed || !viewport.clientWidth || !viewport.clientHeight) return;
-      const size = fit.proposeDimensions();
-      if (!size) return;
+      if (closed || !viewport.clientWidth) return;
+      // Measure the cell from the painted grid, then fit the request to the viewport — the grid itself may
+      // be wider than the viewport when the pane keeps a 2D TUI's own width for sideways panning.
+      const cell = terminal.cols ? screen.getBoundingClientRect().width / terminal.cols : 0;
+      if (!cell) return;
       // The observer is top-anchored. A phone-sized row count would crop the remote prompt away.
-      const width = Math.min(300, Math.max(20, size.cols));
+      const width = terminalObserverCols(viewport.clientWidth, cell);
       if (width === cols) return;
       cols = width;
       terminal.resize(cols, OBSERVED_TERMINAL_ROWS);

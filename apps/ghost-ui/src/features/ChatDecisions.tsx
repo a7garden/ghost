@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { ChevronDown, CircleAlert } from 'lucide-react';
+import { CircleAlert } from 'lucide-react';
 import type { Decision, State } from '@ghost/contract';
 import { deadlineText, DecisionDeck } from './Decision';
 import { decisionHeading } from './decisionText';
@@ -49,7 +49,7 @@ export function ChatDecisions({ state, navigate, decisions, onOpenWork }: {
       <span className="chat-decisions__count">{summary.count}</span>
       <span className="chat-decisions__lead">{summary.lead}</span>
       {summary.due && <span className="chat-decisions__due">{summary.due}</span>}
-      <ChevronDown size={16} aria-hidden="true" className="chat-decisions__chevron"/>
+      <span aria-hidden="true" className="fold-mark"/>
     </button>}
     <div className="chat-decisions__body" id={bodyId} hidden={!open}>{disclosure !== 'unopened' && deck}</div>
   </div>;

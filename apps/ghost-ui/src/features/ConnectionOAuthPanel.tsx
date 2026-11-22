@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, ChevronDown } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import type { ConnectionOAuthView, Ghost } from '@ghost/contract';
 import { Button, Checkbox, FormField, InlineError, Input } from '../ui';
 import { ExternalAnchor } from '../components/ExternalAnchor';
@@ -57,7 +57,7 @@ export function ConnectionOAuthPanel({ service, ghosts, onConnected }: {
   return <section className="flex flex-col gap-4" aria-label={`${service.name} 로그인`}>
     {view && !view.configured && <p className="m-0 text-caption text-ink-2">처음 한 번은 {service.name} OAuth 앱을 등록해야 합니다. 위의 Ghost 연결 도움을 이용하거나 앱 정보를 직접 입력할 수 있습니다.</p>}
     {view && <>
-      <button type="button" className="connection-advanced" aria-expanded={configure || !view.configured} disabled={busy || pending} onClick={() => setConfigure(!configure)}>OAuth 앱 설정<ChevronDown size={14}/></button>
+      <button type="button" className="connection-advanced" aria-expanded={configure || !view.configured} disabled={busy || pending} onClick={() => setConfigure(!configure)}>OAuth 앱 설정<span aria-hidden="true" className="fold-mark"/></button>
       {(configure || !view.configured) && <div className="flex flex-col gap-4">
         <FormField label="리디렉션 주소" description="서비스의 OAuth 앱에 이 주소를 그대로 등록합니다.">{control => <Input {...control} value={view.redirectUri} readOnly/>}</FormField>
         <FormField label="클라이언트 ID">{control => <Input {...control} value={clientId} disabled={busy || pending} maxLength={2048} onChange={event => setClientId(event.target.value)}/>}</FormField>

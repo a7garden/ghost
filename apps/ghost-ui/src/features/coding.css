@@ -100,11 +100,11 @@
   .herdr-view-actions, .herdr-pane-tools { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .herdr-view-actions { justify-content: space-between; }
   .herdr-pane-tools { flex: none; }
-  .herdr-fit-action { white-space: nowrap; color: var(--ghost-ink2); }
-  .herdr-fit-action svg { width: 14px; height: 14px; }
-  [data-slot='dialog-content'].herdr-fit-confirm { max-width: min(23rem, calc(100% - 24px)); gap: 10px; }
-  .herdr-fit-confirm p { margin: 0; color: var(--ghost-ink2); }
-  .herdr-fit-confirm-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+  .herdr-control-action { white-space: nowrap; color: var(--ghost-ink2); }
+  .herdr-control-action[aria-pressed='true'], .herdr-control-action:active { color: var(--ghost-ink); }
+  .herdr-control-action svg { width: 14px; height: 14px; }
+  [data-slot='dialog-content'].herdr-takeover-confirm { max-width: min(23rem, calc(100% - 24px)); gap: 10px; }
+  .herdr-takeover-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
   .coding-context { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; color: var(--ghost-ink3); font-size: var(--text-caption); }
   /* The 맡긴 일 link sits in the caption-size context line, so it takes the line's height, not link-quiet's roomier default. */
   .coding-context .coding-work-link { min-height: 0; padding: 1px 7px; margin-left: 2px; }
@@ -141,7 +141,7 @@
 
   .herdr-conversation { position: relative; flex: 1; min-height: 0; min-width: 0; }
   .herdr-chat-scroll { height: 100%; overflow-y: auto; overscroll-behavior: contain; }
-  .herdr-chat-body { display: grid; gap: 19px; max-width: 47rem; margin-inline: auto; padding: 20px 24px 24px; }
+  .herdr-chat-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 19px; max-width: 47rem; margin-inline: auto; padding: 20px 24px 24px; }
   .herdr-chat-user, .herdr-chat-agent { max-width: min(100%, 43rem); overflow-wrap: anywhere; min-width: 0; line-height: 1.6; }
   .herdr-chat-user { justify-self: end; max-width: 84%; padding: 10px 14px; border-radius: 15px 15px 4px 15px;
     background: var(--ghost-signal-tint); color: var(--ghost-ink); font-size: var(--text-body); white-space: pre-wrap; }
@@ -150,13 +150,14 @@
   .herdr-chat-agent .message-body > :first-child { margin-top: 0; }
   .herdr-chat-agent .message-body > :last-child { margin-bottom: 0; }
   .herdr-chat-steps { color: var(--ghost-ink3); font-size: var(--text-caption); }
-  .herdr-chat-steps summary { display: flex; align-items: center; gap: 4px; width: fit-content; padding-block: 5px; cursor: pointer; }
-  .herdr-chat-steps summary::-webkit-details-marker { display: none; }
-  .herdr-chat-steps[open] summary svg { transform: rotate(90deg); }
+  .herdr-chat-steps summary { display: flex; align-items: center; width: fit-content; padding-block: 5px; cursor: pointer; }
+  .herdr-chat-steps-failed { color: var(--ghost-danger-ink); }
+  .herdr-chat-steps li em { margin-left: 5px; font-style: normal; opacity: .7; }
   .herdr-chat-steps ul { margin: 0 0 0 7px; padding: 2px 0 2px 10px; border-inline-start: 1px solid var(--ghost-line-strong); list-style: none; }
   .herdr-chat-steps li { display: flex; align-items: center; gap: 7px; padding: 4px 0; }
   .herdr-chat-steps li svg { flex: none; }
-  .herdr-chat-steps li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .herdr-chat-steps li > span { min-width: 0; overflow-wrap: anywhere; }
+  .herdr-chat-steps li small { font: 550 var(--text-micro)/1.4 var(--font-mono); color: var(--ghost-ink2); }
   .herdr-chat-steps li[data-failed] { color: var(--ghost-danger-ink); }
   .herdr-chat-note { display: flex; align-items: center; gap: 10px; color: var(--ghost-ink3); text-align: center; font-size: var(--text-caption); }
   .herdr-chat-note::before, .herdr-chat-note::after { content: ''; flex: 1 0 12px; height: 1px; background: var(--ghost-line); }
@@ -179,8 +180,10 @@
   .herdr-xterm > .xterm { height: 100%; }
   .herdr-xterm:focus-within { outline: 1px solid var(--ghost-line-strong); outline-offset: 3px; }
   .herdr-control .herdr-xterm { touch-action: none; }
-  .herdr-live-viewport { height: 100%; overflow: hidden auto; overflow-anchor: none; overscroll-behavior: contain; scrollbar-width: none; }
-  .herdr-live-clip { height: 0; overflow: clip; }
+  /* The watch view pans sideways when an inherently 2D TUI keeps a grid wider than the phone. */
+  .herdr-live-viewport { height: 100%; overflow: auto; overflow-anchor: none; overscroll-behavior: contain; scrollbar-width: none; }
+  .herdr-live-clip { height: 0; width: max-content; min-width: 100%; overflow: visible clip; }
+  .herdr-live-clip .herdr-xterm { width: max-content; overflow: visible; }
   .herdr-live-status {
     position: absolute; top: 8px; inset-inline-end: 16px; max-width: calc(100% - 32px); pointer-events: none; overflow-wrap: anywhere;
     padding: 6px 10px; border-radius: var(--radius-control); background: var(--ghost-surface); color: var(--ghost-ink2); font-size: var(--text-caption);
@@ -200,11 +203,22 @@
   .coding-compose textarea:focus { box-shadow: none; }
   .coding-compose:focus-within { box-shadow: inset 0 0 0 1px var(--ghost-ink3); }
   .coding-compose button { flex: none; min-height: 40px; min-width: 40px; border-radius: 12px; }
-  .herdr-keypad { display: flex; min-width: 0; align-items: center; gap: 7px; margin-bottom: 8px; }
-  .herdr-keys { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; padding: 2px; overscroll-behavior-inline: contain; }
-  .herdr-keys button { flex: none; min-width: 36px; font-family: var(--font-mono, ui-monospace, monospace); }
-  .herdr-keys button[aria-pressed='true'] { background: var(--ghost-signal-tint); color: var(--ghost-signal-ink); }
-  .herdr-keyboard-dismiss { border-inline-start: 1px solid var(--ghost-line); }
+  .herdr-keypad { display: flex; min-width: 0; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .herdr-keys { display: flex; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: none; }
+  .herdr-keys-group { display: flex; flex: none; gap: 4px; padding: 4px; border-radius: 12px; background: var(--ghost-inset); box-shadow: var(--shadow-inset-field); }
+  .herdr-key {
+    display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 38px; min-height: 36px;
+    padding: 0 9px; border: 1px solid var(--ghost-line); border-radius: 9px; background: var(--ghost-surface);
+    color: var(--ghost-ink); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-caption); cursor: pointer;
+  }
+  .herdr-key:hover { background: var(--ghost-hover); }
+  .herdr-key:active { background: var(--ghost-hover); box-shadow: inset 0 1px 2px rgb(0 0 0 / 14%); transform: translateY(1px); }
+  .herdr-key:focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: 1px; }
+  .herdr-key[aria-pressed='true'] {
+    background: var(--ghost-signal-tint); color: var(--ghost-signal-ink); border-color: color-mix(in srgb, var(--ghost-signal) 45%, transparent);
+  }
+  .herdr-keyboard-dismiss { border-inline-start: 1px solid var(--ghost-line); color: var(--ghost-ink2); }
+  .herdr-keyboard-dismiss svg { width: 16px; height: 16px; }
   .herdr-type-menu { width: max-content; display: flex; align-items: center; gap: 6px; padding: 4px; }
   .herdr-type-menu output { min-width: 36px; text-align: center; font-size: var(--text-caption); color: var(--ghost-ink3); }
 
@@ -313,14 +327,14 @@
   .coding-page[data-compact] .herdr-inbox { padding: 5px 4px 12px; }
   .coding-page[data-compact] .herdr-agent-link { min-height: 63px; }
   .coding-page[data-compact] .herdr-chat-body { padding: 14px 16px 18px; gap: 16px; }
-  .coding-page[data-compact] .herdr-chat-steps summary { min-height: 36px; }
+  .coding-page[data-compact] .herdr-chat-steps summary { min-height: 44px; }
   .coding-page[data-compact] .herdr-chat-latest { inset-inline-end: 16px; }
   .coding-page[data-compact] .coding-compose textarea { font-size: 16px; }
   .coding-page[data-compact] .herdr-view-actions [data-slot='segmented-control-item'] { min-height: 44px; }
   .coding-page[data-compact] .herdr-live { padding: 8px 16px; }
   .coding-page[data-compact] .herdr-pane-row a { min-height: 44px; align-content: center; }
   .coding-page[data-compact] .coding-pane-setup { padding: 12px 16px; }
-  .coding-page[data-compact] .herdr-keys button { min-width: 44px; }
+  .coding-page[data-compact] .herdr-key { min-width: 44px; min-height: 44px; }
   .coding-page[data-compact] .herdr-terminal-latest { inset-inline-end: 16px; width: 44px; height: 44px; }
   .coding-page[data-compact] .herdr-changes-head { padding-inline: 16px; }
   .coding-page[data-compact] .herdr-change-work { grid-template-columns: minmax(0, 1fr); }

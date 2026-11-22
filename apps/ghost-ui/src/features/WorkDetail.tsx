@@ -249,7 +249,7 @@ export function WorkHeader({ work, ancestors, glyph, pending, criteria, ghostNam
       </div>
       {(criteria || verbs) && <div className="work-bar__actions">
         {criteria && <button type="button" className="work-bar__toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>
-          <ChevronRight aria-hidden="true"/>완료 기준
+          <span aria-hidden="true" className="fold-mark"/>완료 기준
         </button>}
         {verbs && <span className="work-bar__verbs">
           {onEdit && <Button variant="outline" onClick={onEdit}><Pencil/>수정</Button>}
@@ -319,7 +319,7 @@ function WorkConversation({ work, ghostName, onEdit }: { work: Work; ghostName: 
   if (!work.conversationId) return null;
   return <section className="work-section" aria-labelledby="work-conversation">
     <button type="button" className="work-disclosure" aria-expanded={open} onClick={() => setOpen(value => !value)}>
-      <ChevronRight size={14} aria-hidden="true"/><h2 id="work-conversation" className="section-title">작업 대화</h2>
+      <span aria-hidden="true" className="fold-mark"/><h2 id="work-conversation" className="section-title">작업 대화</h2>
     </button>
     {open && <WorkTranscript conversationId={work.conversationId} ghostId={work.ghostId} ghostName={ghostName} onEdit={onEdit}/>}
   </section>;

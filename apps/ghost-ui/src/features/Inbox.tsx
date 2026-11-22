@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { CheckCheck, ChevronDown, Undo2 } from 'lucide-react';
+import { CheckCheck, Undo2 } from 'lucide-react';
 import { Badge, Banner, Button, Checkbox, Page, PageHeader, InlineError } from '../ui'
 import type { Decision, Notification, State } from '@ghost/contract';
 import { reviewOf } from '@ghost/contract';
@@ -188,7 +188,7 @@ export function InboxView({ state, navigate, focusDecisionId, codingSession }: {
     </section>}
 
     {notifications.length > 0 && <details className="queue-fold" open={unread.length > 0}>
-      <summary><span className="section-title">소식{unread.length > 0 && <span className="count">새 소식 {unread.length}</span>}</span><ChevronDown aria-hidden="true"/></summary>
+      <summary><span className="section-title">소식{unread.length > 0 && <span className="count">새 소식 {unread.length}</span>}</span></summary>
       {unread.length > 0 && <Button variant="ghost" size="sm" className="justify-self-start" onClick={() => markRead(unreadAll.map(item => item.id))}>모두 읽음 표시</Button>}
       {[...notificationGroups].map(([id, items], _, groups) => <section className="infra-scope-group" key={id ?? 'global'}
         data-lone={groups.length === 1 && id === null || undefined}><h3>{id === null ? '전체' : state.scopes.find(scope => scope.id === id)?.name ?? '삭제된 프로젝트'}</h3><ul className="feed">{items.map(item => {
@@ -201,7 +201,7 @@ export function InboxView({ state, navigate, focusDecisionId, codingSession }: {
     </details>}
 
     {settled.length > 0 && <details className="queue-fold">
-      <summary><span className="section-title">처리한 결정<span className="count">{settled.length}</span></span><ChevronDown aria-hidden="true"/></summary>
+      <summary><span className="section-title">처리한 결정<span className="count">{settled.length}</span></span></summary>
       {groupDecisionsByScope(shownSettled, state).map((group, _, groups) => <section className="infra-scope-group" key={group.id ?? 'global'}
         data-lone={groups.length === 1 && group.id === null || undefined}><h3>{group.name}</h3><ul className="feed" data-quiet>{group.decisions.map(decision => {
         const by = reviewOf(decision.proposal)?.resolvedBy;

@@ -104,10 +104,14 @@ describe('herdr pane', () => {
     expect(markup.match(/<textarea[^>]+>/)?.[0].includes('disabled=""')).toBe(disabled);
   });
 
-  it('provides touch keys and a line composer for plain shells', () => {
+  it('groups the touch keys into one accessory strip that leads with the everyday keys', () => {
     const markup = body('idle', false, true, null);
-    const keys = markup.match(/aria-label="터미널 키">(.*?)<\/div>/)?.[1] ?? '';
+    const keys = markup.slice(markup.indexOf('aria-label="터미널 키"'), markup.indexOf('aria-label="셸 명령"'));
+    for (const group of ['이동', '동작', '조합', '추가 이동']) expect(keys).toContain(`aria-label="${group}"`);
+    expect(keys.indexOf('>←</button>')).toBeLessThan(keys.indexOf('aria-label="중단 (Esc)"'));
+    expect(keys.indexOf('aria-label="중단 (Esc)"')).toBeLessThan(keys.indexOf('aria-label="Home"'));
     for (const label of ['Esc', 'Tab', '↑', '↓', '←', '→', 'Enter', 'Ctrl+C']) expect(keys).toContain(`>${label}</button>`);
+    expect(keys).toContain('class="herdr-key"');
     expect(markup).toContain('aria-label="키보드 닫기"');
     expect(markup).toContain('aria-label="Shift+Tab"');
     expect(markup).toContain('aria-label="셸 명령"');
@@ -136,22 +140,18 @@ it('starts with the chosen agent, multiline task and a branch only when using a 
   const fields = new FormData();
   fields.set('cwd', ' /Projects/ghost ');
   fields.set('task', ' 첫 줄\n둘째 줄 ');
-  fields.set('worktree', 'on');
-  fields.set('branch', ' fix/login ');
-  expect(workspaceInput(fields, 'pi')).toEqual({
-    agent: 'pi', cwd: '/Projects/ghost', task: '첫 줄\n둘째 줄', worktree: true, branch: 'fix/login',
+  expect(workspaceInput(fields, 'pi', { worktree: true, label: ' 새 작업 ', branch: ' fix/login ' })).toEqual({
+    agent: 'pi', cwd: '/Projects/ghost', label: '새 작업', task: '첫 줄\n둘째 줄', worktree: true, branch: 'fix/login',
   });
-  fields.delete('worktree');
-  expect(workspaceInput(fields)).toEqual({
-    cwd: '/Projects/ghost', worktree: false,
+  expect(workspaceInput(fields, undefined, { worktree: false, label: '새 작업', branch: 'fix/login' })).toEqual({
+    cwd: '/Projects/ghost', label: '새 작업', worktree: false,
   });
 });
 
-it('offers every herdr agent kind, with only installed kinds enabled and first', () => {
-  const options = herdrAgentOptions(['claude', 'pi']);
-  expect(options).toHaveLength(24);
-  expect(options.slice(0, 2).map(option => option.value)).toEqual(['claude', 'pi']);
-  expect(options.slice(2).every(option => option.disabled && option.label.endsWith('설치 안 됨'))).toBe(true);
+it('offers only installed herdr agent kinds, labelled, without unavailable fillers', () => {
+  expect(herdrAgentOptions(['claude', 'pi'])).toEqual([
+    { value: 'claude', label: 'Claude Code' }, { value: 'pi', label: 'Pi' },
+  ]);
 });
 
 it('decodes base64 into exact ANSI and UTF-8 bytes, without treating the bytes as Latin-1 text', () => {

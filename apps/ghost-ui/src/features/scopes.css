@@ -99,8 +99,6 @@
   .place-details { display: contents; }
   .place-details__toggle { display: inline-flex; width: fit-content; align-items: center; gap: 6px; min-height: 44px; padding: 4px 8px; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink2); background: none; font: 550 var(--text-ui)/1.2 var(--font-sans); cursor: pointer; }
   .place-details__toggle:hover { background: var(--ghost-hover); }
-  .place-details__toggle > svg { transition: transform var(--duration-base) var(--ease-enter); }
-  .place-details__toggle[aria-expanded="true"] > svg { transform: rotate(90deg); }
   .place-details__panel { grid-column: 1 / -1; display: grid; gap: 12px; justify-items: start; padding: 12px 4px; }
   .place-details__path { display: inline-flex; }
   .place-details__delete { display: grid; gap: 10px; justify-items: start; width: 100%; }

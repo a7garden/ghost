@@ -20,7 +20,7 @@ export type LeasedTerminalControls = HerdrTerminalControls & {
 type Command = HerdrControlCommand extends infer C ? C extends HerdrControlCommand ? Omit<C, 'pane' | 'leaseId'> : never : never;
 type Cell = { column: number; row: number };
 
-export default function HerdrControl({ ref, pane, fit: consent, takeover, fontSize, onReady, onProblem, onModifiedKey, onInput, onError }: {
+export default function HerdrControl({ ref, pane, fit, takeover, fontSize, onReady, onProblem, onModifiedKey, onInput, onError }: {
   ref?: Ref<LeasedTerminalControls>; pane: string; fit: boolean; takeover: boolean; fontSize: number;
   onReady(lease: HerdrControlLease): void; onProblem(reason: Exclude<TerminalProblem, 'retry'> | 'taken' | 'released'): void;
   onModifiedKey(key: string): boolean; onInput(text: string): void; onError(message: string): void;
@@ -49,7 +49,7 @@ export default function HerdrControl({ ref, pane, fit: consent, takeover, fontSi
 
   useEffect(() => {
     const node = mount.current!;
-    const { terminal, fit, dispose } = openHerdrXterm(node, { scrollback: 0, fontSize: initialFont() });
+    const { terminal, fit: measure, dispose } = openHerdrXterm(node, { scrollback: 0, fontSize: initialFont() });
     const screen = node.querySelector<HTMLElement>('.xterm-screen')!;
     const lines = new TerminalScrollLines();
     let position = 0;
@@ -81,7 +81,7 @@ export default function HerdrControl({ ref, pane, fit: consent, takeover, fontSi
       await send(lease, { type: 'resize', ...size });
     }, report);
     function geometry(): TerminalSize | undefined {
-      const size = fit.proposeDimensions();
+      const size = measure.proposeDimensions();
       if (size && node.clientWidth && node.clientHeight) {
         return { cols: Math.min(300, Math.max(20, size.cols)), rows: Math.min(120, Math.max(5, size.rows)) };
       }
@@ -191,7 +191,7 @@ export default function HerdrControl({ ref, pane, fit: consent, takeover, fontSi
       void (async () => {
         let acceptedFrame = false;
         try {
-          const ended = await client.herdrControl({ pane, ...size, fit: consent, takeover: allowTakeover }, next => {
+          const ended = await client.herdrControl({ pane, ...size, fit, takeover: allowTakeover }, next => {
             if (connection.signal.aborted) return;
             lease = next;
             allowTakeover = false;
@@ -365,7 +365,7 @@ export default function HerdrControl({ ref, pane, fit: consent, takeover, fontSi
       changeFont.current = null;
       dispose();
     };
-  }, [client, pane, consent, takeover]);
+  }, [client, pane, fit, takeover]);
   useEffect(() => changeFont.current?.(fontSize), [fontSize]);
 
   return <div className="herdr-live herdr-control" data-scrolled={scrolled || undefined}>

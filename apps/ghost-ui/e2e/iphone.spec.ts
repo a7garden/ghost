@@ -25,6 +25,18 @@ test('open and switch Ghost conversations from the mobile dock', async ({ page }
   await expect(ghosts.first()).toHaveAccessibleName('도우미 메인');
   await list.getByRole('button', { name: '도우미 메인' }).tap();
   await expect(page.getByText('이번 주에 들어온 요청을 정리해서 우선순위를 알려 줘.')).toBeVisible();
+  await page.setViewportSize({ width: 320, height: 690 });
+  const header = page.locator('.ghost-titlebar');
+  await header.getByRole('button', { name: '도우미 프로필 열기' }).tap();
+  await expect(page.getByRole('button', { name: '프로필 닫기' })).toBeVisible();
+  await page.getByRole('button', { name: '프로필 닫기' }).tap();
+  await header.getByRole('button', { name: /^스레드/ }).tap();
+  await expect(page.getByRole('button', { name: '맡긴 일 전체' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  const transcript = page.locator('.ghost-conversation__transcript');
+  const bounds = (await header.boundingBox())!;
+  expect((await transcript.boundingBox())!.y).toBeLessThanOrEqual(bounds.y + bounds.height + 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
   await back.tap();
 
   const search = list.getByRole('searchbox', { name: 'Ghost 찾기' });
@@ -38,7 +50,6 @@ test('open and switch Ghost conversations from the mobile dock', async ({ page }
   await expect(tab).toHaveAttribute('aria-current', 'page');
   await expect(list.getByRole('button', { name: '기록가', exact: true })).toBeVisible();
 
-  await page.setViewportSize({ width: 320, height: 690 });
   const hitWidths = await dock.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().width));
   expect(hitWidths).toHaveLength(4);
   expect(hitWidths.every(width => width >= 44)).toBe(true);

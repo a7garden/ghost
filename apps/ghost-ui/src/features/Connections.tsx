@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, ChevronDown, Globe2, Mail, Pencil, PlugZap, Search, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowUpRight, Globe2, Mail, Pencil, PlugZap, Search, Sparkles, Trash2 } from 'lucide-react';
 import { Button, Checkbox, FormField, InlineError, Input, Switch, Textarea } from '../ui';
 import type { Command, Connection, Ghost } from '@ghost/contract';
 import { useHost } from '../host/context';
@@ -192,7 +192,7 @@ function ConnectionDialog({ existing, service, ghosts, canAssist, onAssist, onCl
           {ghosts.map(ghost => <label key={ghost.id} className="flex items-center gap-2 text-ui"><Checkbox checked={draft.ghostIds.includes(ghost.id)} disabled={saving} onCheckedChange={checked => set({ ghostIds: checked ? [...draft.ghostIds, ghost.id] : draft.ghostIds.filter(id => id !== ghost.id) })}/>{ghost.name}</label>)}
         </fieldset>}
         {api && <fieldset disabled={saving} className="border-0 m-0 p-0"><ReadPaths value={draft.readPaths ?? []} onChange={readPaths => set({ readPaths })}/></fieldset>}
-        <button type="button" className="connection-advanced" aria-expanded={advanced} disabled={saving} onClick={() => setAdvanced(!advanced)}>고급 설정<ChevronDown size={14} className={advanced ? 'rotate-180' : ''}/></button>
+        <button type="button" className="connection-advanced" aria-expanded={advanced} disabled={saving} onClick={() => setAdvanced(!advanced)}>고급 설정<span aria-hidden="true" className="fold-mark"/></button>
         {advanced && <div className="flex flex-col gap-4">
           {mail && <>
             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_100px]">

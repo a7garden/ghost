@@ -55,7 +55,7 @@
   /* The 44px buttons grow their touch target 9px outward; the bar's 8px edge padding would let that last 1px widen the page. */
   .ghost-titlebar { overflow-x: clip; }
   .title-nav__step, .shell-search, .shell-icon-button { width: 44px; height: 44px; }
-  .ghost-titlebar[data-focused-coding] { min-height: calc(48px + env(safe-area-inset-top)); }
+  .ghost-titlebar:is([data-focused-coding], [data-focused-chat]) { min-height: calc(48px + env(safe-area-inset-top)); }
   .ghost-titlebar :is(.title-nav__step, .shell-icon-button)::after { content: none; }
   .title-nav__step:nth-child(2), .title-nav__crumb:not(:last-child) { display: none; }
   .title-nav__step:first-child { display: inline-grid; }
@@ -106,9 +106,16 @@
   .ghost-conversation__dock { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
   &[data-keyboard="open"] .ghost-conversation__dock { padding-bottom: 6px; }
   .ghost-conversation { min-width: 0; }
-  /* Keep the agenda in the top control row so it cannot cover transcript text. */
-  .chat-agenda { top: 6px; right: auto; left: 12px; }
-  .ghost-conversation__transcript-frame[data-overlay]::before { background: linear-gradient(var(--ghost-canvas) 50px, transparent); }
+  .chat-title-tools, .chat-title-tools .chat-corner { display: flex; align-items: center; gap: 0; }
+  .chat-title-tools :is(.chat-float, .chat-corner, .chat-threads) { position: static; transform: none; }
+  .chat-title-tools :is(.profile-trigger, .chat-threads) { width: 44px; height: 44px; padding: 0; background: none; box-shadow: none; backdrop-filter: none; }
+  .chat-title-tools .chat-threads { gap: 2px; }
+  .chat-title-tools .profile-trigger { border-radius: var(--radius-control); }
+  .chat-layout .ghost-conversation__transcript-frame::before { height: 5px; }
+  .chat-layout .ghost-conversation__transcript-content { padding-top: 8px; }
+  .chat-layout .ghost-conversation__header { padding-block: 0; }
+  .chat-empty { padding-top: 16px; }
+  .chat-empty__starters { margin-top: 0; }
   .ghost-conversation__transcript-frame:has(> .ghost-conversation__jump) { flex-direction: column; }
   .ghost-conversation__jump { position: relative; inset: auto; translate: none; flex: none; align-self: center; margin-block: 4px; }
   .thread-panel { position: absolute; inset: 0; width: 100%; max-width: 100%; z-index: 3; }

@@ -1,6 +1,6 @@
 import { haptic } from '../host/shell';
 import { useContext, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, CircleHelp, FileText, Flag, KeyRound,
+import { ArrowRight, ArrowUp, ArrowUpRight, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, CircleHelp, FileText, Flag, KeyRound,
   ListChecks, Lock, Monitor, MousePointerClick, type LucideIcon } from 'lucide-react';
 import { Button, Checkbox, FormField, InlineError, Input } from '../ui'
 import { DESTRUCTIVE_RISK, reviewOf, type ActivityConfig, type Decision, type SecureFormRequest, type State, type VaultItemKind, type WorkResult } from '@ghost/contract';
@@ -297,7 +297,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
     {summary && <div className="decision__summary decision__detail--md"><MessageBody text={summary}/></div>}
     {isResult && hasReport && (summary
       ? <details className="decision__full" open={fullOpen} onToggle={event => { setFullTextOpen(decision.id, event.currentTarget.open); redraw(count => count + 1); }}>
-        <summary><ChevronDown size={14} aria-hidden="true"/>{fullOpen ? '전문 접기' : '전문 보기'}
+        <summary>{fullOpen ? '전문 접기' : '전문 보기'}
           {artifacts.length > 0 && <span className="decision__full-count">결과 자료 {artifacts.length}</span>}</summary>
         <ResultReport text={reportText} artifacts={artifacts} criteria={criteria}/>
       </details>

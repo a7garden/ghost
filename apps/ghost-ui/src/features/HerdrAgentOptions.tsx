@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import { ChevronsUpDown } from 'lucide-react';
 import type { HerdrAgentKind, OmpInfo } from '@ghost/contract';
 import { useHost } from '../host/context';
@@ -57,46 +57,60 @@ export function useAgentLaunch(kind: HerdrAgentKind | undefined, directory: stri
     rememberOmpOptions({ ...omp, conversation, session: conversation === 'pick' ? omp.session : '', directory: cwd });
   }
 
-  const disclosure = kind === 'omp' || kind === 'claude' ? <details className="herdr-agent-options" open={expanded}
-    onToggle={event => setExpanded(event.currentTarget.open)}>
-    <summary>옵션{kind === 'omp' && yolo && <span className="text-danger-ink"> · 승인 없이 실행</span>}</summary>
-    {expanded && <div className="herdr-agent-option-fields">
-      <label className="herdr-agent-check"><input type="checkbox" disabled={!continueAllowed}
-        checked={continueAllowed && (kind === 'claude' ? claudeContinue : conversation === 'continue')}
-        onChange={event => {
-          const checked = event.currentTarget.checked;
-          if (kind === 'claude') setClaudeContinue(checked);
-          else setOmp({ ...omp, conversation: checked ? 'continue' : 'new', session: '', directory: cwd });
-        }}/>이어서 하기{!continueAllowed && <small>기존 디렉터리에서만 가능</small>}</label>
-      {kind === 'omp' && <>
-        <FormField label="대화 고르기">{({ id }) => <SelectField id={id} label="대화 고르기" className="w-full"
-          value={conversation === 'pick' ? `session:${omp.session}` : 'none'}
-          options={[{ value: 'none', label: '선택 안 함' }, ...(conversation === 'pick' && !info?.sessions.some(session => session.id === omp.session)
-            ? [{ value: `session:${omp.session}`, label: '이전 선택을 사용할 수 없음', disabled: true }] : []),
-          ...(cwd.startsWith('/') ? info?.sessions.map(session => ({ value: `session:${session.id}`, label: session.title || session.id })) ?? [] : [])]}
-          onValueChange={value => setOmp({ ...omp, directory: cwd, conversation: value === 'none' ? 'new' : 'pick', session: value === 'none' ? '' : value.slice(8) })}/>}</FormField>
-        <OmpModelPicker models={info?.models ?? []} value={omp.model} loading={isLoading}
-          onChange={model => setOmp({ ...omp, model, thinking: '' })}/>
-        {levels.length > 0 && <FormField label="생각 수준">{({ id }) => <SelectField id={id} label="생각 수준" className="w-full"
-          value={levels.includes(omp.thinking) ? omp.thinking : 'default'}
-          options={[{ value: 'default', label: '기본값' }, ...levels.map(level => ({ value: level, label: level }))]}
-          onValueChange={thinking => setOmp({ ...omp, thinking: thinking === 'default' ? '' : thinking })}/>}</FormField>}
-        <FormField label="승인 방식">{({ id }) => <SelectField id={id} label="승인 방식" className="w-full" value={omp.approval || 'default'}
-          options={[{ value: 'default', label: 'omp 기본값' }, { value: 'always-ask', label: '항상 묻기' }, { value: 'write', label: '쓰기 허용' }, { value: 'yolo', label: '승인 없이 실행 (위험)' }]}
-          onValueChange={value => {
-            setOmp({ ...omp, approval: approvals.find(item => item === value) ?? '' });
-            setConfirmed(false);
-            setConfirmationNeeded(value === 'yolo');
-          }}/>}</FormField>
-        {yolo && (confirmed ? <span role="status">이번 실행에 한해 승인 없이 실행</span> : <Button type="button" variant="outline"
-          className="herdr-yolo-confirm" autoFocus={confirmationNeeded} onClick={() => { setConfirmed(true); setConfirmationNeeded(false); }}>이번 실행은 승인 없이 진행</Button>)}
-        {isLoading && <p role="status" className="coding-hint">omp 옵션을 불러오는 중…</p>}
-        {current?.error && <InlineError onRetry={() => { setLookup(undefined); setRevision(value => value + 1); }} retryLabel="다시 불러오기">{current.error}</InlineError>}
-        {unavailable && <InlineError>이전 대화나 모델을 사용할 수 없습니다. 다시 선택하세요.</InlineError>}
-      </>}
-    </div>}
-  </details> : null;
-  return { disclosure, prepare, remember };
+  const fields = kind === 'omp' || kind === 'claude' ? <>
+    <label className="herdr-agent-check"><input type="checkbox" disabled={!continueAllowed}
+      checked={continueAllowed && (kind === 'claude' ? claudeContinue : conversation === 'continue')}
+      onChange={event => {
+        const checked = event.currentTarget.checked;
+        if (kind === 'claude') setClaudeContinue(checked);
+        else setOmp({ ...omp, conversation: checked ? 'continue' : 'new', session: '', directory: cwd });
+      }}/>이어서 하기{!continueAllowed && <small>기존 디렉터리에서만 가능</small>}</label>
+    {kind === 'omp' && <>
+      <FormField label="대화 고르기">{({ id }) => <SelectField id={id} label="대화 고르기" className="w-full"
+        value={conversation === 'pick' ? `session:${omp.session}` : 'none'}
+        options={[{ value: 'none', label: '선택 안 함' }, ...(conversation === 'pick' && !info?.sessions.some(session => session.id === omp.session)
+          ? [{ value: `session:${omp.session}`, label: '이전 선택을 사용할 수 없음', disabled: true }] : []),
+        ...(cwd.startsWith('/') ? info?.sessions.map(session => ({ value: `session:${session.id}`, label: session.title || session.id })) ?? [] : [])]}
+        onValueChange={value => setOmp({ ...omp, directory: cwd, conversation: value === 'none' ? 'new' : 'pick', session: value === 'none' ? '' : value.slice(8) })}/>}</FormField>
+      <OmpModelPicker models={info?.models ?? []} value={omp.model} loading={isLoading}
+        onChange={model => setOmp({ ...omp, model, thinking: '' })}/>
+      {levels.length > 0 && <FormField label="생각 수준">{({ id }) => <SelectField id={id} label="생각 수준" className="w-full"
+        value={levels.includes(omp.thinking) ? omp.thinking : 'default'}
+        options={[{ value: 'default', label: '기본값' }, ...levels.map(level => ({ value: level, label: level }))]}
+        onValueChange={thinking => setOmp({ ...omp, thinking: thinking === 'default' ? '' : thinking })}/>}</FormField>}
+      <FormField label="승인 방식">{({ id }) => <SelectField id={id} label="승인 방식" className="w-full" value={omp.approval || 'default'}
+        options={[{ value: 'default', label: 'omp 기본값' }, { value: 'always-ask', label: '항상 묻기' }, { value: 'write', label: '쓰기 허용' }, { value: 'yolo', label: '승인 없이 실행 (위험)' }]}
+        onValueChange={value => {
+          setOmp({ ...omp, approval: approvals.find(item => item === value) ?? '' });
+          setConfirmed(false);
+          setConfirmationNeeded(value === 'yolo');
+        }}/>}</FormField>
+      {yolo && (confirmed ? <span role="status">이번 실행에 한해 승인 없이 실행</span> : <Button type="button" variant="outline"
+        className="herdr-yolo-confirm" autoFocus={confirmationNeeded} onClick={() => { setConfirmed(true); setConfirmationNeeded(false); }}>이번 실행은 승인 없이 진행</Button>)}
+      {isLoading && <p role="status" className="coding-hint">omp 옵션을 불러오는 중…</p>}
+      {current?.error && <InlineError onRetry={() => { setLookup(undefined); setRevision(value => value + 1); }} retryLabel="다시 불러오기">{current.error}</InlineError>}
+      {unavailable && <InlineError>이전 대화나 모델을 사용할 수 없습니다. 다시 선택하세요.</InlineError>}
+    </>}
+  </> : null;
+  const risk = kind !== 'omp' ? [] : omp.approval === 'yolo' ? [{ label: '승인 없이 실행', danger: true } satisfies AgentRisk]
+    : omp.approval === 'write' ? [{ label: '쓰기 허용' } satisfies AgentRisk] : [];
+  return { expanded, setExpanded, fields, risk, prepare, remember };
+}
+
+export type AgentRisk = { label: string; danger?: boolean };
+/** The parts of a launch the shared settings section renders; `useAgentLaunch` provides them. */
+export type AgentOptionsControls = { expanded: boolean; setExpanded(open: boolean): void; risk: AgentRisk[]; fields: ReactNode };
+
+/** The one optional launch-settings section; folded, its summary still names nondefault, risky choices. */
+export function AgentOptionsSection({ launch, risks = [], children }: {
+  launch: AgentOptionsControls; risks?: AgentRisk[]; children?: ReactNode;
+}) {
+  if (!launch.fields && !children) return null;
+  return <details className="herdr-agent-options" open={launch.expanded} onToggle={event => launch.setExpanded(event.currentTarget.open)}>
+    <summary>옵션{[...risks, ...launch.risk].map(item =>
+      <span key={item.label} className={item.danger ? 'text-danger-ink' : undefined}> · {item.label}</span>)}</summary>
+    {launch.expanded && <div className="herdr-agent-option-fields">{children}{launch.fields}</div>}
+  </details>;
 }
 
 function OmpModelPicker({ models, value, loading, onChange }: {
