@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useReducer, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { SquareTerminal } from 'lucide-react';
+import { Keyboard } from 'lucide-react';
 import type { HerdrDelivery, HerdrPaneView, HerdrUpload, HerdrView } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -90,7 +90,7 @@ export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = f
   const working = Boolean(pane.agent && pane.status === 'working');
   // The terminal takes its own typing; only a conversation view carries the follow-up field.
   const keysVisible = mode === 'live' && (compact || blocked);
-  const composing = mode === 'chat' && Boolean(pane.agent) && !(compact && blocked);
+  const composing = mode === 'chat' && Boolean(pane.agent) && !blocked;
   const approval = blocked ? asks?.entries[pane.id] : undefined;
   const focusComposer = useEffectEvent(() => {
     if (composing && !compact && !field.current?.disabled) field.current?.focus({ preventScroll: true });
@@ -117,7 +117,7 @@ export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = f
       }} onDismiss={() => {
         if (document.activeElement instanceof HTMLElement && root.current?.contains(document.activeElement)) document.activeElement.blur();
       }}/>}
-      {composing && <HerdrComposer agent={pane.agent} blocked={blocked} working={working} pending={pending} delivery={delivery}
+      {composing && <HerdrComposer agent={pane.agent} working={working} pending={pending} delivery={delivery}
         draft={draft} field={field} suggestions={suggestions} onSubmit={onPrompt} onStop={() => onKey('esc')} canUpload={Boolean(onUpload)}/>}
     </div>}
   </section>;
@@ -227,10 +227,11 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
   const checkingChat = Boolean(pane.agent) && (mode === undefined || mode === 'chat') && chat.source === undefined && !chatError;
   const controlling = activeMode === 'live' && controlWanted;
   const activeTerminal = controlling ? control : terminal;
-  // While watching a shared pane, one intentional ask opens a fitted lease; leaving live restores the pane.
-  const terminalAction = controlling ? undefined : <Button type="button" variant="outline" size="sm" className="herdr-control-action"
-    aria-label="직접 조작" title="직접 조작" onClick={() => dispatchLease({ type: 'control' })}>
-    <SquareTerminal aria-hidden="true"/>직접 조작</Button>;
+  // A shared pane is only watched until one intentional press asks to drive it at a fitted size; pressing again, or leaving live, restores it. An app-owned pane drives itself and only offers this after it fell back to watching.
+  const terminalAction = displayed.owned && controlling ? undefined : <Button type="button" variant="ghost" size="sm" className="herdr-control-action"
+    aria-label="직접 조작" title={controlling ? '직접 조작 끝내기' : '직접 조작'} aria-pressed={controlling}
+    onClick={() => dispatchLease({ type: controlling ? 'leave' : 'control' })}>
+    <Keyboard aria-hidden="true"/><span className="herdr-tool-label">직접 조작</span></Button>;
   return <HerdrPaneBody pane={displayed} compact={compact}
     mode={activeMode} onMode={next => { if (next !== 'live') dispatchLease({ type: 'leave' }); select(next); }}
     pending={pending || (controlling && !lease.leased)} error={error}

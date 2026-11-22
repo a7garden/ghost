@@ -50,21 +50,21 @@ const deliveryLabel = { steer: '스티어링', queue: '대기열' } as const sat
 const QUEUE_KEY_AGENT = 'omp';
 
 /**
- * The follow-up field of an agent pane. It stays writable while the agent works: Enter delivers the way the owner chose
+ * The follow-up field of an agent pane. It stays writable while the agent works (a blocked agent shows its approval card instead of the field): Enter delivers the way the owner chose
  * in 설정 (스티어링 or 대기열), ⌥Enter the other way. A next message the owner is likely to send waits above the text
  * while the field is empty; Tab (or a tap) puts it in the field, nothing is sent.
  */
-export function HerdrComposer({ agent, blocked, working, pending, delivery, draft, field, suggestions, onSubmit, onStop, canUpload }: {
-  agent: string | null; blocked: boolean; working: boolean; pending: boolean; delivery: HerdrDelivery;
+export function HerdrComposer({ agent, working, pending, delivery, draft, field, suggestions, onSubmit, onStop, canUpload }: {
+  agent: string | null; working: boolean; pending: boolean; delivery: HerdrDelivery;
   draft: HerdrDraft; field: RefObject<HTMLTextAreaElement | null>; suggestions: readonly string[];
   onSubmit(text: string, delivery?: HerdrDelivery): Promise<boolean>; onStop?(): void; canUpload: boolean;
 }) {
   const picker = useRef<HTMLInputElement>(null);
   const queueable = working && agent === QUEUE_KEY_AGENT;
   const other: HerdrDelivery = delivery === 'steer' ? 'queue' : 'steer';
-  const offered = !draft.draft && !working && !blocked ? suggestions : [];
+  const offered = !draft.draft && !working ? suggestions : [];
   async function send(sent: string, mode: HerdrDelivery) {
-    if (pending || blocked || draft.uploading || !sent.trim()) return;
+    if (pending || draft.uploading || !sent.trim()) return;
     const accepted = await onSubmit(sent.trim(), working ? mode : undefined);
     if (accepted) draft.setDraft(current => current === sent ? '' : current);
     requestAnimationFrame(() => { if (!matchMedia('(pointer: coarse)').matches) field.current?.focus({ preventScroll: true }); });
@@ -76,7 +76,7 @@ export function HerdrComposer({ agent, blocked, working, pending, delivery, draf
   const placeholder = !working ? '후속 지시' : !queueable ? '작업 중 — 이어서 지시' : delivery === 'steer' ? '작업 중 — 지금 바로 전달' : '작업 중 — 끝난 뒤 전달';
   return <Composer className="coding-composer" label="후속 지시" placeholder={placeholder} submitLabel={queueable ? `${deliveryLabel[delivery]}로 보내기` : '보내기'}
     inputRef={field} value={draft.draft} onValueChange={draft.setDraft} onSubmit={() => void send(draft.draft, delivery)}
-    disabled={blocked} pending={pending || draft.uploading} running={working}
+    pending={pending || draft.uploading} running={working}
     onFiles={canUpload ? files => void draft.attach(files) : undefined}
     onKeyDown={event => {
       if (event.nativeEvent.isComposing) return;
@@ -98,12 +98,12 @@ export function HerdrComposer({ agent, blocked, working, pending, delivery, draf
         if (event.currentTarget.files) void draft.attach(Array.from(event.currentTarget.files));
         event.currentTarget.value = '';
       }}/>
-      <button type="button" className="composer-plus__trigger" aria-label="파일 첨부" title="파일 첨부" disabled={blocked || pending || draft.uploading}
+      <button type="button" className="composer-plus__trigger" aria-label="파일 첨부" title="파일 첨부" disabled={pending || draft.uploading}
         onClick={() => picker.current?.click()}><Paperclip aria-hidden="true"/></button>
     </> : undefined}
     footer={queueable ? <span className="coding-delivery" title={`Enter ${deliveryLabel[delivery]} · ⌥Enter ${deliveryLabel[other]}`}>
       {delivery === 'steer' ? <Navigation aria-hidden="true"/> : <ListEnd aria-hidden="true"/>}{deliveryLabel[delivery]}
     </span> : undefined}
-    trailing={onStop && (working || blocked) ? <button type="button" className="chat-stop" aria-label="작업 중단" title="작업 중단 (Esc)" onClick={onStop}>
+    trailing={onStop && working ? <button type="button" className="chat-stop" aria-label="작업 중단" title="작업 중단 (Esc)" onClick={onStop}>
       <Square aria-hidden="true"/></button> : undefined}/>;
 }

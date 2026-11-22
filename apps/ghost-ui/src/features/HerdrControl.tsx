@@ -297,7 +297,9 @@ export default function HerdrControl({ ref, pane, fit, takeover, fontSize, onRea
       if (event.shiftKey && event.key === 'Escape') {
         if (event.type === 'keydown') {
           event.preventDefault();
-          node.closest('.coding-detail')?.querySelector<HTMLButtonElement>('[data-slot="segmented-control-item"][aria-checked="true"]')?.focus();
+          const detail = node.closest('.coding-detail');
+          // A pane with one view has no view switch; the toolbar is then the way out of the terminal.
+          (detail?.querySelector<HTMLButtonElement>('[data-slot="segmented-control-item"][aria-checked="true"]') ?? detail?.querySelector<HTMLButtonElement>('.herdr-pane-tools button'))?.focus();
         }
         return false;
       }

@@ -106,12 +106,12 @@ describe('herdr pane', () => {
     expect(markup.includes('aria-label="작업 중단"')).toBe(status === 'working');
   });
 
-  it.each([['blocked', true], ['working', false], ['done', false], ['idle', false], ['unknown', false]] as const)
-  ('keeps the follow-up field writable while the agent works: %s', (status, disabled) => {
+  it.each([['blocked', false], ['working', true], ['done', true], ['idle', true], ['unknown', true]] as const)
+  ('shows the follow-up field, writable even while the agent works: %s', (status, shown) => {
     const markup = body(status, { mode: 'chat' });
-    expect(markup).toContain('>후속 지시</label>');
-    expect(markup.match(/<textarea[^>]+>/)?.[0].includes('disabled=""')).toBe(disabled);
-    expect(markup.includes('aria-label="작업 중단"')).toBe(status === 'blocked' || status === 'working');
+    expect(markup.includes('>후속 지시</label>')).toBe(shown);
+    if (shown) expect(markup.match(/<textarea[^>]+>/)?.[0].includes('disabled=""')).toBe(false);
+    expect(markup.includes('aria-label="작업 중단"')).toBe(status === 'working');
   });
 
   it('says how a message sent now reaches an omp that is working, and only then', () => {

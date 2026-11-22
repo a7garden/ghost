@@ -63,13 +63,13 @@ export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, br
   return <header className="coding-detail-head">
     {compact ? slot ? createPortal(title, slot) : title : <div className="coding-detail-top">{identity}</div>}
     <div className="herdr-view-actions">
-      <SegmentedControl aria-label="패널 보기" value={mode} options={buttons} onValueChange={onMode}/>
-      <div className="herdr-pane-tools">
-        {mode === 'live' && terminalAction}
-        {mode === 'live' && <TerminalTextSize size={fontSize} onSize={onFontSize}/>}
-        {onStop && <Button type="button" variant="outline" size="icon" className="herdr-stop" aria-label="작업 중단" title="작업 중단 (Esc)" onClick={onStop}>
+      {buttons.length > 1 ? <SegmentedControl aria-label="패널 보기" value={mode} options={buttons} onValueChange={onMode}/> : <span/>}
+      {mode === 'live' && <div className="herdr-pane-tools" role="toolbar" aria-label="터미널 도구">
+        {terminalAction}
+        <TerminalTextSize size={fontSize} onSize={onFontSize}/>
+        {onStop && <Button type="button" variant="ghost" size="icon" className="herdr-stop" aria-label="작업 중단" title="작업 중단 (Esc)" onClick={onStop}>
           <Square aria-hidden="true"/></Button>}
-      </div>
+      </div>}
     </div>
   </header>;
 }

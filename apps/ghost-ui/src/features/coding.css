@@ -17,7 +17,7 @@
   .herdr-worktree svg { flex: none; width: 12px; height: 12px; }
   .herdr-worktree code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .coding-roster-group ul { margin: 0; padding: 0; list-style: none; }
-  .herdr-pane-row { display: flex; align-items: center; min-width: 0; border-radius: var(--radius-control); }
+  .herdr-pane-row { display: flex; align-items: flex-start; min-width: 0; border-radius: var(--radius-control); }
   .herdr-pane-row a {
     display: grid; grid-template-columns: minmax(0, 1fr) auto; flex: 1; min-width: 0; gap: 2px 4px; padding: 6px 0 6px 14px;
     align-items: center; border-radius: var(--radius-control); color: inherit; text-decoration: none; outline-offset: -2px;
@@ -99,10 +99,15 @@
   .coding-detail-title h2 { overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .herdr-view-actions, .herdr-pane-tools { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .herdr-view-actions { justify-content: space-between; }
-  .herdr-pane-tools { flex: none; }
-  .herdr-control-action { white-space: nowrap; color: var(--ghost-ink2); }
-  .herdr-control-action[aria-pressed='true'], .herdr-control-action:active { color: var(--ghost-ink); }
-  .herdr-control-action svg { width: 14px; height: 14px; }
+  /* One toolbar for the terminal: the buttons share a height, a surface and a rest colour, so none reads as the odd one out. */
+  .herdr-pane-tools { flex: none; gap: 2px; padding: 2px; border-radius: var(--radius-control); box-shadow: inset 0 0 0 1px var(--ghost-line); }
+  .herdr-pane-tools > [data-slot='button'], .herdr-pane-tools > [data-slot='popover-trigger'] { height: 28px; min-height: 0; color: var(--ghost-ink2); }
+  .herdr-pane-tools > [data-slot='button']:not(.herdr-control-action) { width: 28px; min-width: 0; }
+  .herdr-control-action { gap: 6px; padding-inline: 8px; white-space: nowrap; }
+  .herdr-pane-tools > [data-slot='button']:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
+  .herdr-control-action[aria-pressed='true'] { background: var(--ghost-signal-tint); color: var(--ghost-signal-ink); }
+  .herdr-pane-tools svg { width: 15px; height: 15px; }
+  .herdr-stop svg { width: 11px; height: 11px; fill: currentColor; }
   [data-slot='dialog-content'].herdr-takeover-confirm { max-width: min(23rem, calc(100% - 24px)); gap: 10px; }
   .herdr-takeover-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
   .coding-context { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; color: var(--ghost-ink3); font-size: var(--text-caption); }
@@ -207,7 +212,6 @@
   .coding-delivery { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px 3px 7px; border-radius: var(--radius-pill);
     background: var(--ghost-signal-tint); color: var(--ghost-signal-ink); font-size: var(--text-caption); font-weight: 550; white-space: nowrap; }
   .coding-delivery svg { width: 13px; height: 13px; }
-  .herdr-stop svg { width: 12px; height: 12px; fill: currentColor; }
   .herdr-keypad { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; max-width: 23rem; margin-bottom: 8px; }
   .herdr-key-palette { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 6px;
     width: min(17rem, calc(100vw - 16px)); max-height: var(--radix-popover-content-available-height); overflow-y: auto;
@@ -326,7 +330,10 @@
   .coding-page[data-compact] .coding-roster-head [data-slot='segmented-control'] { flex: 1; }
   .coding-page[data-compact] .coding-roster-head [data-slot='segmented-control-item'] { flex: 1; min-height: 42px; }
   .coding-page[data-compact] .coding-detail-head { padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); gap: 0; }
-  .coding-page[data-compact] .herdr-view-actions { flex-wrap: wrap; gap: 0; }
+  .coding-page[data-compact] .herdr-view-actions { flex-wrap: nowrap; gap: 0; }
+  .coding-page[data-compact] .herdr-pane-tools { gap: 0; padding: 0; box-shadow: none; }
+  .coding-page[data-compact] .herdr-pane-tools > [data-slot='button'], .coding-page[data-compact] .herdr-pane-tools > [data-slot='popover-trigger'] { height: 44px; min-width: 44px; padding-inline: 0; }
+  .coding-page[data-compact] .herdr-tool-label { display: none; }
   .coding-page[data-compact] .herdr-view-actions .ghost-segmented-control { padding: 0; border: 0; box-shadow: none; background: none; }
   .coding-page[data-compact] .herdr-view-actions .ghost-segmented-control__item { position: relative; min-width: 44px; padding-inline: 10px; background: none; box-shadow: none; }
   .coding-page[data-compact] .herdr-view-actions .ghost-segmented-control__item[aria-checked='true']::after { content: ''; position: absolute; inset: auto 9px 0; height: 2px; background: var(--ghost-ink); }

@@ -175,11 +175,8 @@ for (const { name, width, height, touch } of sizes) {
         await blocked.click();
         const blockedPane = page.getByRole('region', { name: '설정 화면 키보드 탐색 확인', exact: true });
         await expect(blockedPane.getByRole('region', { name: '승인 요청' })).toBeVisible();
-        if (touch) await expect(composer).toHaveCount(0);
-        else {
-          await expect(composer).toBeDisabled();
-          await expect(stop(page)).toBeVisible();
-        }
+        // A blocked agent shows its approval card instead of the follow-up field.
+        await expect(composer).toHaveCount(0);
         await captureCoding(page, `chat-blocked-${theme}-${name}.png`);
         await page.getByRole('radio', { name: '터미널', exact: true }).click();
         await expect(terminal(page)).toContainText('Do you want to proceed?');
@@ -497,7 +494,7 @@ test('forwards native terminal input, including bracketed paste, and refits with
   await input(page).press('Control+c');
   expect((await interrupted).postDataJSON()).toEqual({ pane: visualCodingIds.shell, text: '\x03' });
   await input(page).press('Shift+Escape');
-  await expect(page.getByRole('radio', { name: '터미널' })).toBeFocused();
+  await expect(page.getByRole('toolbar', { name: '터미널 도구' }).getByRole('button').first()).toBeFocused();
   const initial = requests[0]!.searchParams;
   const refitted = page.waitForRequest(request => {
     const url = new URL(request.url());
