@@ -40,6 +40,7 @@ import type {
   OAuthStatus,
   PageSummary,
   ProviderPreset,
+  ProviderQuota,
   PageView,
   SkillCatalog,
   State,
@@ -432,6 +433,11 @@ export class HostClient {
   /** Bundled provider/model defaults; no account credentials or network discovery. */
   providerCatalog(): Promise<ProviderPreset[]> {
     return this.json('/api/providers/catalog');
+  }
+
+  /** Subscription usage read from each provider's own account; `refresh` skips the Host's short cache. */
+  providerQuotas(refresh = false): Promise<ProviderQuota[]> {
+    return this.json(`/api/providers/quota${refresh ? '?refresh=1' : ''}`);
   }
 
   /** Start a device-code login for one OpenAI provider (owner only); joining a pending session returns it unchanged. */

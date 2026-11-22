@@ -8,6 +8,7 @@ import { Modal } from '../components/Modal';
 import { ChatGptLoginDialog } from './ChatGptLogin';
 import { NO_MODEL, modelFromKey, modelSelectOptions } from './ModelPicker';
 import { ProviderEditor } from './ProviderEditor';
+import { ProviderQuotaGroup } from './ProviderQuota';
 import { FallbackSteps, editFallbacks, type FallbackAction } from '../features/fallbacks';
 import type { ProviderSave } from './ProviderEditor';
 
@@ -87,6 +88,7 @@ export function ModelSettings() {
       : settings && <div className="calm"><Plus size={16} aria-hidden="true"/><p>사용할 제공자를 추가해 주세요</p></div>}
     {error && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 flex items-start gap-1.5 text-caption text-success" role="status"><Check size={14} className="mt-0.5 flex-none"/>{notice}</p>}
+    <ProviderQuotaGroup/>
     <SettingsGroup title="모델 선택">
       <SettingsRow label="기본 모델" description="별도로 모델을 지정하지 않은 Ghost가 사용합니다.">
         <SelectField label="기본 모델" className="w-[240px] max-w-full" value={settings?.defaultModel ? `${settings.defaultModel.provider}/${settings.defaultModel.model}` : NO_MODEL}

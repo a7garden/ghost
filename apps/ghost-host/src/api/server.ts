@@ -5,6 +5,7 @@ import { basename, extname, join, resolve, sep } from "node:path";
 import { Type } from "typebox";
 import {
   ArtifactRef,
+  type ProviderQuota,
   CommandRequest,
   ContractError,
   PairingClaim,
@@ -53,6 +54,7 @@ import type { OmpInfoProvider } from "../integrations/omp.ts";
 import { saveUpload, UPLOAD_MAX_BYTES } from "../integrations/uploads.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
+import { ProviderQuotas } from "../integrations/provider-quota.ts";
 import { ConnectionOAuth } from "./connection-oauth.ts";
 import { CloudflareAccessVerifier } from "./cloudflare-access.ts";
 import { Access } from "../core/access.ts";
@@ -130,8 +132,9 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; herdr?: HerdrPort | null; omp?: OmpInfoProvider | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null }): { port: number; stop(): Promise<void> } {
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; herdr?: HerdrPort | null; omp?: OmpInfoProvider | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null; quotas?: ProviderQuotas }): { port: number; stop(): Promise<void> } {
   const { core, config, ownerToken, documents, skills, herdr = null, omp = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
+  const quotas = deps.quotas ?? new ProviderQuotas({ providers: () => core.ledger.providers(), secrets: core.secrets });
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
   const oauth = new OAuthLogins(core);
@@ -525,6 +528,14 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (pathname === "/api/providers/catalog" && request.method === "GET") {
       try {
         return json(core.catalog.presets);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+
+    if (pathname === "/api/providers/quota" && request.method === "GET") {
+      try {
+        return json(await quotas.read(url.searchParams.get("refresh") === "1") satisfies ProviderQuota[]);
       } catch (caught) {
         return failure(caught);
       }

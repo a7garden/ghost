@@ -136,6 +136,36 @@ export type PairingResult = Static<typeof PairingResult>;
 export const ProviderCatalog = Type.Array(ProviderPreset, { maxItems: 64 });
 export type ProviderCatalog = Static<typeof ProviderCatalog>;
 
+/** One usage window of a subscription (5 hours, a week, a month); `usedPercent` is 0–100. */
+export const ProviderQuotaWindow = Type.Object({
+  label: Type.String({ maxLength: 64 }),
+  usedPercent: Type.Number({ minimum: 0, maximum: 100 }),
+  /** When the window resets; null when the provider does not say. */
+  resetsAt: nullable(Timestamp),
+});
+export type ProviderQuotaWindow = Static<typeof ProviderQuotaWindow>;
+
+/**
+ * GET /api/providers/quota. Subscription usage read from each provider's own account: Codex (ChatGPT login),
+ * Z.AI and MiniMax (API key) from the configured providers, and Claude from the Claude Code login on this Mac.
+ * Providers without a usage API are absent. `error` is set when the last read failed; `windows` then holds the
+ * last good reading, if any. No credential crosses this boundary.
+ */
+export const ProviderQuota = Type.Object({
+  /** The configured provider's id, or `claude-code` for the Claude Code login. */
+  id: Type.String({ maxLength: 64 }),
+  name: Type.String({ maxLength: 128 }),
+  plan: nullable(Type.String({ maxLength: 64 })),
+  windows: Type.Array(ProviderQuotaWindow, { maxItems: 16 }),
+  error: nullable(Type.String({ maxLength: 256 })),
+  /** When `windows` was read from the provider. */
+  fetchedAt: nullable(Timestamp),
+});
+export type ProviderQuota = Static<typeof ProviderQuota>;
+
+export const ProviderQuotas = Type.Array(ProviderQuota, { maxItems: 64 });
+export type ProviderQuotas = Static<typeof ProviderQuotas>;
+
 /** GET /api/skills. Skills under the configured skill roots that a Ghost may be given. */
 export const SkillCatalog = Type.Object({
   skills: Type.Array(Type.Object({ name: SkillName, description: Type.String({ maxLength: 2048 }) }), { maxItems: 512 }),

@@ -400,6 +400,7 @@ update/cache/                shell bundle and iPhone IPA proxied from the newest
 | `POST /api/commands` | `{ requestId, command }`, command is a contract union (`message.send`, `work.create`, `work.update`, `work.cancel`, `decision.resolve`, `ghost.create`, `ghost.update`, `schedule.*`, `device.*`, `settings.*`, …) |
 | `POST /api/pairing/claim` | device pairing with a one-time code |
 | `GET /api/providers/catalog` | provider presets and cached model metadata for every principal; public API catalogs are not account-verified, account-specific Codex models appear in settings |
+| `GET /api/providers/quota` | subscription usage windows read from each provider's own account for every principal: Codex (ChatGPT login), Z.AI and MiniMax (API key) from the configured providers, Claude from the Claude Code login on this Mac (read-only, never refreshed or stored). Cached per provider (60 s, Claude 180 s; `?refresh=1` still waits 15 s between attempts); a failed read keeps the last good windows and sets `error`. Providers without a usage API are absent; no credential is returned |
 | `POST /api/providers/:id/oauth` | ChatGPT device-code login, available to the owner and paired devices; a pending attempt is reused |
 | `GET /api/providers/:id/oauth` | login status, verification URL and device code; never tokens |
 | `DELETE /api/providers/:id/oauth` | cancel a pending login, not an existing credential |

@@ -21,3 +21,12 @@ export function useNow(intervalMs = 30_000): number {
   }, [intervalMs]);
   return now;
 }
+
+/** How long until a future moment, coarsely: 곧, 12분 뒤, 3시간 뒤, 2일 뒤. */
+export function untilTime(at: number, now: number): string {
+  const seconds = Math.round((at - now) / 1000);
+  if (seconds < 60) return '곧';
+  if (seconds < 3600) return `${Math.round(seconds / 60)}분 뒤`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}시간 뒤`;
+  return `${Math.round(seconds / 86400)}일 뒤`;
+}
