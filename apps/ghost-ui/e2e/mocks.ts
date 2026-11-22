@@ -1,6 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import type { CodingPrefs, CodingSetup, Decision, HerdrAgentStart, HerdrChanges, HerdrClose, HerdrDiff, HerdrFrame, HerdrInput, HerdrIntegrationInstall, HerdrOutput, HerdrPaneView, HerdrPrompt, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrUpload, HerdrView, HerdrWorkspaceCreate, HerdrWorkspaceView, OmpInfo, VaultItem } from '@ghost/contract';
-import type { HerdrAnswer, HerdrAsk, HerdrChat, HerdrChatItem } from '@ghost/contract';
+import type { HerdrAnswer, HerdrAsk, HerdrChat, HerdrChatItem, HerdrControlCommand, HerdrControlEnd, HerdrControlLease, HerdrControlRelease } from '@ghost/contract';
 import { readRunState } from './run-state';
 
 /** The synthetic decision ids the decision-surface screens focus. */
@@ -122,25 +122,69 @@ function colourTerminal(text: string) {
   return text.split('\n').map((line, index) => `\x1b[${colors[index % colors.length]}m${line}\x1b[0m`).join('\n');
 }
 
-export function fulfillHerdrFrame(route: Route, text: string, { end = false, tracksMouse = false, padded = false }: {
-  end?: boolean; tracksMouse?: boolean; padded?: boolean;
-} = {}) {
-  const url = new URL(route.request().url());
-  const width = Number(url.searchParams.get('cols')), height = Number(url.searchParams.get('rows'));
+function herdrFrame(text: string, width: number, height: number, seq: number, tracksMouse: boolean, padded = false): HerdrFrame {
   const colors = [36, 0, 32, 0, 33];
   const lines = text.split('\n').slice(-height);
   const body = lines.map((line, index) => `\x1b[${colors[index % colors.length]}m${padded ? line.padEnd(width) : line}\x1b[0m`).join('\r\n');
   const mouse = tracksMouse ? '\x1b[?1000h\x1b[?1006h' : '';
   const bytes = Buffer.from(`\x1b[?25l\x1b[2J\x1b[H\x1b[?2004h${mouse}${body}\x1b[?25h`).toString('base64');
-  const frame: HerdrFrame = { seq: 1, full: true, bytes, width, height };
+  return { seq, full: true, bytes, width, height };
+}
+
+export function fulfillHerdrFrame(route: Route, text: string, { end = false, tracksMouse = false, padded = false, lease, reason, drop = false }: {
+  end?: boolean; tracksMouse?: boolean; padded?: boolean; lease?: HerdrControlLease; reason?: HerdrControlEnd['reason']; drop?: boolean;
+} = {}) {
+  const url = new URL(route.request().url());
+  const frame = herdrFrame(text, Number(url.searchParams.get('cols')), Number(url.searchParams.get('rows')), 1, tracksMouse, padded);
+  const leased = lease ? `event: lease\r\ndata: ${JSON.stringify(lease)}\r\n\r\n` : '';
+  const ended = reason ? `event: end\r\ndata: ${JSON.stringify({ reason })}\r\n\r\n` : end ? 'event: end\r\n\r\n' : '';
   return route.fulfill({
     status: 200, contentType: 'text/event-stream',
-    body: `event: frame\r\ndata: ${JSON.stringify(frame)}\r\n\r\n${end ? 'event: end\r\n\r\n' : ''}`,
+    headers: drop ? { 'x-mock-drop': '1' } : undefined,
+    body: `${leased}event: frame\r\ndata: ${JSON.stringify(frame)}\r\n\r\n${ended}`,
   });
 }
 
 /** Coding requests use a page-local herdr session; other API calls go to the seeded Host. */
-export async function mockCodingApi(page: Page, { stopped = false, rich = false }: { stopped?: boolean; rich?: boolean } = {}): Promise<void> {
+export async function mockCodingApi(page: Page, { stopped = false, rich = false, owned = [], held = [], mouse = [] }: {
+  stopped?: boolean; rich?: boolean; owned?: readonly string[]; held?: readonly string[]; mouse?: readonly string[];
+} = {}): Promise<void> {
+  // Playwright fulfills a finite body. Keep successful mock leases open until the caller cancels.
+  await page.addInitScript(() => {
+    const fetchHost = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const response = await fetchHost(input, init);
+      if (new URL(response.url || location.href).pathname !== '/api/herdr/control' || !response.ok || !response.body || response.headers.has('x-mock-drop')) return response;
+      const reader = response.body.getReader();
+      const signal = init?.signal;
+      const pane = new URL(response.url).searchParams.get('pane');
+      const encoder = new TextEncoder();
+      let detach = () => {};
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          const frame = (event: Event) => {
+            const update = (event as CustomEvent<{ pane: string; frame: HerdrFrame }>).detail;
+            if (update.pane === pane) controller.enqueue(encoder.encode(`event: frame\ndata: ${JSON.stringify(update.frame)}\n\n`));
+          };
+          const abort = () => { detach(); controller.error(signal?.reason); };
+          detach = () => {
+            window.removeEventListener('ghost-test:herdr-frame', frame);
+            signal?.removeEventListener('abort', abort);
+          };
+          window.addEventListener('ghost-test:herdr-frame', frame);
+          signal?.addEventListener('abort', abort, { once: true });
+        },
+        async pull(controller) {
+          const item = await reader.read();
+          if (!item.done && !signal?.aborted) controller.enqueue(item.value);
+        },
+        cancel: reason => {
+          detach();
+          return reader.cancel(reason);
+        },
+      }), { status: response.status, headers: response.headers });
+    };
+  });
   const server = { version: '1.4.0', compatible: true, restartNeeded: false };
   const setup: CodingSetup = {
     herdr: { path: '/Users/garden/.local/bin/herdr', version: '1.4.0' },
@@ -160,7 +204,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false 
   for (const output of [
     {
       pane: { id: visualCodingIds.running, workspaceId: 'w79', tabId: 'w79:tB', workspace: 'app', tab: 'checkout', agent: 'Claude Code',
-        status: 'working', focused: true, cwd: '/Users/garden/Workspace/Projects/wt/app-checkout-tests', title: '결제 화면 테스트 추가' },
+        status: 'working', owned: owned.includes(visualCodingIds.running), focused: true, cwd: '/Users/garden/Workspace/Projects/wt/app-checkout-tests', title: '결제 화면 테스트 추가' },
       text: [
         '❯ 결제 화면 테스트를 추가해 주세요.',
         '',
@@ -176,7 +220,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false 
     },
     {
       pane: { id: visualCodingIds.finished, workspaceId: 'w79', tabId: 'w79:tA', workspace: 'app', tab: 'login', agent: 'omp',
-        status: 'done', focused: false, cwd: '/Users/garden/Workspace/Projects/wt/app-fix-login', title: '로그인 실패 시 안내 문구 고치기' },
+        status: 'done', owned: owned.includes(visualCodingIds.finished), focused: false, cwd: '/Users/garden/Workspace/Projects/wt/app-fix-login', title: '로그인 실패 시 안내 문구 고치기' },
       text: [
         '❯ 로그인 실패 시 안내 문구를 고쳐 주세요.',
         '',
@@ -192,7 +236,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false 
     },
     {
       pane: { id: visualCodingIds.blocked, workspaceId: 'w80', tabId: 'w80:tA', workspace: 'ghost', tab: 'settings', agent: 'Claude Code',
-        status: 'blocked', focused: true, cwd: '/Users/garden/Workspace/Projects/ghost', title: '설정 화면 키보드 탐색 확인' },
+        status: 'blocked', owned: owned.includes(visualCodingIds.blocked), focused: true, cwd: '/Users/garden/Workspace/Projects/ghost', title: '설정 화면 키보드 탐색 확인' },
       text: [
         '❯ 설정 화면에서 키보드로 탭을 옮길 수 있는지 확인해 주세요.',
         '',
@@ -207,7 +251,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false 
     },
     {
       pane: { id: visualCodingIds.shell, workspaceId: 'w79', tabId: 'w79:tB', workspace: 'app', tab: 'checkout', agent: null,
-        status: 'unknown', focused: false, cwd: '/Users/garden/Workspace/Projects/app', title: 'zsh' },
+        status: 'unknown', owned: owned.includes(visualCodingIds.shell), focused: false, cwd: '/Users/garden/Workspace/Projects/app', title: 'zsh' },
       text: 'app % git status --short\n M src/checkout/payment.ts\n?? src/checkout/payment.test.ts\n\napp %',
     },
   ] satisfies HerdrOutput[]) entries.set(output.pane.id, output);
@@ -256,7 +300,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false 
     const pane = {
       id, tabId, workspaceId, cwd, tab, workspace: spaces.get(workspaceId)!.label,
       title: title || task?.split('\n')[0] || (agent ? agentLabel(agent)! : 'zsh'),
-      agent: agentLabel(agent), status: agent ? 'working' : 'unknown', focused: true,
+      agent: agentLabel(agent), status: agent ? 'working' : 'unknown', owned: true, focused: true,
     } satisfies HerdrPaneView;
     entries.set(id, { pane, text: task ? `❯ ${task}` : agent ? `${pane.agent} ready` : 'zsh %' });
     return pane;
@@ -340,6 +384,46 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false 
       return fulfillHerdrFrame(route, `${log}\n${text}`);
     }
     return fulfillHerdrFrame(route, text);
+  });
+  let lease: HerdrControlLease | undefined;
+  let leaseSequence = 0;
+  let controlSize = { cols: 80, rows: 24, seq: 1 };
+  await page.route('**/api/herdr/control?*', route => {
+    const query = new URL(route.request().url()).searchParams;
+    const pane = query.get('pane') ?? '';
+    const entry = entries.get(pane);
+    if (!setup.server || !entry) return error(route, 404, '패널을 찾을 수 없습니다.');
+    if (!entry.pane.owned && query.get('fit') !== '1') {
+      return fulfillJson(route, 409, { error: { code: 'confirm_required', message: '크기 변경을 확인하세요.' } });
+    }
+    if (held.includes(pane) && query.get('takeover') !== '1' && !lease) {
+      return fulfillJson(route, 409, { error: { code: 'held', message: '다른 곳에서 쓰는 중입니다.' } });
+    }
+    if (lease && lease.pane !== pane) return fulfillJson(route, 409, { error: { code: 'held', message: '기존 제어가 끝나지 않았습니다.' } });
+    lease = { pane, owned: entry.pane.owned, baseline: { cols: 100, rows: 40 }, leaseId: `00000000-0000-4000-8000-${String(++leaseSequence).padStart(12, '0')}` };
+    controlSize = { cols: Number(query.get('cols')), rows: Number(query.get('rows')), seq: 1 };
+    const text = rich && pane === visualCodingIds.shell
+      ? `${Array.from({ length: 42 }, (_, index) => `  checkout: verified shard ${String(index + 1).padStart(2, '0')}`).join('\n')}\n${entry.text}`
+      : entry.text;
+    return fulfillHerdrFrame(route, text, { lease, tracksMouse: mouse.includes(pane) });
+  });
+  await page.route('**/api/herdr/control/send', async route => {
+    const command = route.request().postDataJSON() as HerdrControlCommand;
+    if (lease?.leaseId !== command.leaseId || lease?.pane !== command.pane) {
+      return fulfillJson(route, 409, { error: { code: 'held', message: '이 제어가 끝났습니다.' } });
+    }
+    const entry = entries.get(command.pane);
+    if (entry && (command.type === 'resize' || (command.type === 'input' && applyInput(entry, [], command.text)))) {
+      if (command.type === 'resize') controlSize = { cols: command.cols, rows: command.rows, seq: controlSize.seq };
+      const frame = herdrFrame(entry.text, controlSize.cols, controlSize.rows, ++controlSize.seq, mouse.includes(command.pane));
+      await page.evaluate(detail => { window.dispatchEvent(new CustomEvent('ghost-test:herdr-frame', { detail })); }, { pane: command.pane, frame });
+    }
+    return fulfillJson(route, 200, { ok: true });
+  });
+  await page.route('**/api/herdr/control/release', route => {
+    const release = route.request().postDataJSON() as HerdrControlRelease;
+    if (lease?.leaseId === release.leaseId && lease.pane === release.pane) lease = undefined;
+    return fulfillJson(route, 200, { ok: true });
   });
   await page.route('**/api/herdr/output?*', route => {
     const query = new URL(route.request().url()).searchParams;
@@ -428,10 +512,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false 
     if (list) list.push({ id: `prompt-${list.length}`, kind: 'user', at: now, text });
     return fulfillJson(route, 200, entry.pane);
   });
-  await page.route('**/api/herdr/input', route => {
-    const { pane, text, keys = [] } = route.request().postDataJSON() as HerdrInput;
-    const entry = entries.get(pane);
-    if (!entry) return error(route, 404, '패널을 찾을 수 없습니다.');
+  function applyInput(entry: HerdrOutput, keys: readonly string[], text?: string): boolean {
     if (keys.includes('esc') || keys.includes('ctrl+c') || text === '\x03' || text === '\x1b') {
       entry.text += '\n\nInterrupted';
       entry.pane.status = 'idle';
@@ -442,7 +523,14 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false 
       entry.pane.status = 'working';
     } else if (entry.pane.agent === null && text) {
       entry.text += text.replaceAll('\r', '\n').replace(/\x1b\[(200|201)~/g, '');
-    }
+    } else return false;
+    return true;
+  }
+  await page.route('**/api/herdr/input', route => {
+    const { pane, text, keys = [] } = route.request().postDataJSON() as HerdrInput;
+    const entry = entries.get(pane);
+    if (!entry) return error(route, 404, '패널을 찾을 수 없습니다.');
+    applyInput(entry, keys, text);
     return fulfillJson(route, 200, { ok: true });
   });
 }

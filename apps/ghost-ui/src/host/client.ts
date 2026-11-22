@@ -15,6 +15,10 @@ import type {
   HerdrAgentStart,
   HerdrClose,
   HerdrFrame,
+  HerdrControlCommand,
+  HerdrControlEnd,
+  HerdrControlLease,
+  HerdrControlRelease,
   HerdrInput,
   HerdrRename,
   HerdrSplit,
@@ -62,6 +66,13 @@ export class HostError extends Error {
   constructor(readonly code: ApiError['code'] | 'network', message: string) {
     super(message);
     this.name = 'HostError';
+  }
+}
+
+export class HerdrControlError extends Error {
+  constructor(readonly code: 'confirm_required' | 'held', message: string) {
+    super(message);
+    this.name = 'HerdrControlError';
   }
 }
 
@@ -174,6 +185,9 @@ export type MailUpdateCommand = CommandOf<'mail.update'>;
  */
 export class HostClient {
   constructor(private readonly token: string | undefined = typeof window === 'undefined' ? undefined : window.__GHOST_TOKEN__) {}
+
+  private herdrController: string | undefined;
+  private herdrRelease: Promise<void> | undefined;
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     return this.token ? { Authorization: `Bearer ${this.token}`, ...extra } : extra;
@@ -298,16 +312,8 @@ export class HostClient {
   /** Returns `end` only for an explicit terminal end. A dropped connection is retryable. */
   async herdrTerminal(pane: string, cols: number, rows: number, onFrame: (frame: HerdrFrame) => void, signal: AbortSignal): Promise<'end' | 'disconnected'> {
     const query = new URLSearchParams({ pane, cols: String(cols), rows: String(rows) });
-    const response = await this.request(`/api/herdr/terminal?${query}`, {
-      headers: this.headers({ Accept: 'text/event-stream' }), cache: 'no-store', signal,
-    });
-    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
-    if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
-      const body = (await response.json().catch(() => null)) as { error?: ApiError } | null;
-      throw new HostError(response.status === 404 ? 'not_found' : body?.error?.code ?? 'network',
-        body?.error?.message ?? '터미널에 연결할 수 없습니다.');
-    }
-    for await (const { event, data } of serverEvents(response.body)) {
+    const body = await this.terminalStream(`/api/herdr/terminal?${query}`, signal);
+    for await (const { event, data } of serverEvents(body)) {
       if (signal.aborted) return 'disconnected';
       if (event === 'end') return 'end';
       if (event === 'frame' && data) onFrame(JSON.parse(data) as HerdrFrame);
@@ -317,6 +323,54 @@ export class HostClient {
       }
     }
     return 'disconnected';
+  }
+
+  async herdrControl({ pane, cols, rows, fit, takeover }: { pane: string; cols: number; rows: number; fit: boolean; takeover: boolean },
+    onLease: (lease: HerdrControlLease) => void, onFrame: (frame: HerdrFrame) => void, signal: AbortSignal,
+  ): Promise<HerdrControlEnd['reason'] | 'disconnected'> {
+    // Route changes release the previous pane before the next controller can resize its pane.
+    await this.herdrRelease;
+    if (signal.aborted) return 'disconnected';
+    this.herdrController ??= crypto.randomUUID();
+    const query = new URLSearchParams({ pane, cols: String(cols), rows: String(rows), client: this.herdrController });
+    if (fit) query.set('fit', '1');
+    if (takeover) query.set('takeover', '1');
+    const body = await this.terminalStream(`/api/herdr/control?${query}`, signal);
+    for await (const { event, data } of serverEvents(body)) {
+      if (signal.aborted) return 'disconnected';
+      if (event === 'lease' && data) onLease(JSON.parse(data) as HerdrControlLease);
+      if (event === 'frame' && data) onFrame(JSON.parse(data) as HerdrFrame);
+      if (event === 'end' && data) return (JSON.parse(data) as HerdrControlEnd).reason;
+    }
+    return 'disconnected';
+  }
+
+  sendHerdrControl(command: HerdrControlCommand): Promise<{ ok: true }> {
+    return this.postHerdr('control/send', command);
+  }
+
+  releaseHerdrControl(release: HerdrControlRelease): Promise<void> {
+    // Unlike sendBeacon, a keepalive request can carry the paired-device Bearer token.
+    const task = this.json('/api/herdr/control/release', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(release), keepalive: true,
+    }).then(() => {}, () => {}); // A dropped request is also released by the Host's stream grace.
+    this.herdrRelease = task;
+    return task;
+  }
+
+  private async terminalStream(path: string, signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+    const response = await this.request(path, {
+      headers: this.headers({ Accept: 'text/event-stream' }), cache: 'no-store', signal,
+    });
+    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
+    if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
+      const body = (await response.json().catch(() => null)) as { error?: ApiError | { code: HerdrControlError['code']; message: string } } | null;
+      const code = body?.error?.code;
+      const message = body?.error?.message ?? '터미널에 연결할 수 없습니다.';
+      if (code === 'held' || code === 'confirm_required') throw new HerdrControlError(code, message);
+      throw new HostError(response.status === 404 ? 'not_found' : code ?? 'network', message);
+    }
+    return response.body;
   }
 
   /** The host's own release update state. */

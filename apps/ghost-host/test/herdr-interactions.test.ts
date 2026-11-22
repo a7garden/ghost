@@ -52,7 +52,7 @@ const CODEX_APPROVAL = `  Implement this plan?
 
 const PANE = "w1:p1";
 const output = (text: string, agent = "omp", status: HerdrOutput["pane"]["status"] = "blocked"): HerdrOutput => ({
-  text, pane: { id: PANE, workspaceId: "w1", tabId: "w1:t1", workspace: "work", tab: "task", title: "task", agent, status, cwd: null, focused: false },
+  text, pane: { id: PANE, workspaceId: "w1", tabId: "w1:t1", workspace: "work", tab: "task", title: "task", agent, status, cwd: null, focused: false, owned: false },
 });
 
 test("reads terminal approval frames with the cursor, context, option tones, and keys", () => {

@@ -790,7 +790,7 @@ async function codingFixture(options: { installed?: ("omp" | "claude" | "codex")
   const calls: { op: string; arg: unknown }[] = [];
   const tree = new Map<string, { checkout: string; branch: string }>();
   const commit = (cwd: string) => { writeFileSync(join(cwd, "b.txt"), `${calls.length}\n`); gitIn(cwd, "add", "b.txt"); gitIn(cwd, "commit", "-qm", "touch b"); };
-  const pane = (id: string) => ({ id, workspaceId: "w1", tabId: "w1:t1", workspace: "repo", tab: "work", agent: "omp", status: options.status ?? "idle" as const, cwd: tree.get(id)?.checkout ?? null, title: "work", focused: false });
+  const pane = (id: string) => ({ id, workspaceId: "w1", tabId: "w1:t1", workspace: "repo", tab: "work", agent: "omp", status: options.status ?? "idle" as const, cwd: tree.get(id)?.checkout ?? null, title: "work", focused: false, owned: true });
   const result = (id: string, base: string | null) => ({ pane: pane(id), checkout: tree.get(id)!.checkout, branch: tree.get(id)!.branch, base, settled: options.outcome ?? "settled" as const });
   const unused = async (): Promise<never> => { throw new Error("not used by the coding tools"); };
   const herdr: HerdrPort = {
@@ -800,6 +800,9 @@ async function codingFixture(options: { installed?: ("omp" | "claude" | "codex")
     ask: unused,
     answer: unused,
     chat: unused,
+    control: unused,
+    controlSend: unused,
+    controlRelease: unused,
     setup: async () => ({
       herdr: { path: "/bin/herdr", version: "0.9.5" }, config: { ok: true, note: null }, session: "default", sessions: [{ name: "default", running: options.server !== false }],
       server: options.server === false ? null : { version: "0.9.5", compatible: true, restartNeeded: false },

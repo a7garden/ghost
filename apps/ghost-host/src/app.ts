@@ -90,6 +90,7 @@ export async function openApp(config: Config): Promise<App> {
   let openedMail: MailService | null = null;
   let openedMailWatcher: MailWatcher | null = null;
   let openedCodingWatcher: CodingWatcher | null = null;
+  let openedHerdr: Herdr | null = null;
   let openedMcp: McpClients | null = null;
   let openedSourceStore: SourceStore | null = null;
   let openedMemory: MemoryStore | null = null;
@@ -113,6 +114,7 @@ export async function openApp(config: Config): Promise<App> {
     await Promise.all([
       attempt(async () => { await openedMailWatcher?.stop(); openedMailWatcher = null; }),
       attempt(() => { openedCodingWatcher?.stop(); openedCodingWatcher = null; }),
+      attempt(async () => { await openedHerdr?.shutdownControls(); openedHerdr = null; }),
       attempt(async () => { await openedMail?.close(); }),
       attempt(async () => { await openedMcp?.close(); openedMcp = null; }),
       attempt(async () => { await openedSources?.close(); }),
@@ -175,7 +177,8 @@ export async function openApp(config: Config): Promise<App> {
     } }));
     const desktop = (openedDesktop = createDesktop(config, { root: config.root }));
     const memory = (openedMemory = new MemoryStore(config.root));
-    const herdr = config.coding === false ? null : new Herdr(undefined, { prefs: () => codingPrefs(core.ledger.setting<unknown>("coding", null)) });
+    const herdr = (openedHerdr = config.coding === false ? null : new Herdr(undefined, { root: config.root, log, prefs: () => codingPrefs(core.ledger.setting<unknown>("coding", null)) }));
+    if (herdr) void herdr.recoverControls().catch((error) => log("herdr 터미널 복구 실패", error));
     const omp = config.coding === false ? null : new OmpInfoProvider();
     const codingWatcher = (openedCodingWatcher = herdr === null ? null : new CodingWatcher(core, herdr));
     const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, herdr, reach: createReach(config), browser, vault, desktop, mail, toss: createToss(), mcp });

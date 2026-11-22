@@ -92,6 +92,8 @@ export const HerdrPaneView = Type.Object({
   cwd: nullable(Type.String()),
   title: Type.String(),
   focused: Type.Boolean(),
+  /** The Host opened this terminal or started its agent. */
+  owned: Type.Boolean(),
 });
 export type HerdrPaneView = Static<typeof HerdrPaneView>;
 
@@ -339,3 +341,57 @@ export const HerdrChat = Type.Object({
   reset: Type.Boolean(),
 });
 export type HerdrChat = Static<typeof HerdrChat>;
+
+/**
+ * Driving a pane at the phone's own size (herdr `terminal session control`), as opposed to watching it
+ * (`/api/herdr/terminal`, which never resizes anything). While a control lease is held the pane itself is resized to
+ * `cols` x `rows`, so the app inside redraws for the phone and herdr-side scrollback and mouse work; herdr does not undo
+ * that when the stream closes, so the Host records the size before the first resize and restores it (size, then scroll to
+ * the bottom) on release, on stream loss after a short grace, and on its own start for leases a crash left behind.
+ *
+ * `GET /api/herdr/control?pane=&cols=&rows=[&fit=1][&takeover=1][&client=<uuid>]` opens the lease and streams
+ * `event: lease` (HerdrControlLease), `event: frame` (HerdrFrame), then `event: end` (HerdrControlEnd).
+ * Before streaming, 409 `confirm_required` asks for `fit=1` on an unowned pane; 409 `held` asks for `takeover=1`.
+ * Reconnecting with the same `client` within 10 seconds keeps the pane's original baseline. Opening a different pane
+ * for that client releases the first. `POST /api/herdr/control/send` and `/release` require the current `leaseId`;
+ * an expired send is a conflict and an expired release does nothing.
+ */
+export const HerdrControlLease = Type.Object({
+  pane: Type.String(),
+  leaseId: Type.String({ format: "uuid" }),
+  /** The size the pane had before the lease; null if it could not be read (then nothing can be restored). */
+  baseline: nullable(Type.Object({ cols: Type.Integer(), rows: Type.Integer() })),
+  /** True for a pane the app started itself (no confirmation was needed). */
+  owned: Type.Boolean(),
+});
+export type HerdrControlLease = Static<typeof HerdrControlLease>;
+
+export const HerdrControlEnd = Type.Object({ reason: Type.Union([Type.Literal("closed"), Type.Literal("taken"), Type.Literal("released"), Type.Literal("error")]) });
+export type HerdrControlEnd = Static<typeof HerdrControlEnd>;
+
+export const HerdrControlRelease = Type.Object({ ...PaneRef, leaseId: Type.String({ format: "uuid" }) });
+export type HerdrControlRelease = Static<typeof HerdrControlRelease>;
+
+export const HerdrControlCommand = Type.Union([
+  Type.Object({ ...HerdrControlRelease.properties, type: Type.Literal("input"), text: Type.String({ minLength: 1, maxLength: 65_536 }) }),
+  Type.Object({ ...HerdrControlRelease.properties, type: Type.Literal("resize"), cols: Type.Integer({ minimum: 20, maximum: 300 }), rows: Type.Integer({ minimum: 5, maximum: 120 }) }),
+  Type.Object({
+    ...HerdrControlRelease.properties,
+    type: Type.Literal("scroll"),
+    direction: Type.Union([Type.Literal("up"), Type.Literal("down")]),
+    lines: Type.Integer({ minimum: 1, maximum: 500 }),
+    source: Type.Optional(Type.Union([Type.Literal("wheel"), Type.Literal("page_key")])),
+    column: Type.Optional(Type.Integer({ minimum: 0, maximum: 299 })),
+    row: Type.Optional(Type.Integer({ minimum: 0, maximum: 119 })),
+  }),
+  Type.Object({
+    ...HerdrControlRelease.properties,
+    type: Type.Literal("mouse"),
+    action: Type.Union([Type.Literal("down"), Type.Literal("up"), Type.Literal("drag"), Type.Literal("move")]),
+    button: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")])),
+    column: Type.Integer({ minimum: 0, maximum: 299 }),
+    row: Type.Integer({ minimum: 0, maximum: 119 }),
+    modifiers: Type.Optional(Type.Integer({ minimum: 0, maximum: 7 })),
+  }),
+]);
+export type HerdrControlCommand = Static<typeof HerdrControlCommand>;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { HerdrChat, HerdrChatItem, HerdrPaneView, HerdrWorkspaceView } from '@ghost/contract';
 import { agentGroups, choiceVariant, elapsedLabel, foldChat, groupAgents, isUnread, mergeChat, trackActivity } from './herdrInboxModel';
 
-const pane: HerdrPaneView = { id: 'w1:p1', workspaceId: 'w1', tabId: 'w1:t1', workspace: 'ghost', tab: 'coding', agent: 'omp', status: 'working', cwd: '/dev/trees/coding', title: '코딩 화면', focused: true };
+const pane: HerdrPaneView = { id: 'w1:p1', workspaceId: 'w1', tabId: 'w1:t1', workspace: 'ghost', tab: 'coding', agent: 'omp', status: 'working', cwd: '/dev/trees/coding', title: '코딩 화면', focused: true, owned: false };
 const tree = (...panes: HerdrPaneView[]): HerdrWorkspaceView[] => [
   { id: 'w1', label: 'ghost', status: 'blocked', worktree: { branch: 'coding-ui', path: '/dev/trees/coding' }, tabs: [
     { id: 'w1:t1', label: 'coding', status: 'blocked', panes },

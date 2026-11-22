@@ -49,7 +49,7 @@ it('distinguishes diff metadata and hunk rows from source lines starting with ex
 });
 
 it('counts blocked live agents only, across every workspace and tab', () => {
-  const pane: HerdrPaneView = { id: 'w1:p1', workspaceId: 'w1', tabId: 'w1:t1', workspace: 'app', tab: 'main', agent: 'omp', status: 'blocked', cwd, title: 'login', focused: true };
+  const pane: HerdrPaneView = { id: 'w1:p1', workspaceId: 'w1', tabId: 'w1:t1', workspace: 'app', tab: 'main', agent: 'omp', status: 'blocked', cwd, title: 'login', focused: true, owned: false };
   const view: HerdrView = { available: true, note: null, session: 'default', workspaces: [
     { id: 'w1', label: 'app', status: 'blocked', worktree: null, tabs: [
       { id: 'w1:t1', label: 'main', status: 'blocked', panes: [pane, { ...pane, id: 'w1:p2', agent: null }, { ...pane, id: 'w1:p3', status: 'working' }] },

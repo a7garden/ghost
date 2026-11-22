@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { GitBranch } from 'lucide-react';
 import type { HerdrPaneView } from '@ghost/contract';
 import { Button, SegmentedControl } from '../ui';
@@ -10,10 +10,11 @@ export const herdrModes: readonly HerdrMode[] = ['chat', 'live', 'changes'];
 const modes = [{ value: 'chat', label: '대화' }, { value: 'live', label: '터미널' }, { value: 'changes', label: '변경' }] as const;
 export type PaneNavigation = { panes: readonly HerdrPaneView[]; onNavigate(id: string): void };
 
-export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, branch, navigation, onEsc, fontSize, onFontSize }: {
+export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, branch, navigation, onEsc, fontSize, onFontSize, terminalAction }: {
   pane: HerdrPaneView; mode: HerdrMode; onMode(mode: HerdrMode): void; compact: boolean;
   chat: boolean; changes: boolean; branch?: string | null; navigation?: PaneNavigation;
   onEsc?: () => void; fontSize: number; onFontSize(size: number): void;
+  terminalAction?: ReactNode;
 }) {
   const touch = useRef<{ x: number; y: number }>(null);
   const siblings = navigation?.panes ?? [];
@@ -50,6 +51,7 @@ export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, br
     <div className="herdr-view-actions">
       <SegmentedControl aria-label="패널 보기" value={mode} options={buttons} onValueChange={onMode}/>
       <div className="herdr-pane-tools">
+        {mode === 'live' && terminalAction}
         {mode === 'live' && <TerminalTextSize size={fontSize} onSize={onFontSize}/>}
         {onEsc && <Button type="button" variant="outline" size="sm" aria-label="중단 (Esc)" onClick={onEsc}>Esc</Button>}
       </div>

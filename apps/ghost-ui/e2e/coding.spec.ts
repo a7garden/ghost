@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { CodingSetup, Effect, HerdrChat, HerdrChatItem, HerdrOutput, WorkDetail } from '@ghost/contract';
+import type { CodingSetup, Effect, HerdrChat, HerdrChatItem, HerdrControlCommand, HerdrOutput, WorkDetail } from '@ghost/contract';
 import { fulfillHerdrFrame, mockCodingApi, visualCodingIds } from './mocks';
 import { openScreen } from './visual';
 import { readRunState } from './run-state';
@@ -26,11 +26,16 @@ async function captureCoding(page: Page, name: string) {
 
 const post = (page: Page, path: string) => page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname === path);
 const paneRoute = (id: string) => `/coding?herdr=${encodeURIComponent(id)}`;
-const terminal = (page: Page) => page.locator('.herdr-terminal-live .xterm-rows');
+const terminal = (page: Page) => page.locator('.herdr-terminal-live .xterm-rows, .herdr-control .xterm-rows');
 const liveScreen = (page: Page) => page.locator('.herdr-live-viewport');
 const input = (page: Page) => page.getByRole('textbox', { name: '터미널 입력' });
 const history = (page: Page) => page.getByRole('region', { name: '터미널 기록', exact: true });
 const latest = (page: Page) => page.getByRole('button', { name: '실시간으로 돌아가기', exact: true });
+const fitToPhone = (page: Page) => page.getByRole('button', { name: '폰 크기에 맞추기', exact: true });
+const restoreSize = (page: Page) => page.getByRole('button', { name: '원래 크기로', exact: true });
+const controlRequest = (page: Page) => page.waitForRequest(request => new URL(request.url()).pathname === '/api/herdr/control');
+const controlCommand = (page: Page, type: HerdrControlCommand['type']) => page.waitForRequest(request =>
+  new URL(request.url()).pathname === '/api/herdr/control/send' && request.postDataJSON().type === type);
 const back = (page: Page) => page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true });
 const codingNav = (page: Page, touch: boolean) => page.getByRole('navigation', { name: touch ? '주요 화면' : '작업실', exact: true });
 const spaces = (page: Page) => page.getByRole('radio', { name: '스페이스', exact: true }).click();
@@ -50,7 +55,7 @@ for (const { name, width, height, touch } of sizes) {
           await page.addInitScript(({ now, pane }) => {
             localStorage.setItem('ghost.coding.activity:default', JSON.stringify({ [pane]: { status: 'working', changedAt: now - 120_000, openedAt: -1 } }));
           }, { now, pane: visualCodingIds.running });
-          await mockCodingApi(page, { rich: true });
+          await mockCodingApi(page, { rich: true, owned: [visualCodingIds.shell] });
         } }, theme);
         const nav = codingNav(page, touch);
         const codingLink = nav.getByRole('button', { name: /코딩/ });
@@ -228,9 +233,9 @@ for (const { name, width, height, touch } of sizes) {
       } finally { release(); }
       await expect(page).toHaveURL(url => url.hash === `#${paneRoute(visualCodingIds.started)}`);
       await expect(terminal(page)).toContainText('두 번째 줄');
-      const interrupted = post(page, '/api/herdr/input');
+      const interrupted = controlCommand(page, 'input');
       await page.getByRole('button', { name: '중단 (Esc)' }).click();
-      expect((await interrupted).postDataJSON()).toEqual({ pane: visualCodingIds.started, keys: ['esc'] });
+      expect((await interrupted).postDataJSON()).toMatchObject({ pane: visualCodingIds.started, type: 'input', text: '\x1b' });
       await expect(terminal(page)).toContainText('Interrupted');
       if (touch) await back(page).click();
 
@@ -391,6 +396,132 @@ test('forwards native terminal input, including bracketed paste, and refits with
   await expect(page).toHaveURL(`${baseUrl}/#${paneRoute(visualCodingIds.shell)}`);
 });
 
+test('opens an owned pane in control and releases it before opening the next pane', async ({ page }) => {
+  const order: string[] = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname === '/api/herdr/control') order.push(`open:${url.searchParams.get('pane')}`);
+    if (url.pathname === '/api/herdr/control/release') order.push(`release:${request.postDataJSON().pane}`);
+    if (url.pathname === '/api/herdr/terminal') order.push('watch');
+  });
+  await openScreen(page, { ...richCoding, route: () => paneRoute(visualCodingIds.finished), waits: () => [], prepare: page =>
+    mockCodingApi(page, { rich: true, owned: [visualCodingIds.finished, visualCodingIds.shell] }) }, 'light');
+  await expect(page.getByRole('radio', { name: '대화' })).toBeChecked();
+  expect(order).toEqual([]);
+  const opened = controlRequest(page);
+  await page.getByRole('radio', { name: '터미널' }).click();
+  const query = new URL((await opened).url()).searchParams;
+  expect(query.get('fit')).toBeNull();
+  expect(query.get('client')).toMatch(/^[a-f0-9-]{36}$/);
+  expect(Number(query.get('rows'))).toBeLessThan(120);
+  await expect(restoreSize(page)).toBeVisible();
+  await expect(terminal(page)).toContainText('3 pass');
+  await expect(history(page)).toHaveCount(0);
+  const tabRelease = post(page, '/api/herdr/control/release');
+  await page.getByRole('radio', { name: '변경' }).click();
+  expect((await tabRelease).postDataJSON().pane).toBe(visualCodingIds.finished);
+  await page.getByRole('radio', { name: '터미널' }).click();
+  await expect(restoreSize(page)).toBeVisible();
+  const switched = controlRequest(page);
+  await page.evaluate(pane => { location.hash = pane; }, paneRoute(visualCodingIds.shell));
+  expect(new URL((await switched).url()).searchParams.get('client')).toBe(query.get('client'));
+  await expect(terminal(page)).toContainText('git status');
+  expect(order).toEqual([
+    `open:${visualCodingIds.finished}`, `release:${visualCodingIds.finished}`, `open:${visualCodingIds.finished}`,
+    `release:${visualCodingIds.finished}`, `open:${visualCodingIds.shell}`,
+  ]);
+});
+
+test('asks before fitting an unowned pane, remembers consent, and releases with auth on pagehide', async ({ page }) => {
+  const control: URL[] = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname === '/api/herdr/control') control.push(url);
+  });
+  await openScreen(page, { ...coding, route: () => paneRoute(visualCodingIds.shell), waits: () => [] }, 'light');
+  await expect(fitToPhone(page)).toBeVisible();
+  await expect(terminal(page)).toContainText('git status');
+  expect(control).toHaveLength(0);
+  await fitToPhone(page).click();
+  const consent = page.getByRole('dialog', { name: '폰 크기로 줄일까요?' });
+  await expect(consent.getByText('나가면 원래대로 돌아옵니다.')).toBeVisible();
+  await consent.getByRole('button', { name: '취소' }).click();
+  await expect(consent).toBeHidden();
+  expect(control).toHaveLength(0);
+  await fitToPhone(page).click();
+  await consent.getByRole('button', { name: '줄이기' }).click();
+  await expect(restoreSize(page)).toBeVisible();
+  expect(control[0]?.searchParams.get('fit')).toBe('1');
+  const released = post(page, '/api/herdr/control/release');
+  await restoreSize(page).click();
+  expect((await released).postDataJSON()).toEqual({ pane: visualCodingIds.shell, leaseId: '00000000-0000-4000-8000-000000000001' });
+  await expect(fitToPhone(page)).toBeVisible();
+  await fitToPhone(page).click();
+  await expect(restoreSize(page)).toBeVisible();
+  await expect(consent).toBeHidden();
+  expect(control[1]?.searchParams.get('fit')).toBe('1');
+  const hideRelease = post(page, '/api/herdr/control/release');
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+  const leaving = await hideRelease;
+  expect(leaving.headers()['authorization']).toMatch(/^Bearer /);
+  expect(leaving.postDataJSON().leaseId).not.toBe((await released).postDataJSON().leaseId);
+  const resume = controlRequest(page);
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  expect(new URL((await resume).url()).searchParams.get('client')).toBe(control[0]?.searchParams.get('client'));
+});
+
+test('requires an explicit takeover when held and falls back to watch when taken', async ({ page }) => {
+  const pane = visualCodingIds.shell;
+  await openScreen(page, { ...coding, route: () => paneRoute(pane), waits: () => [], prepare: async page => {
+    await mockCodingApi(page, { owned: [pane], held: [pane] });
+    await page.route('**/api/herdr/control?*', async route => {
+      const query = new URL(route.request().url()).searchParams;
+      if (!query.has('takeover')) return route.fallback();
+      return fulfillHerdrFrame(route, 'original controller', {
+        lease: { pane, leaseId: '00000000-0000-4000-8000-000000000001', owned: true, baseline: { cols: 100, rows: 40 } },
+        reason: 'taken',
+      });
+    });
+  } }, 'dark');
+  const dialog = page.getByRole('dialog', { name: '다른 곳에서 쓰는 중이에요. 가져올까요?' });
+  await expect(dialog).toBeVisible();
+  const takeover = controlRequest(page);
+  await dialog.getByRole('button', { name: '가져오기' }).click();
+  expect(new URL((await takeover).url()).searchParams.get('takeover')).toBe('1');
+  await expect(page.getByText('다른 곳에서 이 패널을 가져갔어요.', { exact: true })).toBeVisible();
+  await expect(fitToPhone(page)).toBeVisible();
+  await expect(liveScreen(page)).toBeVisible();
+});
+
+test('reopens a dropped control stream with the same client and never replays the takeover', async ({ page }) => {
+  const pane = visualCodingIds.shell;
+  const requests: URLSearchParams[] = [];
+  const releases: string[] = [];
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === '/api/herdr/control/release') releases.push(request.postDataJSON().pane);
+  });
+  await openScreen(page, { ...coding, route: () => paneRoute(pane), waits: () => [], prepare: async page => {
+    await mockCodingApi(page, { owned: [pane], held: [pane] });
+    await page.route('**/api/herdr/control?*', route => {
+      const query = new URL(route.request().url()).searchParams;
+      requests.push(query);
+      if (requests.length === 1) return route.fallback();
+      const first = requests.length === 2;
+      return fulfillHerdrFrame(route, first ? 'original frame' : 'first full frame after reconnect', {
+        drop: first,
+        lease: { pane, leaseId: crypto.randomUUID(), owned: true, baseline: { cols: 100, rows: 40 } },
+      });
+    });
+  } }, 'light');
+  await page.getByRole('button', { name: '가져오기', exact: true }).click();
+  await expect(terminal(page)).toContainText('first full frame after reconnect');
+  expect(requests).toHaveLength(3);
+  expect(requests[1]?.get('takeover')).toBe('1');
+  expect(requests[2]?.get('takeover')).toBeNull();
+  expect(new Set(requests.map(query => query.get('client'))).size).toBe(1);
+  expect(releases).toEqual([]);
+});
+
 test('retains the last picture during loss and reconnects after the quiet interval', async ({ page }) => {
   let available = true;
   let text = 'previous terminal';
@@ -476,7 +607,7 @@ test('preloads colour history, applies the original wheel delta, and keeps the a
   const requests: URL[] = [];
   const output: HerdrOutput = {
     pane: { id: visualCodingIds.finished, workspaceId: 'w79', tabId: 'w79:tA', title: '긴 터미널', agent: 'omp', status: 'idle',
-      workspace: 'app', cwd: null, tab: 'login', focused: true },
+      workspace: 'app', cwd: null, tab: 'login', focused: true, owned: false },
     text: '',
   };
   await openScreen(page, {
@@ -602,6 +733,94 @@ test('starts omp with the chosen options, and never reuses approval bypass witho
 
 test.describe('mobile pane controls', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  test('controlled terminal sends wheel, touch, page and composer input and defers keyboard resize during a gesture', async ({ page }) => {
+    const pane = visualCodingIds.shell;
+    const commands: HerdrControlCommand[] = [];
+    page.on('request', request => {
+      if (new URL(request.url()).pathname === '/api/herdr/control/send') commands.push(request.postDataJSON());
+    });
+    const opened = controlRequest(page);
+    await openScreen(page, { ...coding, route: () => paneRoute(pane), waits: () => [], prepare: page =>
+      mockCodingApi(page, { owned: [pane] }) }, 'light');
+    const originalRows = Number(new URL((await opened).url()).searchParams.get('rows'));
+    await expect(terminal(page)).toContainText('git status');
+    const grid = page.locator('.herdr-control .xterm-screen');
+    await grid.hover();
+    const wheel = controlCommand(page, 'scroll');
+    await page.mouse.wheel(0, -85);
+    expect((await wheel).postDataJSON()).toMatchObject({ pane, type: 'scroll', direction: 'up', source: 'wheel', lines: 4 });
+    await expect(latest(page)).toBeVisible();
+    const reset = controlCommand(page, 'scroll');
+    await latest(page).tap();
+    expect((await reset).postDataJSON()).toMatchObject({ direction: 'down', lines: 500 });
+    await expect(input(page)).toBeFocused();
+    const pageKey = controlCommand(page, 'scroll');
+    await input(page).press('Shift+PageUp');
+    expect((await pageKey).postDataJSON()).toMatchObject({ direction: 'up', source: 'page_key', lines: originalRows - 1 });
+    const typed = controlCommand(page, 'input');
+    await input(page).press('x');
+    expect((await typed).postDataJSON()).toMatchObject({ text: 'x', pane });
+    expect(commands.slice(-2)).toMatchObject([{ direction: 'down', lines: 500 }, { type: 'input', text: 'x' }]);
+    await expect(latest(page)).toBeHidden();
+    await expect(history(page)).toHaveCount(0);
+
+    const rect = (await grid.boundingBox())!;
+    const x = rect.x + 50, y = rect.y + 40;
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      const scroll = controlCommand(page, 'scroll');
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + 60 }] });
+      expect((await scroll).postDataJSON()).toMatchObject({ type: 'scroll', direction: 'up', source: 'wheel', lines: 2 });
+      await page.evaluate(() => {
+        Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 460 });
+        window.visualViewport!.dispatchEvent(new Event('resize'));
+      });
+      await expect(page.locator('html')).toHaveAttribute('data-keyboard', 'open');
+      await page.waitForTimeout(350); // The 250 ms resize would fire here without the gesture guard.
+      expect(commands.filter(command => command.type === 'resize')).toEqual([]);
+      const resized = controlCommand(page, 'resize');
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      expect((await resized).postDataJSON().rows).toBeLessThan(originalRows);
+    } finally { await cdp.detach(); }
+
+    await page.getByRole('button', { name: '키보드 닫기' }).tap();
+    await page.evaluate(() => {
+      Reflect.deleteProperty(window.visualViewport!, 'height');
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+    });
+    const field = page.getByRole('textbox', { name: '셸 명령' });
+    await field.fill('echo hello');
+    const sent = controlCommand(page, 'input');
+    await page.getByRole('button', { name: '보내기' }).click();
+    expect((await sent).postDataJSON()).toMatchObject({ pane, type: 'input', text: '\x1b[200~echo hello\x1b[201~\r' });
+    await expect(field).toHaveValue('');
+  });
+
+  test('controlled mouse mode sends touch taps as cell down/up and still sends wheel scroll', async ({ page }) => {
+    const pane = visualCodingIds.shell;
+    const mouse: HerdrControlCommand[] = [];
+    page.on('request', request => {
+      if (new URL(request.url()).pathname !== '/api/herdr/control/send') return;
+      const command = request.postDataJSON() as HerdrControlCommand;
+      if (command.type === 'mouse') mouse.push(command);
+    });
+    await openScreen(page, { ...coding, route: () => paneRoute(pane), waits: () => [], prepare: page =>
+      mockCodingApi(page, { owned: [pane], mouse: [pane] }) }, 'dark');
+    const grid = page.locator('.herdr-control .xterm-screen');
+    await expect(terminal(page)).toContainText('git status');
+    await grid.tap({ position: { x: 26, y: 30 } });
+    await expect.poll(() => mouse).toMatchObject([
+      { pane, type: 'mouse', action: 'down', button: 'left', row: 1 },
+      { pane, type: 'mouse', action: 'up', button: 'left', row: 1 },
+    ]);
+    await grid.hover();
+    const wheel = controlCommand(page, 'scroll');
+    await page.mouse.wheel(0, -64);
+    expect((await wheel).postDataJSON()).toMatchObject({ pane, source: 'wheel', direction: 'up', row: expect.any(Number), column: expect.any(Number) });
+    await expect(latest(page)).toBeHidden();
+  });
   test('sends sticky shortcuts, file bytes and an IME-safe shell command', async ({ page }) => {
     await openScreen(page, { ...coding, route: () => paneRoute(visualCodingIds.shell), waits: () => [] }, 'light');
     const bar = page.getByRole('group', { name: '터미널 키', exact: true });

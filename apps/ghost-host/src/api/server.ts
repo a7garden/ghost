@@ -37,6 +37,8 @@ import {
   HerdrAgentStart,
   HerdrAnswer,
   HerdrClose,
+  HerdrControlCommand,
+  HerdrControlRelease,
   HerdrInput,
   HerdrIntegrationInstall,
   HerdrPrompt,
@@ -49,6 +51,7 @@ import {
 } from "@ghost/contract";
 import type { Config } from "../config.ts";
 import type { BrowserPort, DocumentsPort, HerdrPort, SkillsPort } from "../integrations/ports.ts";
+import { HerdrControlRefusal } from "../integrations/herdr-control.ts";
 import { mergeFrames } from "../integrations/herdr.ts";
 import type { OmpInfoProvider } from "../integrations/omp.ts";
 import { saveUpload, UPLOAD_MAX_BYTES } from "../integrations/uploads.ts";
@@ -480,6 +483,10 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
 
     const access = viaEdge ? new Access({ kind: "owner" }) : authenticate(request);
     if (access === null) return error("forbidden", "missing or invalid bearer token", 401);
+    const controlRoute = pathname === "/api/herdr/control" || pathname.startsWith("/api/herdr/control/");
+    const fetchSite = request.headers.get("sec-fetch-site");
+    if (controlRoute && (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site"))) return error("forbidden", "다른 사이트에서는 터미널을 조작할 수 없습니다.", 403);
+    const controlPrincipal = access.principal.kind === "owner" ? "owner" : `device:${access.principal.deviceId}`;
     if (pathname.startsWith("/api/connection-oauth/")) {
       try { return await connectionOAuth.handle(request, url, access) ?? error("not_found", "not found", 404); }
       catch (caught) { return failure(caught); }
@@ -631,6 +638,70 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         return failure(caught);
       }
     }
+    if (pathname === "/api/herdr/control" && request.method === "GET") {
+      try {
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
+        const cols = Number(url.searchParams.get("cols") ?? 80), rows = Number(url.searchParams.get("rows") ?? 24);
+        const client = url.searchParams.get("client");
+        if (!Number.isFinite(cols) || !Number.isFinite(rows)) throw invalid("크기가 올바르지 않습니다.");
+        if (client !== null && !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(client)) throw invalid("연결 ID가 올바르지 않습니다.");
+        const control = await herdr.control({
+          pane: url.searchParams.get("pane") ?? "", client: client?.toLowerCase() ?? null,
+          cols: Math.min(300, Math.max(20, Math.round(cols))), rows: Math.min(120, Math.max(5, Math.round(rows))),
+          fit: url.searchParams.get("fit") === "1", takeover: url.searchParams.get("takeover") === "1",
+        }, controlPrincipal, request.signal);
+        const encoder = new TextEncoder();
+        let cleanup = control.disconnect;
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            let pending: HerdrFrame | null = null;
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            let done = false;
+            const send = (event: string, data: unknown) => {
+              if (done) return;
+              if ((controller.desiredSize ?? 0) <= 0) { close(); return; }
+              try { controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); }
+              catch { close(); }
+            };
+            const flush = () => {
+              clearTimeout(timer);
+              timer = undefined;
+              if (pending) { send("frame", pending); pending = null; }
+            };
+            const close = () => {
+              if (done) return;
+              done = true;
+              clearTimeout(timer);
+              clearInterval(keepalive);
+              request.signal.removeEventListener("abort", close);
+              control.disconnect();
+              try { controller.close(); } catch { /* Already cancelled. */ }
+            };
+            const keepalive = setInterval(() => {
+              if ((controller.desiredSize ?? 0) <= 0) { close(); return; }
+              try { controller.enqueue(encoder.encode(": keepalive\n\n")); } catch { close(); }
+            }, 15_000);
+            cleanup = close;
+            request.signal.addEventListener("abort", close, { once: true });
+            if (request.signal.aborted) { close(); return; }
+            send("lease", control.lease);
+            control.listen((frame) => {
+              pending = mergeFrames(pending, frame);
+              timer ??= setTimeout(flush, 40);
+            }, (event) => {
+              if (done) return;
+              flush();
+              send("end", event);
+              close();
+            });
+          },
+          cancel() { cleanup(); },
+        }, { highWaterMark: 1024 * 1024, size: (chunk) => chunk?.byteLength ?? 0 });
+        return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-store" } });
+      } catch (caught) {
+        return caught instanceof HerdrControlRefusal ? json({ ok: false, error: { code: caught.code, message: caught.message } }, 409) : failure(caught);
+      }
+    }
     // The owner's herdr, from the app: the live terminal of a pane and its keyboard, and creating, renaming and closing workspaces, tabs, panes and agents.
     if (pathname === "/api/herdr/terminal" && request.method === "GET") {
       try {
@@ -702,6 +773,12 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
             return json(await herdr.answer(parse(HerdrAnswerPayload, body)) satisfies HerdrPaneView);
           case "/api/herdr/input":
             await herdr.input(parse(HerdrInput, body));
+            return json({ ok: true });
+          case "/api/herdr/control/send":
+            await herdr.controlSend(parse(HerdrControlCommand, body), controlPrincipal);
+            return json({ ok: true });
+          case "/api/herdr/control/release":
+            await herdr.controlRelease(parse(HerdrControlRelease, body), controlPrincipal);
             return json({ ok: true });
           case "/api/herdr/rename":
             await herdr.rename(parse(HerdrRename, body));

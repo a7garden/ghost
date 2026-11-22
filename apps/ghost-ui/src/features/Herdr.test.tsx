@@ -10,7 +10,7 @@ import { decodeHerdrFrame, HerdrInputQueue } from './herdrTerminalProtocol';
 
 const pane: HerdrPaneView = {
   id: 'w1:pA', workspaceId: 'w1', tabId: 'w1:t1', workspace: 'ghost', tab: 'login', agent: 'Claude Code',
-  status: 'blocked', cwd: '/work/tree', title: '로그인 고치기', focused: true,
+  status: 'blocked', cwd: '/work/tree', title: '로그인 고치기', focused: true, owned: false,
 };
 
 describe('herdr address', () => {

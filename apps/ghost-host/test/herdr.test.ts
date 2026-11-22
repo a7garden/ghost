@@ -107,7 +107,7 @@ test("herdr shows the session as its sidebar does, and reads any pane's terminal
       ["w2", "fix", "idle", { path: "/wt/repo-fix", branch: "ghost/fix" }],
     ]);
     expect(view.workspaces[0]!.tabs.map((tab) => [tab.id, tab.label, tab.panes.map((pane) => pane.id)])).toEqual([["w1:t1", "로그인 고치기", ["w1:pA"]], ["w1:t2", "shell", ["w1:p2", "w1:p3"]]]);
-    expect(view.workspaces[0]!.tabs[0]!.panes[0]).toEqual({ id: "w1:pA", workspaceId: "w1", tabId: "w1:t1", workspace: "ghost", tab: "로그인 고치기", agent: "claude", status: "blocked", cwd: "/work/tree", title: "로그인 고치기", focused: true });
+    expect(view.workspaces[0]!.tabs[0]!.panes[0]).toEqual({ id: "w1:pA", workspaceId: "w1", tabId: "w1:t1", workspace: "ghost", tab: "로그인 고치기", agent: "claude", status: "blocked", cwd: "/work/tree", title: "로그인 고치기", focused: true, owned: false });
     // A plain shell is a pane too, with no agent.
     expect(view.workspaces[0]!.tabs[1]!.panes[0]).toMatchObject({ id: "w1:p2", agent: null, status: "unknown", focused: false, title: "work" });
 
@@ -707,7 +707,7 @@ test("the watcher tells the owner once when an agent that was working starts wai
   const herdr = {
     overview: async () => ({
       available: true, session: state.session, note: null,
-      workspaces: [{ id: "w1", label: "ghost", status: "idle" as const, worktree: null, tabs: [{ id: "w1:t1", label: "로그인 고치기", status: "idle" as const, panes: state.panes.map(([id, status, agent]) => ({ id, workspaceId: "w1", tabId: "w1:t1", workspace: "ghost", tab: "로그인 고치기", agent, status, cwd: "/work", title: "로그인 고치기", focused: false })) }] }],
+      workspaces: [{ id: "w1", label: "ghost", status: "idle" as const, worktree: null, tabs: [{ id: "w1:t1", label: "로그인 고치기", status: "idle" as const, panes: state.panes.map(([id, status, agent]) => ({ id, workspaceId: "w1", tabId: "w1:t1", workspace: "ghost", tab: "로그인 고치기", agent, status, cwd: "/work", title: "로그인 고치기", focused: false, owned: false })) }] }],
     }),
   } as unknown as HerdrPort;
   let time = 1_000_000;
