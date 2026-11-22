@@ -252,7 +252,6 @@ for (const { name, width, height, touch } of sizes) {
       await expect(terminal(page)).toContainText('두 번째 줄');
       const interrupted = controlCommand(page, 'input');
       if (touch) {
-        await expect(stop(page)).toHaveCount(0);
         await page.getByRole('group', { name: '터미널 키' }).getByRole('button', { name: '중단 (Esc)', exact: true }).tap();
       } else {
         const headerStop = page.locator('.coding-detail-head').getByRole('button', { name: '작업 중단', exact: true });
@@ -710,7 +709,8 @@ test('manages workspaces, tabs, splits and shell agents through the roster', asy
   await page.getByRole('button', { name: '시작', exact: true }).click();
   expect((await agent).postDataJSON()).toEqual({ pane: 'w79:p82', agent: 'pi', task: '변경을 읽어 주세요.' });
   await expect(terminal(page)).toContainText('변경을 읽어 주세요.');
-  await expect(followUp(page)).toHaveCount(0);
+  // An agent without a conversation view keeps its follow-up field beside the terminal.
+  await expect(followUp(page)).toBeVisible();
   await returnToRoster('변경을 읽어 주세요.');
 
   await choose('실험', '닫기');

@@ -83,10 +83,10 @@ describe('herdr roster', () => {
 });
 
 describe('herdr pane', () => {
-  const body = (status: HerdrPaneView['status'], options: { mode?: 'chat' | 'live'; pending?: boolean; compact?: boolean; agent?: string | null; delivery?: 'steer' | 'queue'; suggestions?: string[] } = {}) =>
+  const body = (status: HerdrPaneView['status'], options: { mode?: 'chat' | 'live'; pending?: boolean; compact?: boolean; agent?: string | null; delivery?: 'steer' | 'queue'; suggestions?: string[]; chat?: boolean } = {}) =>
     renderToStaticMarkup(<HerdrPaneBody
       pane={{ ...pane, status, agent: options.agent === undefined ? pane.agent : options.agent }} pending={options.pending} compact={options.compact ?? false}
-      mode={options.mode ?? 'live'} chat onMode={() => {}} delivery={options.delivery} suggestions={options.suggestions}
+      mode={options.mode ?? 'live'} chat={options.chat ?? true} onMode={() => {}} delivery={options.delivery} suggestions={options.suggestions}
       screen={<HerdrDiffText value={'@@ -0 +1 @@\n+<b>$ bun test</b>'} wrap={false}/>} onPrompt={async () => true} onKey={() => {}}/>);
 
   it('escapes diffs as text and keeps the pane context', () => {
@@ -127,6 +127,11 @@ describe('herdr pane', () => {
     expect(markup).toContain('aria-label="다음 메시지 제안"');
     expect(markup).toContain('테스트도 돌려줘');
     expect(body('working', { mode: 'chat', suggestions })).not.toContain('다음 지시 제안');
+  });
+
+  it('keeps the follow-up field in the terminal of an agent that has no conversation view', () => {
+    expect(body('done', { mode: 'live', chat: false })).toContain('>후속 지시</label>');
+    expect(body('done', { mode: 'live', chat: true })).not.toContain('>후속 지시</label>');
   });
 
   it('has no follow-up field for a plain shell', () => {

@@ -88,9 +88,9 @@ export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = f
   const root = useRef<HTMLElement>(null);
   const blocked = Boolean(pane.agent && pane.status === 'blocked');
   const working = Boolean(pane.agent && pane.status === 'working');
-  // The terminal takes its own typing; only a conversation view carries the follow-up field.
+  // The terminal takes its own typing; the follow-up field belongs to the conversation view, or to the terminal of an agent that has none.
   const keysVisible = mode === 'live' && (compact || blocked);
-  const composing = mode === 'chat' && Boolean(pane.agent) && !blocked;
+  const composing = (mode === 'chat' || (mode === 'live' && !chat)) && Boolean(pane.agent) && !blocked;
   const approval = blocked ? asks?.entries[pane.id] : undefined;
   const focusComposer = useEffectEvent(() => {
     if (composing && !compact && !field.current?.disabled) field.current?.focus({ preventScroll: true });
