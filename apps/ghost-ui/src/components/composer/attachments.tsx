@@ -64,7 +64,7 @@ export function AttachmentTray({ items, onRemove }: { items: PendingAttachment[]
     {items.map(item => <li key={item.id} className="attachment" data-status={item.status} data-kind={item.preview ? 'image' : 'file'}
       title={item.error ? `${item.name} — ${item.error}` : item.name}>
       {item.preview ? <img src={item.preview} alt=""/> : <span className="attachment__icon" aria-hidden="true">{item.status === 'failed' ? <CircleAlert/> : <FileText/>}</span>}
-      {!item.preview && <span className="attachment__copy"><span>{item.name}</span><small>{item.error ?? sizeLabel(item.size)}</small></span>}
+      {!item.preview && <span className="attachment__copy"><span>{item.name}</span><small>{item.status === 'uploading' ? '올리는 중…' : item.error ?? sizeLabel(item.size)}</small></span>}
       {item.preview && item.status === 'failed' && <span className="attachment__failed" aria-hidden="true"><CircleAlert/></span>}
       <span className="sr-only">{item.name}{item.status === 'uploading' ? ' 올리는 중' : item.error ? ` ${item.error}` : ''}</span>
       <button type="button" className="attachment__remove" aria-label={`${item.name} 빼기`} onClick={() => onRemove(item.id)}><X aria-hidden="true"/></button>

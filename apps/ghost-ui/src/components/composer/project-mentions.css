@@ -1,5 +1,6 @@
 .project-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
 .ghost-composer .project-chips { padding: 4px 14px; }
+.chat-layout .ghost-composer .project-chips { padding: 2px 4px; }
 .project-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; max-width: 100%; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: var(--ghost-hover2); color: var(--ghost-ink2); font: 500 var(--text-ui)/1.4 var(--font-sans); text-decoration: none; cursor: pointer; }
 .project-chip span { overflow-wrap: anywhere; min-width: 0; }
 .project-chip svg { flex-shrink: 0; }

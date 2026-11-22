@@ -44,8 +44,6 @@ export interface ComposerProps {
   className?: string
 }
 
-const MAX_HEIGHT = 240
-
 /** Controlled, auto-growing message composer. The owner clears the draft after submission. */
 export function Composer({
   value,
@@ -90,13 +88,13 @@ export function Composer({
   const resize = React.useCallback(() => {
     const textarea = textareaRef.current
     if (!textarea) return
+    const scrollTop = textarea.scrollTop
     textarea.style.height = "auto"
-    const contentHeight = textarea.scrollHeight
-    textarea.style.height = `${Math.min(contentHeight, MAX_HEIGHT)}px`
-    textarea.style.overflowY = contentHeight > MAX_HEIGHT ? "auto" : "hidden"
+    textarea.style.height = `${textarea.scrollHeight}px`
+    textarea.scrollTop = scrollTop
   }, [])
 
-  React.useLayoutEffect(resize, [resize, value])
+  React.useLayoutEffect(resize, [resize, value, placeholder])
 
   React.useEffect(() => {
     const textarea = textareaRef.current

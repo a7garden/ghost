@@ -1,11 +1,12 @@
-/* The conversation's decision dock fold (ChatDecisions). The deck itself stays app.css's;
-   only the summary row and the compact height cap live here. The row renders on the compact
-   layout only, so its rules need no media query of their own. */
-.chat-decisions { display: grid; min-width: 0; gap: 6px; }
-/* Folded with nothing to unfold (the deck renders nothing), the body takes no room. */
+/* Keep the compact summary fixed while the expanded deck shares the dock with the draft. */
+.chat-decisions { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 6px; margin-bottom: 10px; }
+.chat-decisions:has(.chat-decisions__row) { min-height: 44px; }
+.chat-decisions:not(:has(.chat-decisions__row, .deck)) { display: none; }
+.chat-decisions .deck[data-docked] { margin-bottom: 0; }
+.chat-decisions__body { min-height: 0; max-height: min(40dvh, 380px); overflow-y: auto; overscroll-behavior: contain; }
 .chat-decisions__body:empty { display: none; }
 .chat-decisions__row {
-  display: flex; min-width: 0; min-height: 48px; align-items: center; gap: 8px;
+  display: flex; flex: none; min-width: 0; min-height: 44px; align-items: center; gap: 8px;
   padding: 8px 12px; border: 1px solid var(--ghost-line-strong); border-radius: var(--radius-control);
   background: var(--ghost-surface); color: var(--ghost-ink); font: inherit; text-align: left; cursor: pointer;
 }
@@ -15,9 +16,11 @@
 .chat-decisions__count { flex: none; font-size: 15px; font-weight: 650; }
 .chat-decisions__lead { flex: 1; min-width: 0; overflow: hidden; color: var(--ghost-ink2); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-decisions__due { flex: none; color: var(--ghost-amber-ink); font-size: var(--text-caption); font-weight: 550; }
+.chat-decisions__row > .fold-mark { flex: none; }
 
-/* Unfolded beside the composer, the card gives the transcript room back: the desktop cap
-   (65dvh) assumes the deck is the only dock content. */
-@media (max-width: 55.999rem) {
-  :root:not([data-desktop-shell]) .chat-decisions[data-open] .deck[data-docked] .decision { max-height: min(46dvh, 380px); }
+.chat-decisions .deck[data-docked] .decision { max-height: none; overflow: visible; }
+.chat-decisions .decision:focus-visible { outline-offset: -3px; }
+:root[data-keyboard="open"] .chat-decisions__body { max-height: max(110px, calc(var(--ghost-visible-height, 100dvh) * .29)); }
+.chat-decisions[data-open]:has(.decision) ~ .ghost-composer .ghost-composer__textarea {
+  max-height: clamp(44px, calc(var(--ghost-visible-height, 100dvh) * min(.18, var(--composer-draft-share, .18))), 240px);
 }

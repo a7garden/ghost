@@ -210,7 +210,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
       extension={mode === 'work' ? <div className="composer-fields">
         <label className="composer-field"><span>완료 기준</span>
           <input value={criteria} onChange={event => setCriteria(event.target.value)} maxLength={8192} disabled={sending} placeholder="무엇이 되면 끝난 것인지"/></label>
-        <label className="composer-field" style={{ flexGrow: 0 }}><span>기한</span>
+        <label className="composer-field composer-field--deadline"><span>기한</span>
           <input type="datetime-local" value={deadline} onChange={event => setDeadline(event.target.value)} disabled={sending}/></label>
         <fieldset disabled={sending} className="border-0 p-0 m-0 min-w-0 basis-full"><WorkModelFields slot={slot} retrySlot={retrySlot} onSlot={setSlot} onRetry={setRetrySlot}/></fieldset>
       </div> : mode === 'later' ? <div className="composer-fields">

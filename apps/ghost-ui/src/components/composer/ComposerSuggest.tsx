@@ -21,10 +21,14 @@ export function ComposerSuggest({ id, label, items, active, onActive }: {
     const node = ref.current;
     const anchor = node?.offsetParent;
     if (!node || !(anchor instanceof HTMLElement)) return;
+    const frame = anchor.closest('.ghost-conversation');
+    const viewport = window.visualViewport;
     const place = () => {
       const bounds = anchor.getBoundingClientRect();
-      const above = Math.max(0, bounds.top - 64);
-      const below = Math.max(0, window.innerHeight - bounds.bottom - 64);
+      const top = viewport?.offsetTop ?? 0;
+      const bottom = top + (viewport?.height ?? window.innerHeight);
+      const above = Math.max(0, bounds.top - Math.max(frame?.getBoundingClientRect().top ?? top + 56, top) - 8);
+      const below = Math.max(0, Math.min(frame?.getBoundingClientRect().bottom ?? bottom, bottom) - bounds.bottom - 8);
       const preferBelow = above < Math.min(node.scrollHeight, 280) && below > above;
       const maxHeight = Math.min(280, preferBelow ? below : above);
       setPlacement(previous => previous.below === preferBelow && previous.maxHeight === maxHeight ? previous : { below: preferBelow, maxHeight });
@@ -32,13 +36,29 @@ export function ComposerSuggest({ id, label, items, active, onActive }: {
     place();
     const observer = new ResizeObserver(place);
     observer.observe(anchor);
+    if (frame) observer.observe(frame);
+    viewport?.addEventListener('resize', place);
     window.addEventListener('resize', place);
     document.addEventListener('scroll', place, true);
-    return () => { observer.disconnect(); window.removeEventListener('resize', place); document.removeEventListener('scroll', place, true); };
+    return () => {
+      observer.disconnect();
+      viewport?.removeEventListener('resize', place);
+      window.removeEventListener('resize', place);
+      document.removeEventListener('scroll', place, true);
+    };
   }, [items.length]);
+  useLayoutEffect(() => {
+    const list = ref.current;
+    const option = list?.children[active];
+    if (!list || !option) return;
+    const bounds = list.getBoundingClientRect();
+    const row = option.getBoundingClientRect();
+    if (row.top < bounds.top) list.scrollTop += row.top - bounds.top;
+    else if (row.bottom > bounds.bottom) list.scrollTop += row.bottom - bounds.bottom;
+  }, [active, placement]);
   return <div ref={ref} className="composer-suggest" data-below={placement.below || undefined} style={{ maxHeight: placement.maxHeight }} role="listbox" id={id} aria-label={label}>
     {items.map((item, index) => <div key={item.id} id={`${id}-${index}`} role="option" aria-selected={index === active} className="composer-suggest__item"
-      onPointerMove={() => { if (index !== active) onActive(index); }}
+      onPointerMove={event => { if (event.pointerType !== 'touch' && index !== active) onActive(index); }}
       // The field keeps focus so typing continues after a pick.
       onPointerDown={event => event.preventDefault()}
       onClick={item.onSelect}>

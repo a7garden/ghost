@@ -56,6 +56,31 @@ test('open and switch Ghost conversations from the mobile dock', async ({ page }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
 
+test('keeps the long chat draft and its actions within the keyboard viewport', async ({ page }) => {
+  await openScreen(page, { name: 'conversation', route: state => `/ghosts/${state.defaultGhostId}`, waits: () => ['맡긴 일에서 볼 수 있어요'], prepare: mockIPhone }, 'light');
+  const composer = page.locator('#message-input');
+  const draft = '검토한 내용을 다시 읽습니다.\n'.repeat(30);
+  await composer.fill(draft);
+  await page.evaluate(() => {
+    Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 500 });
+    window.visualViewport!.dispatchEvent(new Event('resize'));
+  });
+  await expect(page.locator('html')).toHaveAttribute('data-keyboard', 'open');
+  const dock = page.locator('.ghost-conversation__dock');
+  await dock.getByRole('button', { name: '더하기', exact: true }).tap();
+  const menu = dock.getByRole('menu', { name: '더하기' });
+  await expect(menu).toBeVisible();
+  const bounds = (await menu.boundingBox())!;
+  const title = (await page.locator('.ghost-titlebar').boundingBox())!;
+  expect(bounds.y).toBeGreaterThanOrEqual(title.y + title.height);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(500);
+  await page.keyboard.press('Escape');
+  await dock.getByRole('button', { name: /확인 필요 1건/ }).tap();
+  await expect(dock.locator('.decision')).toBeVisible();
+  expect(await dock.getByRole('button', { name: '메시지 보내기', exact: true }).evaluate(button => button.getBoundingClientRect().bottom)).toBeLessThanOrEqual(500);
+  await expect(composer).toHaveValue(draft);
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test.describe(theme, () => {
     test.use({ colorScheme: theme });
@@ -151,6 +176,10 @@ for (const theme of ['light', 'dark'] as const) {
       await composer.press('Enter');
       await expect(composer).toHaveValue('함께 확인할 내용\n');
       await expect(composer).toBeFocused();
+      const decisionRow = page.getByRole('button', { name: /확인 필요 1건/ });
+      const surface = page.locator('.ghost-conversation__dock .ghost-composer__surface');
+      const decisionBounds = (await decisionRow.boundingBox())!;
+      expect((await surface.boundingBox())!.y - decisionBounds.y - decisionBounds.height).toBeGreaterThanOrEqual(8);
       await screenshot(page, `composer-focused-${theme}-iphone.png`);
       await page.evaluate(() => {
         Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 500 });
@@ -160,6 +189,7 @@ for (const theme of ['light', 'dark'] as const) {
       const composerBounds = (await composer.boundingBox())!;
       expect(composerBounds.y + composerBounds.height).toBeLessThanOrEqual(500);
       await screenshot(page, `composer-keyboard-${theme}-iphone.png`);
+      expect(await surface.evaluate(element => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(500);
       await page.evaluate(() => {
         Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 844 });
         window.visualViewport!.dispatchEvent(new Event('resize'));

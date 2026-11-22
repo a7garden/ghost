@@ -467,7 +467,7 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 .thread-card__copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
 .thread-card__title { overflow: hidden; font-size: var(--text-ui); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .thread-card[data-settled] .thread-card__title { font-weight: 450; }
-.thread-card__meta { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--ghost-ink3); font-size: var(--text-caption); }
+.thread-card__meta { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: 2px 6px; color: var(--ghost-ink3); font-size: var(--text-caption); overflow-wrap: anywhere; }
 .thread-card__meta .dot-avatar { border-radius: 50%; }
 .thread-card__delegates { display: flex; min-width: 0; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .thread-card__delegate { display: inline-flex; min-width: 0; max-width: 160px; align-items: center; gap: 4px; padding: 2px 7px 2px 4px; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: var(--ghost-hover); font-size: var(--text-micro); animation: pop-in var(--duration-base) var(--ease-spring) both; }
@@ -479,9 +479,9 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 .chat-stop { display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: var(--radius-pill); color: var(--ghost-ink); background: var(--ghost-hover2); cursor: pointer; }
 .chat-stop:hover { background: color-mix(in srgb, var(--ghost-ink) 12%, transparent); }
 .chat-stop svg { width: 12px; height: 12px; fill: currentColor; }
-.chat-error { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; padding: 10px 12px; border-radius: var(--radius-card); color: var(--ghost-ink); background: var(--ghost-danger-tint); font-size: var(--text-caption); text-align: left; }
-.chat-error > svg { flex: none; margin-top: 1px; color: var(--ghost-danger); }
-.chat-error > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.chat-error { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 4px 6px 4px 12px; border-radius: var(--radius-card); color: var(--ghost-ink); background: var(--ghost-danger-tint); font-size: var(--text-caption); text-align: left; }
+.chat-error > svg { flex: none; color: var(--ghost-danger-ink); }
+.chat-error > span { min-width: 0; flex: 1; padding-block: 4px; overflow-wrap: anywhere; }
 .chat-empty { display: grid; justify-items: center; gap: 14px; padding: clamp(32px, 14vh, 140px) 0 24px; text-align: center; animation: rise-in var(--duration-slow) var(--ease-enter) both; }
 .chat-empty h2 { margin: 0; color: var(--ghost-ink); font-size: var(--text-headingLg); font-weight: 650; letter-spacing: -.028em; }
 .chat-empty__starters { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 560px; margin-top: 10px; }
@@ -546,6 +546,7 @@ details.transcript-event[open] { background: var(--ghost-hover); }
 .trail__summary { display: inline-flex; max-width: calc(100% + 6px); min-width: 0; align-items: center; gap: 8px; margin-left: -6px; padding: 4px 10px 4px 6px; border-radius: var(--radius-pill); list-style: none; cursor: pointer; transition: background-color var(--duration-fast) ease; }
 .trail__summary::-webkit-details-marker { display: none; }
 .trail__summary:hover { background: var(--ghost-hover); }
+.chat-layout :is(.trail__summary, .reasoning__summary):focus-visible { outline: 2px solid var(--ghost-ink2); outline-offset: -2px; }
 /* Opened disclosures unfold their content instead of snapping in. */
 .trail[open] > .trail__steps, .reasoning[open]:not([data-live]) > .reasoning__body { animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .trail__count { min-width: 0; overflow: hidden; color: var(--ghost-ink2); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }

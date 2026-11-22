@@ -271,26 +271,29 @@
 .ghost-segmented-control__count { flex-shrink: 0; color: var(--ghost-ink3); font-size: var(--text-micro); font-variant-numeric: tabular-nums; }
 
 /* Composer ------------------------------------------------------------- */
-.ghost-composer { position: relative; min-width: 0; }
+.ghost-composer { position: relative; isolation: isolate; min-width: 0; }
 .ghost-composer__label { display: block; margin-bottom: var(--ghost-space-2); color: var(--ghost-ink); font-size: var(--text-caption); }
 .ghost-composer__label--visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .ghost-composer__surface {
   position: relative; display: flex; min-width: 0; flex-direction: column; gap: 6px;
-  padding: 12px 12px 10px 16px; border-radius: var(--radius-composer); background: var(--ghost-surface);
+  padding: var(--composer-surface-padding, 12px 12px 10px 16px); border-radius: var(--radius-composer); background: var(--ghost-surface);
   box-shadow: var(--shadow-raised);
   transition: box-shadow var(--duration-base) ease;
 }
 .ghost-composer__surface:focus-within { box-shadow: 0 0 0 1px var(--ghost-line-strong), 0 1px 2px rgba(16, 18, 24, .04), 0 16px 40px -18px rgba(16, 18, 24, .24); }
 .ghost-composer__textarea {
-  box-sizing: border-box; min-height: 28px; max-height: 240px; height: auto; resize: none; overflow-y: hidden;
-  padding: 4px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  box-sizing: border-box; min-height: 28px; max-height: 240px; height: auto; resize: none; overflow-y: auto;
+  padding: var(--composer-text-padding, 4px 0); border: 0; border-radius: 0; background: transparent; box-shadow: none;
   color: var(--ghost-ink); font: var(--text-bodyLg)/1.5 var(--font-sans);
 }
-.ghost-composer__textarea::placeholder { color: var(--ghost-ink3); }
+.ghost-composer__textarea::placeholder { color: var(--ghost-ink3); opacity: 1; }
+:is(.chat-layout .ghost-composer, .coding-composer) { --composer-surface-padding: 10px 12px; --composer-text-padding: 4px; }
 .ghost-composer__textarea:disabled { opacity: .55; }
 .ghost-composer__footer { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.ghost-composer__footer-slot, .ghost-composer__footer-actions, .ghost-composer__footer-trailing { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; }
-.ghost-composer__footer-slot { flex: 1; }
+.ghost-composer__footer-slot, .ghost-composer__footer-actions { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.ghost-composer__footer-slot { flex: 1; overflow-wrap: anywhere; }
+.ghost-composer__footer-slot:has(.composer-hint, .composer-confirmation) { order: -1; flex: 0 0 100%; padding-inline: 4px; }
+.ghost-composer__footer-actions > :is(.chat-stop, [data-slot="button"]) { flex: none; }
 .composer-confirmation { color: var(--ghost-signal-ink); font-size: var(--text-caption); font-weight: 500; animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .ghost-composer__footer-actions { justify-content: flex-end; }
 /* While the Ghost responds two soft arcs circle the composer at an even pace, over a faint steady ring so the
@@ -298,7 +301,7 @@
    2026.11.11 : 가속·감속 곡선 하나짜리 혜성이 울컥거리며 돌았다. 마주 보는 긴 꼬리 두 개를 일정 속도로 돌리고 빛은 숨 쉬듯 바꾼다. */
 .ghost-composer[data-running] .ghost-composer__surface { box-shadow: 0 0 0 1px color-mix(in srgb, var(--ghost-signal) 18%, transparent), var(--shadow-raised); }
 .ghost-composer[data-running] .ghost-composer__surface::before,
-.ghost-composer[data-running] .ghost-composer__surface::after {
+.ghost-composer[data-running]::before {
   content: ''; position: absolute; inset: -1.5px; z-index: -1; border-radius: inherit; pointer-events: none;
   background: conic-gradient(from var(--composer-angle, 0deg),
     transparent 0%, color-mix(in srgb, var(--ghost-signal) 20%, transparent) 18%, color-mix(in srgb, var(--ghost-signal) 85%, transparent) 38%, transparent 50%,
@@ -310,8 +313,8 @@
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
 }
-.ghost-composer[data-running] .ghost-composer__surface::after {
-  inset: -3px; z-index: -2; filter: blur(12px);
+.ghost-composer[data-running]::before {
+  inset: -2px; z-index: -2; border-radius: var(--radius-composer); filter: blur(var(--composer-glow-blur, 8px));
   animation: composer-orbit 4.2s linear infinite, composer-breathe 2.4s ease-in-out infinite;
 }
 @keyframes composer-orbit { to { --composer-angle: 360deg; } }
@@ -341,9 +344,21 @@
 .ghost-conversation__messages > [data-kind="speaker"] + * { margin-block-start: 6px; }
 /* The top padding keeps the composer's 1.5px running edge inside the dock, below the fade above it. */
 .ghost-conversation__dock { position: relative; z-index: 1; flex: 0 0 auto; padding: 6px var(--ghost-space-6) 16px; background: var(--ghost-canvas); }
+.chat-layout .ghost-conversation__dock { display: flex; max-height: 100%; }
+.chat-layout .ghost-conversation__dock > .ghost-conversation__column { display: flex; min-height: 0; flex-direction: column; }
+.chat-layout .ghost-conversation__dock > .ghost-conversation__column > .ghost-conversation__footer { flex: none; }
+.chat-layout .ghost-conversation__dock .ghost-composer { display: flex; min-height: 0; flex-direction: column; }
+.chat-layout .ghost-conversation__dock .ghost-composer__surface { min-height: 0; }
+.chat-layout .ghost-conversation__dock .ghost-composer__surface > :not(.ghost-composer__textarea, .composer-fields) { flex-shrink: 0; }
+.chat-layout .ghost-conversation__dock .composer-fields { min-height: 0; overflow-y: auto; }
 .ghost-conversation__dock::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px; background: linear-gradient(transparent, var(--ghost-canvas)); pointer-events: none; }
-.ghost-conversation__footer { margin-top: var(--ghost-space-2); color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.4; text-align: center; }
-.ghost-conversation__jump { position: absolute; z-index: 2; bottom: 12px; left: 50%; max-width: calc(100% - 24px); translate: -50% 0; border-radius: var(--radius-pill) !important; background: var(--ghost-raised) !important; box-shadow: var(--shadow-raised); animation: rise-in var(--duration-base) var(--ease-enter) both; }
+.ghost-conversation__footer { color: var(--ghost-ink2); font-size: var(--text-caption); line-height: 1.4; text-align: center; }
+.ghost-conversation__transcript-frame:has(> .ghost-conversation__jump) { flex-direction: column; }
+.ghost-conversation__jump {
+  position: relative; z-index: 2; flex: none; align-self: center; max-width: calc(100% - 24px); margin-block: 2px 4px;
+  border-radius: var(--radius-pill) !important; background: var(--ghost-raised) !important; box-shadow: var(--shadow-raised);
+  animation: rise-in var(--duration-base) var(--ease-enter) both;
+}
 
 /* ScrollRail placed in its frame, here the transcript's. Fine pointers only; touch keeps native scrolling. */
 .ghost-rail { position: absolute; z-index: 2; top: 30px; right: 2px; bottom: 18px; width: 22px; opacity: 0; touch-action: none; user-select: none; cursor: default; transition: opacity var(--duration-base) ease; }
@@ -427,7 +442,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .ghost-composer[data-running] .ghost-composer__surface::before { animation: none; background: color-mix(in srgb, var(--ghost-signal) 70%, transparent); }
-  .ghost-composer[data-running] .ghost-composer__surface::after { display: none; }
+  .ghost-composer[data-running]::before { display: none; }
 }
 @media (forced-colors: active) {
   .ghost-conversation__transcript:focus-visible, .ghost-conversation-activity__summary:focus-visible { outline-color: Highlight; }

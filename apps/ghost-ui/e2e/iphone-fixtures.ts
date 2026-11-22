@@ -96,6 +96,8 @@ const presentation: InteractiveUi = { version: 'ghost-ui/1', title: '주간 조�
   { type: 'html', id: 'html', title: '보고서 미리보기', html: '<article><h2>이번 주의 기록</h2><p>세 가지 자료를 비교하고 다음 확인 항목을 정리했습니다.</p><table><tr><th>항목</th><th>관찰</th></tr><tr><td>처리 시간</td><td>핵심 경로를 먼저 확인</td></tr></table></article>' },
 ] };
 export async function mockRichConversation(page: Page) {
+  // The interactive transcript fixtures don't exercise AI suggestions; keep the dock height stable.
+  await page.route('**/api/suggestions?*', route => route.fulfill({ json: { suggestions: [] } }));
   await page.route('**/api/state', async route => {
     const response = await route.fetch();
     const state = await response.json();

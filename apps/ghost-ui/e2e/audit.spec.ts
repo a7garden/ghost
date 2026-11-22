@@ -200,6 +200,15 @@ for (const theme of ['light', 'dark'] as const) {
       await page.locator('.trail:not([data-live]) > summary').click();
       await expect(page.getByText('세 가지 자료를 읽고 중요한 차이를 정리했습니다.')).toBeVisible();
       await capture(page, 'tool-trail', theme, info.project.name);
+      const jump = page.getByRole('button', { name: '최신 메시지', exact: true });
+      const transcript = page.locator('.ghost-conversation__transcript');
+      await transcript.dispatchEvent('touchmove');
+      await transcript.evaluate(element => { element.scrollTop = 0; });
+      await expect(jump).toBeVisible();
+      const transcriptBounds = (await transcript.boundingBox())!;
+      expect((await jump.boundingBox())!.y).toBeGreaterThanOrEqual(transcriptBounds.y + transcriptBounds.height);
+      await jump.click();
+      await expect(jump).toBeHidden();
       await page.goto(`${state.baseUrl}/#/ghosts/${state.defaultGhostId}?thread=${state.workLiveId}`);
       await expect(page.locator('.thread-panel')).toBeVisible();
       await expect(page.locator('.thread-panel .chat-live__text')).toHaveText('자료를 비교하고 있어요. 확인이 필요한 차이부터 정리해서 전해드릴게요.');

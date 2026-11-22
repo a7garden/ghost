@@ -204,10 +204,9 @@
   .coding-dock > * { max-width: 47rem; margin-inline: auto; }
   .coding-dock > [role='alert'] { margin-bottom: 8px; }
   .coding-composer { width: 100%; }
-  .coding-composer .ghost-composer__surface { padding-top: 10px; }
   .coding-composer .coding-hint { padding: 2px 0; }
-  /* The pane clips its edge, so the working glow stays inside the dock's padding. */
-  .coding-composer[data-running] .ghost-composer__surface::after { inset: -2px; filter: blur(7px); }
+  /* The coding pane clips outside the dock; keep the halo within its gutters. */
+  .coding-composer { --composer-glow-blur: 5px; }
   /* How a message sent now reaches the working agent. */
   .coding-delivery { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px 3px 7px; border-radius: var(--radius-pill);
     background: var(--ghost-signal-tint); color: var(--ghost-signal-ink); font-size: var(--text-caption); font-weight: 550; white-space: nowrap; }
@@ -356,7 +355,7 @@
   .coding-page[data-compact] .herdr-file-diff header { padding-inline: 8px 12px; }
   .coding-page[data-compact] .herdr-agent-options > summary { padding-block: 10px; }
   .coding-page[data-compact] .coding-dock { padding: 8px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
-  :root[data-keyboard='open'] .coding-page[data-compact] .coding-dock { padding-bottom: 12px; }
+  :root[data-keyboard='open'] .coding-page[data-compact] .coding-dock { padding-bottom: 10px; }
   .coding-page[data-compact] .coding-new { padding: 14px 16px max(20px, env(safe-area-inset-bottom)); }
   .coding-page[data-compact] .coding-new :is(input[data-slot='input'], button[data-slot='select-trigger']), .coding-page[data-compact] [data-slot='button'] { min-height: 44px; }
   .coding-page[data-compact] [data-slot='button'][aria-label] { min-width: 44px; }
