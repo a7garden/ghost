@@ -28,8 +28,9 @@ import { Goals } from './features/goals/Goals';
 import { WorkDetail } from './features/WorkDetail';
 import { InboxView } from './features/Inbox';
 import { HostView } from './features/HostView';
-import { CodingAgentSettings } from './features/CodingAgentSettings';
-import { CodingPage, codingSessionPath } from './features/CodingSession';
+import { CodingSettings } from './features/CodingSetup';
+import { CodingPage } from './features/Coding';
+import { herdrPanePath } from './features/herdrDisplay';
 import { GhostSettings } from './features/GhostSettings';
 import { MobilePairing } from './features/MobilePairing';
 import { VaultView } from './features/VaultView';
@@ -182,7 +183,7 @@ function Shell() {
   const switchGhost = (id: string) => navigate(`/ghosts/${encodeURIComponent(id)}`);
 
   const selectedScope = section === 'scopes' && path.split('/')[2] ? decodeURIComponent(path.split('/')[2]!) : undefined;
-  const codingDetail = section === 'coding' && (params.get('new') === '1' || params.has('session') || params.has('herdr'));
+  const codingDetail = section === 'coding' && (params.get('new') === '1' || params.has('herdr'));
   const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail' || section === 'coding';
   const closeCodingForm = (next: string) => {
     // A start can finish after the owner leaves the form, without pulling them back.
@@ -254,7 +255,7 @@ function Shell() {
     { id: 'history', label: '구성 기록', icon: RefreshCw, content: <ConfigHistory/> },
     { id: 'metrics', label: '계측', icon: Server, content: <ScopeMetrics/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
-    { id: 'coding', label: '코딩 에이전트', icon: SquareTerminal, content: <CodingAgentSettings/> },
+    { id: 'coding', label: '코딩', icon: SquareTerminal, content: <CodingSettings/> },
     { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
       {desktopError && <Banner variant="warning" className="mb-4">{desktopError}</Banner>}
@@ -302,8 +303,8 @@ function Shell() {
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
-            {section === 'coding' && <CodingPage scopes={state.scopes} sessionId={params.get('session')} herdrPane={params.get('herdr')} creating={params.get('new') === '1'} compact={compact}
-              onCancel={() => closeCodingForm('/coding')} onStarted={id => closeCodingForm(codingSessionPath(id))}/>}
+            {section === 'coding' && <CodingPage scopes={state.scopes} herdrPane={params.get('herdr')} creating={params.get('new') === '1'} compact={compact}
+              onCancel={() => closeCodingForm('/coding')} onStarted={id => closeCodingForm(herdrPanePath(id))}/>}
             {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>

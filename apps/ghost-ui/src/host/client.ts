@@ -3,10 +3,8 @@ import type {
   ApiError,
   ArtifactRef,
   Command,
-  CodingAgentsView,
-  CodingSessionDetail,
-  CodingSessionList,
-  CodingSessionStart,
+  CodingSetup,
+  CodingStart,
   CommandOf,
   ConnectionOAuthView,
   ConnectionOAuthClientInput,
@@ -14,6 +12,10 @@ import type {
   CommandResponse,
   HerdrOutput,
   HerdrView,
+  HerdrIntegrationInstall,
+  HerdrKeys,
+  HerdrPaneView,
+  HerdrPrompt,
   ConversationPage,
   LedgerEvent,
   LiveEvent,
@@ -207,43 +209,36 @@ export class HostClient {
     return this.json('/api/skills');
   }
 
-  /** The coding agents the Host found on its Mac and the owner's choice among them; `refresh` looks again. */
-  codingAgents(refresh = false): Promise<CodingAgentsView> {
-    return this.json(refresh ? '/api/coding-agents?refresh=1' : '/api/coding-agents');
+  codingSetup(): Promise<CodingSetup> {
+    return this.json('/api/coding', { cache: 'no-store' });
   }
-
-  /** Coding sessions, newest first; with `workId`, only that Work's. */
-  codingSessions(workId?: string): Promise<CodingSessionList> {
-    return this.json(workId === undefined ? '/api/coding-sessions' : `/api/coding-sessions?work=${encodeURIComponent(workId)}`);
-  }
-  /** One coding session with its steps from `after` on; ask again with `next` to follow a running one. */
-  codingSession(id: string, after = 0): Promise<CodingSessionDetail> {
-    return this.json(`/api/coding-sessions/${encodeURIComponent(id)}?after=${after}`);
-  }
-
-  startCodingSession(input: CodingSessionStart): Promise<CodingSessionDetail> {
-    return this.json('/api/coding-sessions', {
+  installHerdrIntegration(input: HerdrIntegrationInstall): Promise<CodingSetup> {
+    return this.json('/api/coding/integrations', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
     });
   }
 
-  sendCodingSession(id: string, text: string): Promise<CodingSessionDetail> {
-    return this.json(`/api/coding-sessions/${encodeURIComponent(id)}/messages`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
-    });
-  }
-
-  stopCodingSession(id: string): Promise<CodingSessionDetail> {
-    return this.json(`/api/coding-sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' });
-  }
-
-  /** The coding agents running in the owner's herdr sessions. */
+  /** The coding agents in the herdr session in use. */
   herdr(): Promise<HerdrView> {
     return this.json('/api/herdr');
   }
-  /** One herdr agent pane with the end of its terminal as text. */
-  herdrOutput(session: string, pane: string): Promise<HerdrOutput> {
-    return this.json(`/api/herdr/output?session=${encodeURIComponent(session)}&pane=${encodeURIComponent(pane)}`);
+  herdrOutput(pane: string): Promise<HerdrOutput> {
+    return this.json(`/api/herdr/output?pane=${encodeURIComponent(pane)}`);
+  }
+  startHerdr(input: CodingStart): Promise<HerdrPaneView> {
+    return this.json('/api/herdr/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
+  }
+  promptHerdr(input: HerdrPrompt): Promise<HerdrPaneView> {
+    return this.json('/api/herdr/prompt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
+  }
+  herdrKeys(input: HerdrKeys): Promise<HerdrPaneView> {
+    return this.json('/api/herdr/keys', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
   }
 
   /** The host's own release update state. */

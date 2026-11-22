@@ -40,7 +40,7 @@ export interface Config {
    * A release finds its own copies beside its Host bundle; `"desktop": null` turns it off.
    */
   desktop?: null | DesktopConfig;
-  /** Coding agents (omp, Claude Code, Codex) found on this Mac for code_agents and code_run; `"coding": false` turns them off. */
+  /** Coding through the owner's herdr (the Coding tab, code_agents and code_run); `"coding": false` turns it off. */
   coding?: boolean;
 }
 

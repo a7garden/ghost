@@ -157,13 +157,17 @@ export async function seed(host: HostHandle): Promise<SeedResult> {
     return rows.decisions.find(decision => decision.kind === 'question' && decision.state === 'pending') ?? null;
   });
 
-  // Two Works from the conversation. The first completes and is approved; the second waits on its owner.
+  // The Host auto-accepts effect-free workspace results. Use the isolated fixture directory
+  // for owner-PC Works so the mock's `complete` calls leave actual owner decisions.
+  const execution = { kind: 'host', cwd: host.scopePath, worktree: false };
+  await command(host, { type: 'ghost.update', ghostId: defaultGhost.id, hostExecution: true });
   const workDoneId = String((await command(host, {
     type: 'work.create',
     ghostId: defaultGhost.id,
     title: '주간 보고 초안',
     brief: 'MEDIC-COMPLETE 이번 주 활동을 요약한 보고 초안을 만들어 줘.',
     originConversationId: conversationA,
+    execution,
   })).workId);
   const acceptanceDone = await untilAcceptance(host, workDoneId);
   await command(host, { type: 'decision.resolve', decisionId: acceptanceDone.id, outcome: 'approve' });
@@ -176,6 +180,7 @@ export async function seed(host: HostHandle): Promise<SeedResult> {
     title: '회의 메모 요약',
     brief: 'MEDIC-COMPLETE 어제 회의 메모를 세 문단으로 요약해 줘.',
     originConversationId: conversationA,
+    execution,
   })).workId);
   await untilAcceptance(host, workLiveId);
 

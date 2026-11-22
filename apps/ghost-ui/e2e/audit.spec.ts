@@ -40,6 +40,7 @@ for (const theme of ['light', 'dark'] as const) {
           }
         } }, theme);
         await expect(page.locator('.ghost-settings__content-inner')).not.toBeEmpty();
+        if (tab === 'coding') await expect(page.getByRole('combobox', { name: 'herdr 세션' })).toHaveText('기본 세션');
         await capture(page, `settings-${tab}`, theme, info.project.name);
         if (tab === 'devices') {
           const conversation = page.getByRole('group', { name: '받을 알림' }).getByRole('button', { name: '대화', exact: true });
@@ -52,24 +53,21 @@ for (const theme of ['light', 'dark'] as const) {
           await expect(conversation).toHaveAttribute('aria-pressed', 'true');
         }
         if (tab === 'coding') {
-          const claude = page.getByRole('switch', { name: 'Claude Code 사용' });
-          await expect(claude).toBeChecked();
+          const agent = page.getByRole('combobox', { name: '기본 에이전트' });
+          const session = page.getByRole('combobox', { name: 'herdr 세션' });
+          await expect(agent).toHaveText('Claude Code');
           const saved = () => page.waitForRequest(request => request.url().endsWith('/api/commands') && request.postDataJSON()?.command?.type === 'coding.set');
-          const off = saved();
-          await claude.click();
-          expect((await off).postDataJSON().command).toMatchObject({ default: null, disabled: ['claude'] });
-          await expect(claude).not.toBeChecked();
-          const on = saved();
-          await claude.click();
-          expect((await on).postDataJSON().command).toMatchObject({ disabled: [] });
-          await expect(claude).toBeChecked();
-          const pick = saved();
-          await page.getByRole('button', { name: '기본으로' }).click();
-          expect((await pick).postDataJSON().command).toMatchObject({ default: 'claude', disabled: [] });
-          await expect(page.getByRole('button', { name: '기본으로' })).toHaveCount(1);
-          await page.getByRole('link', { name: '세션 목록 보기' }).click();
-          await expect(page).toHaveURL(/#\/coding$/);
-          await expect(page.getByRole('link', { name: /로그인 실패 시 안내 문구 고치기/ })).toBeVisible();
+          const pickAgent = saved();
+          await agent.click();
+          await page.getByRole('option', { name: 'omp', exact: true }).click();
+          expect((await pickAgent).postDataJSON().command).toMatchObject({ session: null, agent: 'omp' });
+          await expect(agent).toHaveText('omp');
+          const pickSession = saved();
+          await session.click();
+          await page.getByRole('option', { name: 'studio', exact: true }).click();
+          expect((await pickSession).postDataJSON().command).toMatchObject({ session: 'studio', agent: 'omp' });
+          await expect(session).toHaveText('studio');
+          await expect(page.getByText('herdr 서버 · studio')).toBeVisible();
         }
         if (tab === 'models' && info.project.name === 'iphone') {
           const options = await page.getByRole('radiogroup', { name: '생각 수준' }).getByRole('radio').evaluateAll(elements =>

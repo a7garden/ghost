@@ -1,4 +1,4 @@
-import type { CodingAgentId, CodingSessionDetail, CodingSessionStart, CodingSessionView, CodingStep, Decision, ExecutionTarget, HerdrOutput, HerdrView, Scope, VaultItem, Work } from "@ghost/contract";
+import type { CodingAgentId, CodingSetup, CodingStart, Decision, ExecutionTarget, HerdrKeys, HerdrOutput, HerdrPaneView, HerdrView, Scope, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 export type { McpPort, McpTool, McpCallResult } from "./mcp.ts";
 
@@ -160,89 +160,6 @@ export interface HostPort {
   validateCommand(input: HostCommand): HostCommand;
   executeCommand(input: HostCommand, authorize?: () => void): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean }>;
 }
-
-export interface CodingAgentInfo {
-  id: CodingAgentId;
-  name: string;
-  /** Absolute path of the executable the Host found. */
-  path: string;
-  version: string | null;
-  /** False when it is installed but cannot run a task now, such as a login that ended. */
-  ready: boolean;
-  /** Why it is not ready, or what the owner should know (a login that ends soon). */
-  note: string | null;
-}
-
-/** One thing an agent did, read from its event stream. */
-export interface CodingEvent {
-  kind: CodingStep["kind"];
-  text: string;
-}
-
-/** Reads an agent's JSON-lines output as it arrives: the events so far, the agent's own id for the session and its last message. */
-export interface CodingStream {
-  /** The agent's own session id, once it has said it. */
-  nativeId: string | null;
-  /** The agent's last message, which is its closing summary when the run ends well. */
-  final: string | null;
-  feed(chunk: string): CodingEvent[];
-  /** What the last unterminated line holds, when the output ends. */
-  flush(): CodingEvent[];
-}
-
-/** The coding agents installed on the owner's Mac. Implemented in src/integrations/coding-agents.ts. */
-export interface CodingAgentPort {
-  /** Agents found on this Mac, in preference order; cached briefly unless `refresh`. */
-  detect(refresh?: boolean): Promise<CodingAgentInfo[]>;
-  /** argv for one non-interactive run in `cwd`, continuing the agent's own session `resume` when given; its output is read with `stream`. */
-  command(agent: CodingAgentInfo, prompt: string, cwd: string, resume: string | null): string[];
-  stream(agent: CodingAgentInfo): CodingStream;
-  readonly sessions: CodingSessionStore;
-  readonly run: CodingRunPort;
-}
-
-export interface CodingSessionOpen {
-  agent: CodingAgentId;
-  workId: string | null;
-  callId: string;
-  task: string;
-  cwd: string;
-  branch: string | null;
-  base: string | null;
-}
-
-export interface CodingSessionWriter {
-  readonly id: string;
-  native(nativeId: string): void;
-  step(kind: CodingStep["kind"], text: string): void;
-  end(exitCode: number): void;
-}
-
-/** Every `code_run` kept as a session the owner can read. Implemented in src/integrations/coding-sessions.ts. */
-export interface CodingSessionStore {
-  open(meta: CodingSessionOpen): CodingSessionWriter;
-  /** Another turn of a finished session: its file and agent conversation, running again; null when unknown or still running. */
-  reopen(id: string): CodingSessionWriter | null;
-  /** Newest first; with `workId`, only that Work's runs. */
-  list(limit?: number, workId?: string): CodingSessionView[];
-  get(id: string, after?: number): CodingSessionDetail | null;
-  /** Where a session ran and the agent's own id for it, or null when it cannot be continued. */
-  continuation(id: string): { agent: CodingAgentId; cwd: string; branch: string | null; base: string | null; nativeId: string } | null;
-}
-
-/**
- * Sessions the owner drives from the app with no Ghost between: start one, send a follow-up into a finished turn,
- * stop a running one. Each turn is one headless agent run; its steps go to the same session record the viewer reads.
- * Implemented in src/integrations/coding-runner.ts.
- */
-export interface CodingRunPort {
-  start(input: CodingSessionStart): Promise<CodingSessionDetail>;
-  send(id: string, text: string): Promise<CodingSessionDetail>;
-  stop(id: string): CodingSessionDetail;
-  /** Ends every running turn: the Host is shutting down. */
-  stopAll(): void;
-}
-
 /** The owner's skill folders, read-only. Implemented in src/integrations/skills.ts. */
 export interface SkillsPort {
   /** Skills across the configured roots, first root wins on duplicate names; cached briefly. */
@@ -381,10 +298,36 @@ export interface DesktopPort {
   shutdown(): Promise<void>;
 }
 
-/** The coding agents running in the owner's herdr sessions, looked at and never driven. Implemented in src/integrations/herdr.ts. */
+/** What starting or prompting an agent in herdr came to: the pane, where it works, and whether the agent settled when the caller waited. */
+export interface HerdrRun {
+  pane: HerdrPaneView;
+  /** The directory the agent works in: the worktree herdr made, or the directory itself. */
+  checkout: string;
+  branch: string | null;
+  /** The commit the branch was cut from; null when the Host did not cut it. */
+  base: string | null;
+  /** `unwaited`: the caller did not wait; `timeout` and `stalled`: the agent did not settle in time or never began. */
+  settled: "settled" | "timeout" | "stalled" | "unwaited";
+}
+
+/** How long a caller waits for an agent to settle, and how it stops waiting. */
+export interface HerdrWait {
+  timeoutMs: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Coding through the owner's herdr: the agents in the session in use, their terminals, starting an agent in a new
+ * workspace, prompting and keying one, and what must be set up for that. Implemented in src/integrations/herdr.ts.
+ */
 export interface HerdrPort {
-  /** Every agent pane of every running herdr session. */
+  /** The session coding uses. */
+  readonly session: string;
   overview(): Promise<HerdrView>;
-  /** One agent pane with the end of its terminal as text; null when that pane is not an agent pane of that session. */
-  output(session: string, pane: string): Promise<HerdrOutput | null>;
+  output(pane: string): Promise<HerdrOutput>;
+  setup(): Promise<CodingSetup>;
+  installIntegration(agent: CodingAgentId): Promise<void>;
+  start(input: CodingStart, wait?: HerdrWait): Promise<HerdrRun>;
+  prompt(pane: string, text: string, wait?: HerdrWait): Promise<HerdrRun>;
+  keys(input: HerdrKeys): Promise<HerdrPaneView>;
 }

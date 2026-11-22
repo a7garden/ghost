@@ -22,19 +22,19 @@ import {
   type StreamFrame,
   type PageSummary,
   type PageView,
-  type CodingAgentsView,
+  type CodingSetup,
   type HerdrOutput,
+  type HerdrPaneView,
   type HerdrView,
-  type CodingSessionDetail,
-  type CodingSessionList,
-  type CodingPrefs,
-  CodingSessionMessage,
-  CodingSessionStart,
+  CodingStart,
+  HerdrIntegrationInstall,
+  HerdrKeys,
+  HerdrPrompt,
   type SkillCatalog,
   parse,
 } from "@ghost/contract";
 import type { Config } from "../config.ts";
-import type { BrowserPort, CodingAgentPort, DocumentsPort, HerdrPort, SkillsPort } from "../integrations/ports.ts";
+import type { BrowserPort, DocumentsPort, HerdrPort, SkillsPort } from "../integrations/ports.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
 import { ConnectionOAuth } from "./connection-oauth.ts";
@@ -112,8 +112,8 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; coding?: CodingAgentPort | null; herdr?: HerdrPort | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null }): { port: number; stop(): Promise<void> } {
-  const { core, config, ownerToken, documents, skills, coding = null, herdr = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; herdr?: HerdrPort | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null }): { port: number; stop(): Promise<void> } {
+  const { core, config, ownerToken, documents, skills, herdr = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
   const oauth = new OAuthLogins(core);
@@ -521,41 +521,26 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       }
     }
 
-    // The coding agents the Host found on its Mac and the owner's choice among them; `?refresh=1` looks again instead of using the minute cache.
-    if (pathname === "/api/coding-agents" && request.method === "GET") {
+    // Coding is the owner's herdr. What must be set up for it, the agents in the session in use, one pane's terminal text, and the few things
+    // the owner does from the app: start an agent in a new workspace, send it a prompt or keys, install herdr's hook for an agent.
+    if (pathname === "/api/coding" && request.method === "GET") {
       try {
-        if (!coding) throw new CommandError("unavailable", "coding agents are not available on this Host");
-        const prefs = core.ledger.setting<CodingPrefs>("coding", { default: null, disabled: [] });
-        const agents = await coding.detect(url.searchParams.get("refresh") === "1");
-        return json({ agents: agents.map(({ id, name, path, version, ready, note }) => ({ id, name, path, version, ready, note })), default: prefs.default, disabled: prefs.disabled } satisfies CodingAgentsView);
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
+        return json(await herdr.setup() satisfies CodingSetup);
       } catch (caught) {
         return failure(caught);
       }
     }
-
-    // Every code_run kept as a session: the newest first, or one with its steps from `?after=` on (poll with the returned `next` to follow a running one).
-    if (pathname === "/api/coding-sessions" && request.method === "GET") {
+    if (pathname === "/api/coding/integrations" && request.method === "POST") {
       try {
-        if (!coding) throw new CommandError("unavailable", "coding agents are not available on this Host");
-        return json({ sessions: coding.sessions.list(30, url.searchParams.get("work") ?? undefined) } satisfies CodingSessionList);
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
+        const body: unknown = await request.json().catch(() => { throw invalid("malformed JSON body"); });
+        await herdr.installIntegration(parse(HerdrIntegrationInstall, body).agent);
+        return json(await herdr.setup() satisfies CodingSetup);
       } catch (caught) {
         return failure(caught);
       }
     }
-    const codingSession = /^\/api\/coding-sessions\/([0-9a-f]{32})$/.exec(pathname);
-    if (codingSession !== null && request.method === "GET") {
-      try {
-        if (!coding) throw new CommandError("unavailable", "coding agents are not available on this Host");
-        const after = Number(url.searchParams.get("after") ?? 0);
-        const detail = coding.sessions.get(codingSession[1]!, Number.isInteger(after) && after >= 0 ? after : 0);
-        if (detail === null) throw notFound(`coding session ${codingSession[1]}`);
-        return json(detail satisfies CodingSessionDetail);
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-
-    // The coding agents in the owner's herdr sessions, and one pane's terminal text. Read-only: nothing here reaches a terminal.
     if (pathname === "/api/herdr" && request.method === "GET") {
       try {
         if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
@@ -567,34 +552,34 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (pathname === "/api/herdr/output" && request.method === "GET") {
       try {
         if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        const session = url.searchParams.get("session") ?? "", pane = url.searchParams.get("pane") ?? "";
-        const output = await herdr.output(session, pane);
-        if (output === null) throw notFound(`herdr pane ${pane}`);
-        return json(output satisfies HerdrOutput);
+        return json(await herdr.output(url.searchParams.get("pane") ?? "") satisfies HerdrOutput);
       } catch (caught) {
         return failure(caught);
       }
     }
-
-    // The owner drives coding from the app with no Ghost between: start a session, send a follow-up into a finished turn, stop a running one.
-    // Each answers with the session as it stands; follow it with the GET above.
-    if (pathname === "/api/coding-sessions" && request.method === "POST") {
+    if (pathname === "/api/herdr/start" && request.method === "POST") {
       try {
-        if (!coding) throw new CommandError("unavailable", "coding agents are not available on this Host");
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
         const body: unknown = await request.json().catch(() => { throw invalid("malformed JSON body"); });
-        return json(await coding.run.start(parse(CodingSessionStart, body)) satisfies CodingSessionDetail, 202);
+        return json((await herdr.start(parse(CodingStart, body))).pane satisfies HerdrPaneView);
       } catch (caught) {
         return failure(caught);
       }
     }
-    const codingControl = /^\/api\/coding-sessions\/([0-9a-f]{32})\/(messages|stop)$/.exec(pathname);
-    if (codingControl !== null && request.method === "POST") {
+    if (pathname === "/api/herdr/prompt" && request.method === "POST") {
       try {
-        if (!coding) throw new CommandError("unavailable", "coding agents are not available on this Host");
-        const id = codingControl[1]!;
-        if (codingControl[2] === "stop") return json(coding.run.stop(id) satisfies CodingSessionDetail);
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
+        const body = parse(HerdrPrompt, await request.json().catch(() => { throw invalid("malformed JSON body"); }));
+        return json((await herdr.prompt(body.pane, body.text)).pane satisfies HerdrPaneView);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+    if (pathname === "/api/herdr/keys" && request.method === "POST") {
+      try {
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
         const body: unknown = await request.json().catch(() => { throw invalid("malformed JSON body"); });
-        return json(await coding.run.send(id, parse(CodingSessionMessage, body).text) satisfies CodingSessionDetail, 202);
+        return json(await herdr.keys(parse(HerdrKeys, body)) satisfies HerdrPaneView);
       } catch (caught) {
         return failure(caught);
       }

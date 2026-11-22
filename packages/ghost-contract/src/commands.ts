@@ -3,7 +3,7 @@ import { ActivityConfig, ConnectionConfig, ConnectionIconUrl } from "./autonomy.
 import { PolicyRule } from "./policy.ts";
 import { McpServer } from "./mcp.ts";
 import { DutyHours } from "./duty.ts";
-import { CodingAgentId } from "./coding.ts";
+import { CodingPrefs } from "./coding.ts";
 import {
   ADAPTATION_MAX_CHARS,
   ApprovalPolicy,
@@ -146,8 +146,8 @@ export const Command = Type.Union([
   command("duty.switch", { onDuty: Type.Boolean() }),
   /** 근무 시간표. null 이면 시간표 없이 원버튼으로만 바꾼다. */
   command("duty.hours", { hours: nullable(DutyHours) }),
-  /** Which coding agent `code_run` prefers and which it must not use. */
-  command("coding.set", { default: nullable(CodingAgentId), disabled: Type.Array(CodingAgentId, { uniqueItems: true, maxItems: 3 }) }),
+  /** Which herdr session coding uses and which agent a new coding session starts with. */
+  command("coding.set", CodingPrefs.properties),
 
   // Owner-approved standing delegations and account-scoped connections.
   command("connection.upsert", {

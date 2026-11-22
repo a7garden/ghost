@@ -23,7 +23,7 @@ import { executionLabel } from './activity-config';
 import { readVerdict, workReason } from './workText';
 import { ProjectChips } from '../components/composer/ProjectMentions';
 import { CancelWorkDialog } from './WorkViews';
-import { CodeRunSessionLink } from './CodingSession';
+import { codeRunPane, herdrPanePath } from './herdrDisplay';
 
 const effectGlyph: Record<Effect['state'], GlyphState> = { pending: 'running', done: 'done', unknown: 'blocked', denied: 'cancelled' };
 const effectLabel: Record<Effect['state'], string> = { pending: '실행 중', done: '완료', unknown: '결과 미확정', denied: '거부됨' };
@@ -154,18 +154,21 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
         </AsideSection>}
 
         <AsideSection compact={compact} title="실행 기록" count={effects.length}>
-          {effects.length > 0 ? <ol className="timeline">{[...effects].sort((a, b) => a.createdAt - b.createdAt).map(effect => <li key={effect.id} data-state={effect.state}>
-            <StateGlyph state={effectGlyph[effect.state]} size={14}/>
-            <div className="timeline__copy">
-              <span className="timeline__summary">{effect.summary}</span>
-              <span className="timeline__meta">
-                {effect.state !== 'done' && <span>{effectLabel[effect.state]}</span>}
-                <time className="tabular" title={absoluteTime(effect.createdAt)}>{relativeTime(effect.endedAt ?? effect.createdAt, now)}</time>
-              </span>
-              {effect.tool === 'code_run' && <CodeRunSessionLink workId={work.id} callId={effect.callId} running={effect.state === 'pending'}/>}
-              {effect.result && <details className="timeline__result"><summary>출력</summary><pre>{effect.result}</pre></details>}
-            </div>
-          </li>)}</ol> : <p className="work-aside__empty">실행 기록 없음</p>}
+          {effects.length > 0 ? <ol className="timeline">{[...effects].sort((a, b) => a.createdAt - b.createdAt).map(effect => {
+            const pane = effect.tool === 'code_run' ? codeRunPane(effect.result) : null;
+            return <li key={effect.id} data-state={effect.state}>
+              <StateGlyph state={effectGlyph[effect.state]} size={14}/>
+              <div className="timeline__copy">
+                <span className="timeline__summary">{effect.summary}</span>
+                <span className="timeline__meta">
+                  {effect.state !== 'done' && <span>{effectLabel[effect.state]}</span>}
+                  <time className="tabular" title={absoluteTime(effect.createdAt)}>{relativeTime(effect.endedAt ?? effect.createdAt, now)}</time>
+                </span>
+                {pane && <Button asChild variant="outline" size="sm"><a href={`#${herdrPanePath(pane)}`}>herdr에서 보기</a></Button>}
+                {effect.result && <details className="timeline__result"><summary>출력</summary><pre>{effect.result}</pre></details>}
+              </div>
+            </li>;
+          })}</ol> : <p className="work-aside__empty">실행 기록 없음</p>}
         </AsideSection>
       </aside>
     </div>
