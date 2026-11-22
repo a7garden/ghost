@@ -104,11 +104,10 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
   const showPending = () => {
     const section = pendingRef.current;
     if (!section) return;
-    // Measured on the next frame, once a panel the click folded is gone. On a phone the bar sticks over the
-    // sheet's top: the cards land just below it, however tall it has wrapped.
+    // Scrolled on the next frame, once a panel the click folded is gone.
     requestAnimationFrame(() => {
-      const bar = section.parentElement?.querySelector<HTMLElement>(':scope > .work-bar');
-      section.style.scrollMarginTop = bar && getComputedStyle(bar).position === 'sticky' ? `${bar.offsetHeight + 12}px` : '';
+      const warning = section.closest('.shell-sheet')?.querySelector(':scope > .connection-banner');
+      section.style.scrollMarginTop = warning ? `${warning.getBoundingClientRect().height + 8}px` : '';
       section.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
       section.focus({ preventScroll: true });
     });
@@ -198,8 +197,8 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
 /**
  * The top of a 맡긴 일: where it sits (parents, title, and the lifecycle while it runs), then one bar that
  * answers 「where is it, and what is mine to do」 — state and deadline, who has it since when, why it stopped,
- * then 완료 기준 and the owner's moves. On a phone the bar sticks while the page scrolls; it is the parent's
- * direct child (a sibling of the header) so it can stick for the whole page.
+ * then 완료 기준 and the owner's moves. It is the parent's direct child (a sibling of the header) so the
+ * reason line can hang right beneath the bar on every size.
  */
 export function WorkHeader({ work, ancestors, glyph, pending, criteria, ghostName, now, link, navigate, onPending, onEdit, onCancel, onResume }: {
   work: Work; ancestors: Work[]; glyph: GlyphState; pending: number;

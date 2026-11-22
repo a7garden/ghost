@@ -1,8 +1,11 @@
-import { useState, type ReactNode } from 'react';
-import { Home, Inbox, Menu, MessageCircle, Search, Settings, SquareTerminal } from 'lucide-react';
-import { CommandPalette, Dialog, DialogContent, DialogTitle, TitleBar, type CommandItem } from '../ui'
+import { createContext, useState, type ReactNode } from 'react';
+import { Ellipsis, Home, Inbox, Menu, MessageCircle, Search, Settings, SquareTerminal } from 'lucide-react';
+import { CommandPalette, Dialog, DialogContent, DialogTitle, Popover, PopoverContent, PopoverTrigger, TitleBar, type CommandItem } from '../ui';
+import { useCompact } from '../ui/adaptive';
 import { routeLabels } from '../uiText';
 import { shortcut } from '../ui/keys';
+
+export const CompactTitleSlot = createContext<HTMLDivElement | null>(null);
 
 /**
  * The window: a quiet sidebar on the page tone, the destination on an inset sheet,
@@ -32,6 +35,10 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar,
   children: ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const compact = useCompact();
+  const focusedCoding = compact && section === 'coding' && hideDock;
+  const [titleSlot, setTitleSlot] = useState<HTMLDivElement | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const search = <button type="button" className="shell-search" aria-label="명령 검색" title={`명령 검색 · ${shortcut('K')}`} onClick={() => onPaletteOpenChange(true)}>
     <Search aria-hidden="true"/><span className="shell-search__label">검색</span><kbd>{shortcut('K')}</kbd>
   </button>;
@@ -50,15 +57,23 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar,
   return <div className="shell" data-fill={fill || undefined}>
     {desktop
       ? <TitleBar aria-label="Ghost" macOSInset={macOSInset} left={left} center={island} right={right}/>
-      : <header className="ghost-titlebar shell-header">
-        <div className="ghost-titlebar__slot ghost-titlebar__slot--left">{left}</div>
+      : <header className="ghost-titlebar shell-header" data-focused-coding={focusedCoding || undefined}>
+        <div className="ghost-titlebar__slot ghost-titlebar__slot--left">{left}{focusedCoding && <div className="compact-title-slot" ref={setTitleSlot}/>}</div>
         <div className="ghost-titlebar__slot ghost-titlebar__slot--center">{island}</div>
-        <div className="ghost-titlebar__slot ghost-titlebar__slot--right">{right}</div>
+        <div className="ghost-titlebar__slot ghost-titlebar__slot--right">{focusedCoding
+          ? <Popover open={toolsOpen} onOpenChange={setToolsOpen}>
+            <PopoverTrigger asChild><button type="button" className="shell-icon-button" aria-label="작업실 메뉴"><Ellipsis aria-hidden="true"/></button></PopoverTrigger>
+            <PopoverContent aria-label="작업실 메뉴" className="coding-shell-menu">
+              {duty}
+              <button type="button" onClick={() => { setToolsOpen(false); onPaletteOpenChange(true); }}><Search/>명령 검색</button>
+              <button type="button" onClick={() => { setToolsOpen(false); navigate('/settings'); }}><Settings/>설정</button>
+            </PopoverContent>
+          </Popover> : right}</div>
       </header>}
     <div className="shell-body">
       <aside className="shell-sidebar" aria-label="작업실 탐색">{sidebar}</aside>
       <main id="main-content" tabIndex={-1} className="shell-sheet" data-fill={fill || undefined}>
-        {children}
+        <CompactTitleSlot.Provider value={titleSlot}>{children}</CompactTitleSlot.Provider>
       </main>
     </div>
     {!desktop && <nav className="compact-dock" aria-label="주요 화면" data-hidden={hideDock || undefined}>

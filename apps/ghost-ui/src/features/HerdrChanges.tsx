@@ -54,13 +54,13 @@ export function HerdrChangesView({ pane, compact, data, error, onRefresh, revisi
   const diff = result?.path === path ? result?.diff : undefined;
   const diffError = result?.path === path ? result?.error : undefined;
   return <section className="herdr-changes" aria-label="작업 변경">
-    <header className="herdr-changes-head">
+    {(!compact || !path) && <header className="herdr-changes-head">
       <div className="herdr-branch">
         {data?.branch && <strong><GitBranch size={15} aria-hidden="true"/>{data.branch}</strong>}
         {data?.base && <span>기준 <code title={data.base}>{data.base.slice(0, 12)}</code></span>}
       </div>
       <Button type="button" variant="ghost" size="icon" aria-label="변경 새로고침" title="변경 새로고침" onClick={onRefresh}><RefreshCw aria-hidden="true"/></Button>
-    </header>
+    </header>}
     {error && <InlineError onRetry={onRefresh} retryLabel="다시 불러오기">{error}</InlineError>}
     {!data && !error && <p role="status" className="coding-pane-status">변경을 불러오는 중…</p>}
     {data && <div className="herdr-change-work" data-file={Boolean(path) || undefined}>
@@ -87,8 +87,9 @@ export function HerdrChangesView({ pane, compact, data, error, onRefresh, revisi
       {path && <article className="herdr-file-diff" aria-label={path}>
         <header>
           {compact && <Button type="button" variant="ghost" size="icon" aria-label="파일 목록" onClick={() => select(null)}><ArrowLeft aria-hidden="true"/></Button>}
-          <code>{path}</code>
+          <code className="min-w-0 truncate">{path}</code>
           <Button type="button" variant="ghost" size="icon" aria-label="줄 바꿈" title="줄 바꿈" aria-pressed={wrap} onClick={() => setWrap(value => !value)}><WrapText aria-hidden="true"/></Button>
+          {compact && <Button type="button" variant="ghost" size="icon" aria-label="변경 새로고침" title="변경 새로고침" onClick={onRefresh}><RefreshCw aria-hidden="true"/></Button>}
         </header>
         {diffError ? <InlineError onRetry={onRefresh} retryLabel="다시 불러오기">{diffError}</InlineError>
           : !diff ? <p role="status" className="coding-pane-status">파일 차이를 불러오는 중…</p>

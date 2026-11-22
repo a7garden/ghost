@@ -1,7 +1,9 @@
-import { useRef, type ReactNode } from 'react';
-import { GitBranch } from 'lucide-react';
+import { useContext, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { ChevronDown, GitBranch } from 'lucide-react';
+import { CompactTitleSlot } from '../components/AppFrame';
 import type { HerdrPaneView } from '@ghost/contract';
-import { Button, SegmentedControl } from '../ui';
+import { Button, Popover, PopoverContent, PopoverTrigger, SegmentedControl } from '../ui';
 import { HerdrState } from './herdrDisplay';
 import { uiTerms } from '../uiText';
 import { TerminalTextSize } from './HerdrTerminalControls';
@@ -17,39 +19,49 @@ export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, br
   onEsc?: () => void; fontSize: number; onFontSize(size: number): void;
   terminalAction?: ReactNode;
 }) {
-  const touch = useRef<{ x: number; y: number }>(null);
+  const slot = useContext(CompactTitleSlot);
+  const [open, setOpen] = useState(false);
+  const touch = useRef<{ x: number; y: number } | null>(null);
   const siblings = navigation?.panes ?? [];
   const current = siblings.findIndex(item => item.id === pane.id);
   const canSwipe = compact && siblings.length > 1 && current >= 0;
   const buttons = modes.filter(item => item.value === 'chat' ? chat : item.value === 'changes' ? changes : true);
-  return <header className="coding-detail-head">
-    <div className="coding-detail-top" data-swipe={canSwipe || undefined}
-      onPointerDown={event => {
-        if (!canSwipe || event.pointerType !== 'touch' || (event.target as Element).closest('button')) return;
-        touch.current = { x: event.clientX, y: event.clientY };
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }} onPointerCancel={() => { touch.current = null; }} onPointerUp={event => {
+  const identity = <div className="coding-detail-title">
+        <div className="coding-context"><HerdrState status={pane.status} size={15} label={compact}/><span>{pane.agent ?? '셸'}</span>
+          {pane.codingWorkId && <a className="link-quiet coding-work-link" href={`#/work/${encodeURIComponent(pane.codingWorkId)}`}>{uiTerms.work}</a>}</div>
+        <h2>{pane.title}</h2>
+        {(branch || pane.cwd) && <code className="coding-directory" title={pane.cwd ?? undefined} aria-label={branch ? `브랜치 ${branch}` : `작업 디렉터리 ${pane.cwd}`}>
+          {branch && <GitBranch aria-hidden="true" size={13}/>}<span>{branch || pane.cwd}</span>
+        </code>}
+        {compact && branch && pane.cwd && <code className="coding-directory">{pane.cwd}</code>}
+      </div>;
+  const title = compact && <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild><button type="button" className="coding-pane-picker" aria-label={`패널 정보 · ${pane.title}`}
+      onTouchStart={event => {
+        const point = event.touches[0];
+        touch.current = canSwipe && event.touches.length === 1 ? { x: point.clientX, y: point.clientY } : null;
+      }} onTouchCancel={() => { touch.current = null; }} onTouchEnd={event => {
         const start = touch.current;
         touch.current = null;
-        if (!start || !canSwipe) return;
-        const dx = event.clientX - start.x, dy = event.clientY - start.y;
+        if (!start) return;
+        const dx = event.changedTouches[0].clientX - start.x, dy = event.changedTouches[0].clientY - start.y;
         if (Math.abs(dx) < 46 || Math.abs(dx) < 1.35 * Math.abs(dy)) return;
         const next = siblings[current + (dx < 0 ? 1 : -1)];
         if (next) navigation?.onNavigate(next.id);
       }}>
-      <div className="coding-detail-title">
-        <div className="coding-context"><HerdrState status={pane.status} size={15} label={false}/><span>{pane.agent ?? '셸'}</span>
-          {pane.codingWorkId && <a className="link-quiet coding-work-link" href={`#/work/${encodeURIComponent(pane.codingWorkId)}`}>{uiTerms.work}</a>}</div>
-        <h2>{pane.title}</h2>
-        {(branch || pane.cwd) && <code className="coding-directory" title={pane.cwd ?? undefined} aria-label={branch ? `브랜치 ${branch}` : `작업 디렉터리 ${pane.cwd}`}>
-          {branch && <GitBranch aria-hidden="true" size={13}/>}<span>{branch || (compact ? pane.cwd?.split('/').filter(Boolean).slice(-2).join('/') || '/' : pane.cwd)}</span>
-        </code>}
-      </div>
-      {canSwipe && <nav className="herdr-pane-dots" aria-label="탭의 패널">
-        {siblings.map(item => <button key={item.id} type="button" aria-label={item.title} aria-current={item.id === pane.id ? 'page' : undefined}
-          onClick={() => { if (item.id !== pane.id) navigation?.onNavigate(item.id); }}><i/></button>)}
-      </nav>}
-    </div>
+      <HerdrState status={pane.status} size={15} label={false}/><strong>{pane.title}</strong><ChevronDown size={14} aria-hidden="true"/>
+    </button></PopoverTrigger>
+    <PopoverContent className="coding-pane-info" aria-label="패널 정보">
+      {identity}
+      {canSwipe && <nav aria-label="탭의 패널">{siblings.map(item =>
+        <button key={item.id} type="button" aria-current={item.id === pane.id ? 'page' : undefined}
+          onClick={() => { setOpen(false); if (item.id !== pane.id) navigation?.onNavigate(item.id); }}>
+          <HerdrState status={item.status} size={14} label={false}/><span>{item.title}</span>
+        </button>)}</nav>}
+    </PopoverContent>
+  </Popover>;
+  return <header className="coding-detail-head">
+    {compact ? slot ? createPortal(title, slot) : title : <div className="coding-detail-top">{identity}</div>}
     <div className="herdr-view-actions">
       <SegmentedControl aria-label="패널 보기" value={mode} options={buttons} onValueChange={onMode}/>
       <div className="herdr-pane-tools">

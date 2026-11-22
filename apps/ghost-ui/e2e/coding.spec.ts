@@ -134,6 +134,7 @@ for (const { name, width, height, touch } of sizes) {
         await expect(page.getByText('Show a fallback on login errors')).toBeVisible();
         await page.getByRole('button', { name: /src\/auth\/login\.ts/ }).click();
         const diff = page.getByLabel('파일 차이');
+        if (touch) expect((await diff.boundingBox())!.y).toBeLessThan(165);
         await expect(diff.locator('[data-kind="addition"]').first()).toContainText('로그인할 수 없습니다.');
         await expect(diff.locator('[data-kind="deletion"]').first()).toContainText('return showError');
         await page.getByRole('button', { name: '줄 바꿈' }).click();
@@ -1139,10 +1140,14 @@ test.describe('mobile pane navigation', () => {
   test('swipes only to siblings and keeps terminal size across panes', async ({ page }) => {
     await openScreen(page, { ...richCoding, route: () => paneRoute(visualCodingIds.running), waits: () => [] }, 'light');
     await expect(page.getByRole('radio', { name: '대화' })).toBeChecked();
-    const dots = page.getByRole('navigation', { name: '탭의 패널' });
-    await expect(dots.getByRole('button')).toHaveCount(2);
-    const header = (await page.locator('.coding-detail-top').boundingBox())!;
-    const x = header.x + 165, y = header.y + 25;
+    const picker = page.getByRole('button', { name: /^패널 정보 · / });
+    expect((await page.getByRole('region', { name: '에이전트 대화' }).boundingBox())!.y).toBeLessThan(110);
+    await picker.tap();
+    const siblings = page.getByRole('navigation', { name: '탭의 패널' });
+    await expect(siblings.getByRole('button')).toHaveCount(2);
+    await page.getByRole('button', { name: '닫기', exact: true }).click();
+    const header = (await picker.boundingBox())!;
+    const x = header.x + header.width * .8, y = header.y + header.height / 2;
     const cdp = await page.context().newCDPSession(page);
     try {
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
@@ -1161,9 +1166,15 @@ test.describe('mobile pane navigation', () => {
     await page.getByRole('button', { name: '글자 크게' }).click();
     await expect(page.getByRole('dialog', { name: '터미널 글자 크기' }).locator('output')).toHaveText('15px');
     await page.keyboard.press('Escape');
-    await dots.getByRole('button', { name: '결제 화면 테스트 추가' }).click();
+    await picker.tap();
+    await siblings.getByRole('button', { name: /결제 화면 테스트 추가/ }).click();
     await page.getByRole('radio', { name: '터미널' }).click();
     await page.getByRole('button', { name: '터미널 글자 크기' }).click();
     await expect(page.getByRole('dialog', { name: '터미널 글자 크기' }).locator('output')).toHaveText('15px');
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.getByRole('button', { name: '작업실 메뉴' }).tap();
+    await page.getByRole('button', { name: '명령 검색' }).tap();
+    await expect(page.getByRole('dialog', { name: '명령', exact: true })).toBeVisible();
   });
 });

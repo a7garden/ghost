@@ -155,6 +155,10 @@ Feature-level compositions:
 - **Coding inbox**: blocked agents come first, then active work and unread completions.
   The same inline approval sits above the pane composer. Chats group a run's tool
   steps into one disclosure; the space tree and terminal remain alternate views.
+  On phones, the pane title and state share the back bar. Tap the title for the full
+  path, branch, linked Work and sibling panes; swipe the title to switch siblings.
+  The view switch stays directly above the content. A selected diff has one file
+  toolbar, and a blocking request replaces the disabled chat composer.
 - **Collaboration**: a `delegate` result reads as a 위임 event line (Ghost · title), and a
   child's report as 위임 결과. Thread cards list every Ghost working under the thread with
   its live state; a waiting Work reads 응답 대기, whether it waits on delegated Work, a question
@@ -167,8 +171,8 @@ Feature-level compositions:
   one amber 확인 필요 N, which jumps to the cards. The result reads verdict (who judged it: 확인
   규칙, 검토, 메인 Ghost or 소유자; 사유 folded), summary and files; during a revision only the
   verdict. 위임 lists only Work handed on from here (parents are the trail above the title);
-  실행 기록 lists what ran, its state only when not 완료. On phones the bar sticks under the top
-  bar, 위임 and 실행 기록 fold below the work, and wide tables read as one card per row. In the
+  실행 기록 lists what ran, its state only when not 완료. On phones the state and assignee
+  wrap together and scroll with the page; 위임 and 실행 기록 fold below the work. In the
   work conversation the owner's turns are a left rule, not a bubble, and a Ghost's name heads
   each run of its rows; the thread panel's work conversation reads the same way. The page
   scrolls only vertically; code, tables and tool output scroll inside their own blocks.

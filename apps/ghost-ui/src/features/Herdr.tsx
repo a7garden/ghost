@@ -122,7 +122,7 @@ export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = f
       }} onDismiss={() => {
         if (document.activeElement instanceof HTMLElement && root.current?.contains(document.activeElement)) document.activeElement.blur();
       }}/>}
-      {mode !== 'changes' && <HerdrComposer shell={!pane.agent} blocked={blocked} working={working} pending={pending} compact={compact}
+      {mode !== 'changes' && !(compact && blocked && mode === 'chat') && <HerdrComposer shell={!pane.agent} blocked={blocked} working={working} pending={pending} compact={compact}
         draft={draft} field={field} onSubmit={onPrompt} onModifiedKey={onModifiedKey} canUpload={Boolean(onUpload)}/>}
     </div>}
   </section>;

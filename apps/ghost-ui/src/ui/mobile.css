@@ -56,6 +56,8 @@
   /* The 44px buttons grow their touch target 9px outward; the bar's 8px edge padding would let that last 1px widen the page. */
   .ghost-titlebar { overflow-x: clip; }
   .title-nav__step, .shell-search, .shell-icon-button { width: 44px; height: 44px; }
+  .ghost-titlebar[data-focused-coding] { min-height: calc(48px + env(safe-area-inset-top)); }
+  .ghost-titlebar :is(.title-nav__step, .shell-icon-button)::after { content: none; }
   .title-nav__step:nth-child(2), .title-nav__crumb:not(:last-child) { display: none; }
   .title-nav__step:first-child { display: inline-grid; }
   .title-nav:not(:has(.title-nav__steps)) [aria-current] { padding-left: 10px; }
@@ -143,17 +145,14 @@
   .message-body table[data-wide] td:first-child > .message-body__cell { font-weight: 600; }
   .ghost-ui-scroll { overscroll-behavior-x: contain; }
   .home, .work-detail, .work-body, .decision { min-width: 0; }
-  /* Work page: the state bar sticks under the top bar; it undoes the sheet's 18px gutter so its canvas covers what scrolls beneath,
-     and its top undoes the sheet's 24px top padding, which sticky offsets count from. */
+  /* Work page: state, assignee and actions wrap into compact rows that scroll away with the page — a bar
+     tall enough to hold the unfolded criteria never pins itself over the cards it introduces. */
   .work-head__title { font-size: var(--text-heading); }
-  .work-bar { position: sticky; top: -24px; z-index: 2; margin-inline: -18px; padding: 10px 18px; row-gap: 8px; background: var(--ghost-canvas); box-shadow: 0 1px 0 var(--ghost-line); }
-  /* Only one thing holds the top edge: while the connection banner shows, the work bar scrolls with the page instead of sliding under it. */
-  .connection-banner { top: -24px; }
-  .shell-sheet:has(> .connection-banner) .work-bar { position: static; }
-  .work-bar__state, .work-bar__who { flex-basis: 100%; }
+  .work-bar { row-gap: 8px; }
   .work-bar__due { margin-left: auto; }
   .work-bar__panel { max-height: calc(var(--ghost-visible-height, 100dvh) * .45); overflow-y: auto; overscroll-behavior: contain; }
-  .work-bar__files { flex-direction: column; align-items: stretch; }
+  /* Only the connection banner keeps the sheet's top edge; its sticky offset undoes the sheet's 24px top padding. */
+  .connection-banner { top: -24px; }
   .work-transcript { padding: 14px 12px; }
   /* A trail says what it did in words; the tool chips stay for wide screens. */
   .trail__chips { display: none; }
