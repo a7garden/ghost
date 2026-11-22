@@ -23,7 +23,7 @@ const SEARCH_LIMIT = 8;
  * fading out at the bottom while more follows. The rail beside it marks Ghosts that are
  * working or need the owner, so a long roster still shows where to look.
  */
-export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, attentionCount, status, navigate, openGhost }: {
+export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, attentionCount, blockedAgents, status, navigate, openGhost }: {
   state: State | null;
   section: string;
   /** Ghost whose conversation is on screen; null on workspace pages. */
@@ -31,6 +31,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
   /** Project on screen; null while the create form is open. */
   selectedScope?: string;
   attentionCount: number;
+  blockedAgents: number;
   status: HostStatus;
   navigate(path: string): void;
   openGhost(id: string): void;
@@ -112,6 +113,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
         </NavigationItem>
         <NavigationItem current={section === 'coding'} onClick={() => navigate('/coding')}>
           <SquareTerminal/><span className="flex-1">{routeLabels.coding}</span>
+          {blockedAgents > 0 && <span className="sidebar-count" data-tone="amber"><span className="sr-only">입력 필요 </span>{blockedAgents}</span>}
         </NavigationItem>
         <NavigationItem current={section === 'mail'} onClick={() => navigate('/mail')}>
           <Mail/><span className="flex-1">{routeLabels.mail}</span>

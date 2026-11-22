@@ -5,7 +5,7 @@ import { codingChecklist } from './CodingSetup';
 const ready: CodingSetup = {
   herdr: { path: '/bin/herdr', version: '1.4.0' }, config: { ok: true, note: null }, session: 'default',
   sessions: [{ name: 'default', running: true }], server: { version: '1.4.0', compatible: true, restartNeeded: false },
-  agents: [{ id: 'omp', name: 'omp', path: '/bin/omp', integration: 'current' }], prefs: { session: null, agent: null },
+  agents: [{ id: 'omp', name: 'omp', path: '/bin/omp', integration: 'current' }], prefs: { session: null, agent: null, notify: 'blocked' },
   kinds: ['omp'],
 };
 

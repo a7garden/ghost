@@ -1,4 +1,4 @@
-import type { CodingAgentId, CodingSetup, CodingStart, Decision, ExecutionTarget, HerdrAgentStart, HerdrClose, HerdrFrame, HerdrInput, HerdrOutput, HerdrPaneView, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrView, HerdrWorkspaceCreate, Scope, VaultItem, Work } from "@ghost/contract";
+import type { CodingAgentId, CodingSetup, CodingStart, Decision, ExecutionTarget, HerdrAgentStart, HerdrChanges, HerdrClose, HerdrDiff, HerdrFrame, HerdrInput, HerdrOutput, HerdrPaneView, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrView, HerdrWorkspaceCreate, Scope, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 export type { McpPort, McpTool, McpCallResult } from "./mcp.ts";
 
@@ -325,8 +325,11 @@ export interface HerdrPort {
   readonly session: string;
   /** The session as herdr's sidebar shows it: workspaces, tabs, panes. */
   overview(): Promise<HerdrView>;
-  /** The end of a pane's terminal as text. */
-  output(pane: string): Promise<HerdrOutput>;
+  /** The end of a pane's terminal as text; with colours and a longer history for the history view. */
+  output(pane: string, options?: { ansi?: boolean; lines?: number }): Promise<HerdrOutput>;
+  /** What the agent in a pane changed, read from git in its directory. */
+  changes(pane: string): Promise<HerdrChanges>;
+  diff(pane: string, path: string): Promise<HerdrDiff>;
   setup(): Promise<CodingSetup>;
   installIntegration(agent: CodingAgentId): Promise<void>;
   /** An agent in a new worktree workspace with its task (`code_run`), waiting for it to settle when asked. */

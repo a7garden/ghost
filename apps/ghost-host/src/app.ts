@@ -24,6 +24,8 @@ import { createToolSet } from "./tools/index.ts";
 import type { BrowserPort, DesktopPort, DocumentsPort, HerdrPort, SkillsPort, HostPort } from "./integrations/ports.ts";
 import { MacHost } from "./integrations/host.ts";
 import { codingPrefs, Herdr } from "./integrations/herdr.ts";
+import { OmpInfoProvider } from "./integrations/omp.ts";
+import { CodingWatcher } from "./integrations/coding-watch.ts";
 import { HostWatch } from "./core/hostwatch.ts";
 import { ProviderCatalog } from "./integrations/provider-catalog.ts";
 import { settingsView } from "./core/commands.ts";
@@ -42,6 +44,8 @@ export interface App {
   documents: DocumentsPort;
   skills: SkillsPort | null;
   herdr: HerdrPort | null;
+  omp: OmpInfoProvider | null;
+  codingWatcher: CodingWatcher | null;
   host: HostPort | null;
   vault: Vault;
   /** Host-side Chrome; the owner's handoff live view reaches it through the API. */
@@ -85,6 +89,7 @@ export async function openApp(config: Config): Promise<App> {
   let openedSources: SourceConnections | null = null;
   let openedMail: MailService | null = null;
   let openedMailWatcher: MailWatcher | null = null;
+  let openedCodingWatcher: CodingWatcher | null = null;
   let openedMcp: McpClients | null = null;
   let openedSourceStore: SourceStore | null = null;
   let openedMemory: MemoryStore | null = null;
@@ -107,6 +112,7 @@ export async function openApp(config: Config): Promise<App> {
     if (openedCore && !coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
     await Promise.all([
       attempt(async () => { await openedMailWatcher?.stop(); openedMailWatcher = null; }),
+      attempt(() => { openedCodingWatcher?.stop(); openedCodingWatcher = null; }),
       attempt(async () => { await openedMail?.close(); }),
       attempt(async () => { await openedMcp?.close(); openedMcp = null; }),
       attempt(async () => { await openedSources?.close(); }),
@@ -170,6 +176,8 @@ export async function openApp(config: Config): Promise<App> {
     const desktop = (openedDesktop = createDesktop(config, { root: config.root }));
     const memory = (openedMemory = new MemoryStore(config.root));
     const herdr = config.coding === false ? null : new Herdr(undefined, { prefs: () => codingPrefs(core.ledger.setting<unknown>("coding", null)) });
+    const omp = config.coding === false ? null : new OmpInfoProvider();
+    const codingWatcher = (openedCodingWatcher = herdr === null ? null : new CodingWatcher(core, herdr));
     const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, herdr, reach: createReach(config), browser, vault, desktop, mail, toss: createToss(), mcp });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
     const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));
@@ -182,6 +190,8 @@ export async function openApp(config: Config): Promise<App> {
       documents,
       skills,
       herdr,
+      omp,
+      codingWatcher,
       host,
       vault,
       browser,
@@ -243,7 +253,7 @@ export async function serve(config: Config) {
     app.core.catalog.start(catalogChanged);
     app.core.codexCatalog.start(catalogChanged);
     const token = ownerToken(config.root);
-    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, herdr: app.herdr, vault: app.vault, browser: app.browser, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
+    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, herdr: app.herdr, omp: app.omp, vault: app.vault, browser: app.browser, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
     push = startPush(app.core, config);
     const hostFile = join(config.root, "host.json");
     writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });
@@ -253,6 +263,7 @@ export async function serve(config: Config) {
     app.core.autonomy.start();
     app.memoryDreams.start();
     void app.mailWatcher.start();
+    app.codingWatcher?.start();
     updater?.start();
     log(`serving ${config.root} on http://${config.host}:${server.port}`);
   } catch (error) {

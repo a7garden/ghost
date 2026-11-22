@@ -23,7 +23,12 @@ import {
   type PageSummary,
   type PageView,
   type CodingSetup,
+  type HerdrChanges,
+  type HerdrDiff,
+  type HerdrFrame,
   type HerdrOutput,
+  type HerdrUpload,
+  type OmpInfo,
   type HerdrPaneView,
   type HerdrView,
   CodingStart,
@@ -41,6 +46,9 @@ import {
 } from "@ghost/contract";
 import type { Config } from "../config.ts";
 import type { BrowserPort, DocumentsPort, HerdrPort, SkillsPort } from "../integrations/ports.ts";
+import { mergeFrames } from "../integrations/herdr.ts";
+import type { OmpInfoProvider } from "../integrations/omp.ts";
+import { saveUpload, UPLOAD_MAX_BYTES } from "../integrations/uploads.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
 import { ConnectionOAuth } from "./connection-oauth.ts";
@@ -118,8 +126,8 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; herdr?: HerdrPort | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null }): { port: number; stop(): Promise<void> } {
-  const { core, config, ownerToken, documents, skills, herdr = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; herdr?: HerdrPort | null; omp?: OmpInfoProvider | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null }): { port: number; stop(): Promise<void> } {
+  const { core, config, ownerToken, documents, skills, herdr = null, omp = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
   const oauth = new OAuthLogins(core);
@@ -558,7 +566,43 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (pathname === "/api/herdr/output" && request.method === "GET") {
       try {
         if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        return json(await herdr.output(url.searchParams.get("pane") ?? "") satisfies HerdrOutput);
+        const lines = url.searchParams.get("lines");
+        return json(await herdr.output(url.searchParams.get("pane") ?? "", { ansi: url.searchParams.get("format") === "ansi", ...(lines === null ? {} : { lines: Number(lines) }) }) satisfies HerdrOutput);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+    if (pathname === "/api/herdr/changes" && request.method === "GET") {
+      try {
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
+        return json(await herdr.changes(url.searchParams.get("pane") ?? "") satisfies HerdrChanges);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+    if (pathname === "/api/herdr/diff" && request.method === "GET") {
+      try {
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
+        return json(await herdr.diff(url.searchParams.get("pane") ?? "", url.searchParams.get("path") ?? "") satisfies HerdrDiff);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+    // What omp offers for starting a session in a directory: its models and that directory's recent conversations.
+    if (pathname === "/api/coding/omp" && request.method === "GET") {
+      try {
+        if (!omp) throw new CommandError("unavailable", "omp is not available on this Host");
+        return json(await omp.info(url.searchParams.get("cwd") ?? "") satisfies OmpInfo);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+    // A file from the app (a phone screenshot) saved on the Mac for an agent to read by path; the body is the file's bytes.
+    if (pathname === "/api/herdr/upload" && request.method === "POST") {
+      try {
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
+        if (Number(request.headers.get("content-length") ?? 0) > UPLOAD_MAX_BYTES) throw invalid("the file is larger than 10 MB");
+        return json(saveUpload(config.root, url.searchParams.get("name") ?? "file", new Uint8Array(await request.arrayBuffer())) satisfies HerdrUpload);
       } catch (caught) {
         return failure(caught);
       }
@@ -578,12 +622,24 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
           async start(controller) {
             const send = (event: string, data: unknown) => { try { controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); } catch { /* the viewer is gone */ } };
             keepalive = setInterval(() => { try { controller.enqueue(encoder.encode(": keepalive\n\n")); } catch { /* the viewer is gone */ } }, 15_000);
+            // Output that arrives within 40 ms goes out as one frame: a busy agent redraws many times a second and a phone does not need every step.
+            let pending: HerdrFrame | null = null;
+            let flushTimer: ReturnType<typeof setTimeout> | undefined;
+            const flush = () => { flushTimer = undefined; if (pending !== null) { send("frame", pending); pending = null; } };
             try {
-              for await (const frame of frames) send("frame", frame);
+              for await (const frame of frames) {
+                pending = mergeFrames(pending, frame);
+                flushTimer ??= setTimeout(flush, 40);
+              }
+              clearTimeout(flushTimer);
+              flush();
               send("end", {});
             } catch (caught) {
+              clearTimeout(flushTimer);
+              flush();
               send("error", { message: caught instanceof Error ? caught.message : "the terminal stopped" });
             } finally {
+              clearTimeout(flushTimer);
               clearInterval(keepalive);
               try { controller.close(); } catch { /* already closed */ }
             }

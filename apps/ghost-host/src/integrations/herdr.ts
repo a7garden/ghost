@@ -2,7 +2,7 @@ import { accessSync, constants, existsSync, realpathSync, statSync } from "node:
 import { homedir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import { Type } from "typebox";
-import { HERDR_AGENT_KINDS, validate, type CodingAgentId, type CodingPrefs, type CodingSetup, type CodingStart, type HerdrAgentKind, type HerdrAgentStart, type HerdrClose, type HerdrFrame, type HerdrInput, type HerdrIntegration, type HerdrOutput, type HerdrPaneView, type HerdrRename, type HerdrSplit, type HerdrTabCreate, type HerdrView, type HerdrWorkspaceCreate, type HerdrWorkspaceView } from "@ghost/contract";
+import { HERDR_AGENT_KINDS, validate, type CodingAgentId, type CodingPrefs, type CodingSetup, type CodingStart, type HerdrAgentKind, type HerdrAgentStart, type HerdrChangedFile, type HerdrChanges, type HerdrClose, type HerdrDiff, type HerdrFrame, type HerdrInput, type HerdrIntegration, type HerdrOutput, type HerdrPaneView, type HerdrRename, type HerdrSplit, type HerdrTabCreate, type HerdrView, type HerdrWorkspaceCreate, type HerdrWorkspaceView } from "@ghost/contract";
 import { CommandError, conflict, invalid, notFound } from "../core/errors.ts";
 import type { HerdrPort, HerdrRun, HerdrWait } from "./ports.ts";
 
@@ -75,8 +75,12 @@ const MAX_OBSERVERS = 12;
 const KEEPALIVE_MS = 15_000;
 export const OUTPUT_LINES = 300;
 const OUTPUT_BYTES = 64 * 1024;
+const HISTORY_MAX_LINES = 2_000;
+const HISTORY_BYTES = 512 * 1024;
+const DIFF_BYTES = 200 * 1024;
+const MAX_FILES = 300;
 const ENV_KEPT = ["HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR"];
-const NO_PREFS: CodingPrefs = { session: null, agent: null };
+const NO_PREFS: CodingPrefs = { session: null, agent: null, notify: "blocked" };
 
 const AGENT_IDS: readonly unknown[] = CODING_AGENTS.map((agent) => agent.id);
 
@@ -90,6 +94,7 @@ export function codingPrefs(saved: unknown): CodingPrefs {
   return {
     session: typeof value.session === "string" && SESSION.test(value.session) ? value.session : null,
     agent: AGENT_IDS.includes(agent) ? (agent as CodingAgentId) : null,
+    notify: value.notify === "off" || value.notify === "all" ? value.notify : "blocked",
   };
 }
 
@@ -114,13 +119,43 @@ export function findProgram(name: string, dirs?: string[]): string | null {
   return null;
 }
 
+/**
+ * Joins what the observer sent since the last flush into one frame: the stream is a sequence of ANSI writes, so
+ * consecutive writes of the same size concatenate, and a full repaint makes everything before it unnecessary.
+ */
+export function mergeFrames(pending: HerdrFrame | null, next: HerdrFrame): HerdrFrame {
+  if (pending === null || next.full || next.width !== pending.width || next.height !== pending.height) return next;
+  return { ...next, full: pending.full, bytes: Buffer.concat([Buffer.from(pending.bytes, "base64"), Buffer.from(next.bytes, "base64")]).toString("base64") };
+}
+
 /** What a terminal gave back, ready to read: escape sequences and control bytes gone, trailing blanks trimmed, the end of it only. */
-export function terminalText(raw: string): string {
+export function terminalText(raw: string, maxLines = OUTPUT_LINES, maxBytes = OUTPUT_BYTES): string {
   const lines = raw.replace(/\u001b\[[0-9;?]*[ -\/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").split("\n").map((line) => line.trimEnd());
   while (lines.length > 0 && lines[0] === "") lines.shift();
   while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  const text = lines.slice(-OUTPUT_LINES).join("\n");
-  return text.length > OUTPUT_BYTES ? text.slice(-OUTPUT_BYTES) : text;
+  const text = lines.slice(-maxLines).join("\n");
+  return text.length > maxBytes ? text.slice(-maxBytes) : text;
+}
+
+/** A terminal's text with its colours: SGR sequences and newlines kept, every other escape sequence and control byte gone, the end of it only. */
+export function ansiText(raw: string, maxLines: number, maxBytes: number): string {
+  const lines = raw
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "")
+    .replace(/\u001b\[([0-9;:?]*)([ -\/]*)([@-~])/g, (sequence, _params: string, _inter: string, final: string) => (final === "m" && !sequence.includes("?") ? sequence : ""))
+    .replace(/\u001b(?!\[[0-9;:]*m)/g, "")
+    .replace(/[\u0000-\u0008\u000b-\u001a\u001c-\u001f\u007f]/g, "")
+    .split("\n")
+    .map((line) => line.trimEnd());
+  while (lines.length > 0 && lines[0] === "") lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  let text = lines.slice(-maxLines).join("\n");
+  if (text.length > maxBytes) {
+    // Cut at a line start, never inside an escape sequence.
+    text = text.slice(-maxBytes);
+    const newline = text.indexOf("\n");
+    text = newline < 0 ? "" : text.slice(newline + 1);
+  }
+  return text;
 }
 
 /** The instruction a coding agent starts with: the task, then where it may work and how to finish. */
@@ -143,12 +178,13 @@ export function promptFor(task: string, branch: string | null): string {
 
 const slugOf = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "task";
 
-async function git(args: string[], cwd: string): Promise<{ code: number; out: string }> {
+async function git(args: string[], cwd: string, max = 20_000, keep: "tail" | "head" = "tail"): Promise<{ code: number; out: string }> {
   const child = Bun.spawn([GIT, ...args], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const timer = setTimeout(() => child.kill(), 60_000);
   try {
     const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-    return { code, out: (out.trim() || err.trim()).slice(-20_000) };
+    const text = out.trim() || err.trim();
+    return { code, out: keep === "tail" ? text.slice(-max) : text.slice(0, max) };
   } finally {
     clearTimeout(timer);
   }
@@ -320,15 +356,79 @@ export class Herdr implements HerdrPort {
     }
   }
 
-  async output(id: string): Promise<HerdrOutput> {
+  /** The end of a pane's terminal as text; `ansi` keeps the colours (the history view), `lines` is how far back. */
+  async output(id: string, options: { ansi?: boolean; lines?: number } = {}): Promise<HerdrOutput> {
     const pane = await this.pane(id);
     if (this.executable === null) throw new CommandError("unavailable", "herdr is not installed on this Mac");
-    const read = await this.run(["--session", this.session, "pane", "read", id, "--source", "recent-unwrapped", "--lines", String(OUTPUT_LINES)]);
+    const lines = Math.min(Math.max(Math.round(options.lines ?? OUTPUT_LINES), 1), HISTORY_MAX_LINES);
+    const read = await this.run(["--session", this.session, "pane", "read", id, "--source", "recent-unwrapped", "--lines", String(lines), ...(options.ansi ? ["--format", "ansi"] : [])], 15_000);
     if (read.code !== 0) {
       const why = Herdr.reason(read);
       throw failure(why.code, why.message);
     }
-    return { pane, text: terminalText(read.out) };
+    return { pane, text: options.ansi ? ansiText(read.out, lines, HISTORY_BYTES) : terminalText(read.out, lines, lines > OUTPUT_LINES ? HISTORY_BYTES : OUTPUT_BYTES) };
+  }
+
+  /** The repository a pane works in, and the commit its work is measured from: where its worktree was cut, for the main checkout HEAD itself. */
+  private async repository(id: string): Promise<{ cwd: string; branch: string | null; base: string } | null> {
+    const cwd = (await this.pane(id)).cwd;
+    if (cwd === null || !existsSync(cwd)) return null;
+    if ((await git(["rev-parse", "--show-toplevel"], cwd)).code !== 0) return null;
+    const head = await git(["rev-parse", "HEAD"], cwd);
+    // A repository with no commit has nothing to measure from.
+    if (head.code !== 0) return null;
+    const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).out;
+    const main = /^worktree .*\nHEAD ([0-9a-f]+)/.exec((await git(["worktree", "list", "--porcelain"], cwd)).out)?.[1];
+    const merged = main === undefined ? null : await git(["merge-base", "HEAD", main], cwd);
+    return { cwd, branch: branch === "HEAD" ? null : branch, base: merged !== null && merged.code === 0 && /^[0-9a-f]{7,40}$/.test(merged.out) ? merged.out : head.out };
+  }
+
+  async changes(id: string): Promise<HerdrChanges> {
+    const repo = await this.repository(id);
+    if (repo === null) return { git: false, branch: null, base: null, commits: [], files: [], truncated: false };
+    const [numstat, names, untracked, log] = await Promise.all([
+      git(["diff", "--numstat", "-M", repo.base], repo.cwd, 2_000_000, "head"),
+      git(["diff", "--name-status", "-M", repo.base], repo.cwd, 2_000_000, "head"),
+      git(["ls-files", "--others", "--exclude-standard"], repo.cwd, 2_000_000, "head"),
+      git(["log", "--format=%h%x09%s", "-20", `${repo.base}..HEAD`], repo.cwd),
+    ]);
+    const counts = new Map<string, { additions: number | null; deletions: number | null }>();
+    for (const line of numstat.out.split("\n")) {
+      const [added, deleted, ...rest] = line.split("\t");
+      const path = rest.at(-1);
+      if (path === undefined || path === "") continue;
+      // A rename prints `old => new` or `dir/{old => new}/file`; the count belongs to the new path.
+      const target = path.replace(/\{[^}]* => ([^}]*)\}/, "$1").replace(/^.* => /, "").replace(/\/\//g, "/");
+      counts.set(target, { additions: added === "-" ? null : Number(added), deletions: deleted === "-" ? null : Number(deleted) });
+    }
+    const kind: Record<string, HerdrChangedFile["status"]> = { A: "added", M: "modified", D: "deleted", R: "renamed", C: "added", T: "modified" };
+    const files: HerdrChangedFile[] = [];
+    for (const line of names.out.split("\n")) {
+      const [code, ...paths] = line.split("\t");
+      const path = paths.at(-1);
+      if (code === undefined || path === undefined || path === "") continue;
+      files.push({ path, status: kind[code[0]!] ?? "modified", ...(counts.get(path) ?? { additions: null, deletions: null }) });
+    }
+    for (const path of untracked.out.split("\n")) if (path !== "") files.push({ path, status: "untracked", additions: null, deletions: null });
+    return {
+      git: true,
+      branch: repo.branch,
+      base: repo.base.slice(0, 12),
+      commits: log.out.split("\n").filter(Boolean).map((line) => ({ sha: line.slice(0, line.indexOf("\t")), subject: line.slice(line.indexOf("\t") + 1) })),
+      files: files.slice(0, MAX_FILES),
+      truncated: files.length > MAX_FILES,
+    };
+  }
+
+  /** One changed file's diff against the same base. Only a path `changes` lists is answered, so a path cannot name anything else on the Mac. */
+  async diff(id: string, path: string): Promise<HerdrDiff> {
+    const repo = await this.repository(id);
+    const listed = repo === null ? undefined : (await this.changes(id)).files.find((file) => file.path === path);
+    if (repo === null || listed === undefined) throw notFound(`${path} is not a changed file of herdr pane ${id}`);
+    const result = listed.status === "untracked"
+      ? await git(["diff", "--no-index", "--no-color", "--", "/dev/null", path], repo.cwd, DIFF_BYTES + 1, "head")
+      : await git(["diff", "--no-color", "-M", repo.base, "--", path], repo.cwd, DIFF_BYTES + 1, "head");
+    return { path, diff: result.out.slice(0, DIFF_BYTES), truncated: result.out.length > DIFF_BYTES };
   }
 
   async setup(): Promise<CodingSetup> {
@@ -431,9 +531,10 @@ export class Herdr implements HerdrPort {
   }
 
   /** Starts an agent of `kind` in a pane that is a shell at its prompt. The name only has to be unique among live agents; the pane id is what the Host addresses it by. */
-  private async launch(pane: string, kind: HerdrAgentKind, seed: string): Promise<void> {
+  private async launch(pane: string, kind: HerdrAgentKind, seed: string, args: readonly string[] = []): Promise<void> {
     const name = `ghost-${slugOf(seed).slice(0, 18).replace(/-+$/, "") || "agent"}-${crypto.randomUUID().slice(0, 4)}`;
-    await this.call(["agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_MS)], START_MS + 5_000);
+    // The agent's own arguments go after `--`, as herdr asks.
+    await this.call(["agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_MS), ...(args.length > 0 ? ["--", ...args] : [])], START_MS + 5_000);
   }
 
   /** Whatever a creation did after herdr had already opened the pane: the pane is there, whatever the agent did next. */
@@ -457,14 +558,14 @@ export class Herdr implements HerdrPort {
   }
 
   /** An agent and its first instruction in a pane that was just opened, when the owner asked for them. */
-  private async populate(pane: string, input: { agent?: HerdrAgentKind | undefined; task?: string | undefined }, branch: string | null, seed: string): Promise<void> {
+  private async populate(pane: string, input: { agent?: HerdrAgentKind | undefined; args?: string[] | undefined; task?: string | undefined }, branch: string | null, seed: string): Promise<void> {
     if (input.agent === undefined) {
-      if (input.task !== undefined) throw invalid("a first instruction needs an agent to give it to");
+      if (input.task !== undefined || input.args !== undefined) throw invalid("a first instruction or agent arguments need an agent to give them to");
       return;
     }
     const agent = input.agent;
     await this.afterOpen(pane, async () => {
-      await this.launch(pane, agent, seed);
+      await this.launch(pane, agent, seed, input.args);
       if (input.task !== undefined) await this.submit(pane, branch === null ? input.task : promptFor(input.task, branch));
     });
   }

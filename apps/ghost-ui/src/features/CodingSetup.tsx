@@ -8,6 +8,9 @@ import { Button, InlineError, SelectField, SettingsGroup, SettingsRow } from '..
 const INSTALL_DOCS = 'https://herdr.dev/tui/docs/install/';
 const INSTALL = 'curl -fsSL https://herdr.dev/install.sh | sh';
 type SetupStatus = 'ready' | 'missing' | 'invalid' | 'stopped' | 'restart' | 'outdated' | 'unlinked';
+const agentNotificationChoices = [
+  { value: 'off', label: '끔' }, { value: 'blocked', label: '입력 필요할 때' }, { value: 'all', label: '입력 필요·끝났을 때' },
+] as const;
 
 /** The order follows herdr's dependencies. A missing agent or hook never blocks the connection. */
 export function codingChecklist(setup: CodingSetup) {
@@ -79,6 +82,8 @@ function useCodingSetup(pollOptional: boolean, onSessionChanged?: () => void): S
         if (view.prefs.session !== action.prefs.session) {
           setView(null);
           onSessionChanged?.();
+        } else {
+          setView({ ...view, prefs: action.prefs });
         }
       }
     } catch (reason) {
@@ -166,7 +171,7 @@ export function useCodingPageSetup(showOptional: boolean, onSessionChanged: () =
 export function CodingSettings() {
   const model = useCodingSetup(true);
   const { view, pending, readError, act } = model;
-  const sessionId = useId(), agentId = useId();
+  const sessionId = useId(), agentId = useId(), notifyId = useId();
   return <div className="coding-settings">
     <SetupErrors model={model}/>
     {!view && !readError && <p role="status">herdr 설정을 불러오는 중…</p>}
@@ -181,6 +186,13 @@ export function CodingSettings() {
           <SelectField id={agentId} label="기본 에이전트" value={view.prefs.agent ?? 'auto'} disabled={Boolean(pending)}
             options={[{ value: 'auto', label: '자동 선택' }, ...view.agents.map(agent => ({ value: agent.id, label: agent.name, disabled: agent.path === null && agent.id !== view.prefs.agent }))]}
             onValueChange={value => void act({ prefs: { ...view.prefs, agent: view.agents.find(agent => agent.id === value)?.id ?? null } })}/>
+        </SettingsRow>
+        <SettingsRow label="에이전트 알림" htmlFor={notifyId}>
+          <SelectField id={notifyId} label="에이전트 알림" value={view.prefs.notify} disabled={Boolean(pending)}
+            options={[...agentNotificationChoices]} onValueChange={value => {
+              const choice = agentNotificationChoices.find(option => option.value === value);
+              if (choice) void act({ prefs: { ...view.prefs, notify: choice.value } });
+            }}/>
         </SettingsRow>
       </SettingsGroup>
       <SettingsGroup title="herdr 연결">

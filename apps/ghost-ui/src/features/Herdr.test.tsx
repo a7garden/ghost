@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { HerdrPaneView, HerdrWorkspaceView } from '@ghost/contract';
-import { HerdrHistoryText, HerdrPaneBody } from './Herdr';
+import { HerdrPaneBody } from './Herdr';
+import { HerdrDiffText } from './HerdrChanges';
 import { findHerdrPane, herdrNodeActions, HerdrRoster } from './HerdrRoster';
 import { herdrAgentOptions, workspaceInput } from './HerdrStart';
 import { codeRunPane, herdrPanePath, parseHerdrPane } from './herdrDisplay';
@@ -67,11 +68,11 @@ describe('herdr roster', () => {
 describe('herdr pane', () => {
   const body = (status: HerdrPaneView['status'], pending?: boolean, compact = false, agent = pane.agent) => renderToStaticMarkup(<HerdrPaneBody
     pane={{ ...pane, status, agent }} pending={pending} compact={compact} mode="live" onMode={() => {}}
-    screen={<HerdrHistoryText text={'<b>$ bun test</b>\n3 pass'}/>} onPrompt={async () => true} onKey={() => {}}/>);
+    screen={<HerdrDiffText value={'@@ -0 +1 @@\n+<b>$ bun test</b>'} wrap={false}/>} onPrompt={async () => true} onKey={() => {}}/>);
 
-  it('escapes history as text and keeps the pane context', () => {
+  it('escapes diffs as text and keeps the pane context', () => {
     const markup = body('blocked');
-    expect(markup).toMatch(/<pre[^>]*aria-label="터미널 기록"[^>]*>&lt;b&gt;\$ bun test&lt;\/b&gt;\n3 pass<\/pre>/);
+    expect(markup).toContain('data-kind="addition">+&lt;b&gt;$ bun test&lt;/b&gt;');
     expect(markup).not.toContain('<b>$ bun test');
     expect(markup).not.toContain('contenteditable');
     expect(markup).toContain('/work/tree');
@@ -86,10 +87,13 @@ describe('herdr pane', () => {
     expect(markup.match(/<textarea[^>]+>/)?.[0].includes('disabled=""')).toBe(disabled);
   });
 
-  it('provides touch keys for any pane on compact; plain shells do not have a prompt composer', () => {
-    const markup = body('idle', true, true, null);
+  it('provides touch keys and a line composer for plain shells', () => {
+    const markup = body('idle', false, true, null);
     const keys = markup.match(/aria-label="터미널 키">(.*?)<\/div>/)?.[1] ?? '';
     for (const label of ['Esc', 'Tab', '↑', '↓', '←', '→', 'Enter', 'Ctrl+C']) expect(keys).toContain(`>${label}</button>`);
+    expect(markup).toContain('aria-label="보조 터미널 키"');
+    expect(markup).toContain('aria-label="Shift+Tab"');
+    expect(markup).toContain('aria-label="셸 명령"');
     expect(markup).not.toContain('후속 지시');
     expect(body('idle', true).match(/<textarea[^>]+>/)?.[0]).toContain('disabled=""');
   });

@@ -26,9 +26,10 @@ const settledLabel: Record<Decision['state'], string> = { pending: '', approved:
  * 2026.11.11 : 카드 한 장씩 넘기던 화면을 빨리 훑고 넘기는 목록으로 바꿨다. 추천대로 한꺼번에 · 메인에게 맡기기 ·
  * 나중에(이 기기에서 뒤로)를 둔다. 소식과 처리한 결정은 접어서 아래에 둔다.
  */
-export function InboxView({ state, navigate, focusDecisionId }: {
+export function InboxView({ state, navigate, focusDecisionId, codingSession }: {
   state: State;
   navigate(path: string): void;
+  codingSession?: string | null;
   /** ?decision= opens that decision in place. */
   focusDecisionId: string | null;
 }) {
@@ -83,7 +84,7 @@ export function InboxView({ state, navigate, focusDecisionId }: {
   const markRead = (ids: string[]) => { setError(''); void client.send({ type: 'notification.read', notificationIds: ids }).catch(fail('읽음 표시를 저장하지 못했습니다.')); };
   const openNotification = (item: Notification) => {
     if (!item.readAt) markRead([item.id]);
-    const destination = notificationRoute(item, state);
+    const destination = notificationRoute(item, state, codingSession);
     if (destination) navigate(destination);
   };
   const resolveRecommended = async (decision: Decision) => {

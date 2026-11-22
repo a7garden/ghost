@@ -4,7 +4,7 @@ import type { HerdrPaneView, HerdrTabView, HerdrTarget, HerdrWorkspaceView } fro
 import { Button, Popover, PopoverContent, PopoverTrigger } from '../ui';
 import { HerdrState, herdrPanePath } from './herdrDisplay';
 
-export type HerdrNode = { id: string; label: string; target: HerdrTarget };
+export type HerdrNode = { id: string; label: string; target: HerdrTarget; cwd?: string | null };
 export type RosterAction =
   | { kind: 'tab'; node: HerdrNode }
   | { kind: 'split'; node: HerdrNode; pane: string; direction: 'right' | 'down' }
@@ -58,8 +58,8 @@ function NodeActions({ node, items, onAction }: { node: HerdrNode; items: Roster
 }
 
 function TabRows({ tab, selected, onAction }: { tab: HerdrTabView; selected: string | null; onAction(action: RosterAction): void }) {
-  const node: HerdrNode = { id: tab.id, label: tab.label, target: 'tab' };
   const splitPane = tab.panes.find(pane => pane.id === selected) ?? tab.panes.find(pane => pane.focused) ?? tab.panes[0];
+  const node: HerdrNode = { id: tab.id, label: tab.label, target: 'tab', cwd: splitPane?.cwd };
   return <section className="herdr-roster-tab" aria-label={`탭 · ${tab.label}`}>
     <div className="herdr-node-head">
       <h3>{tab.label}</h3>
@@ -67,7 +67,7 @@ function TabRows({ tab, selected, onAction }: { tab: HerdrTabView; selected: str
       <NodeActions node={node} items={herdrNodeActions(node, { splitPane: splitPane?.id })} onAction={onAction}/>
     </div>
     <ul>{tab.panes.map(pane => {
-      const paneNode: HerdrNode = { id: pane.id, label: pane.title, target: 'pane' };
+      const paneNode: HerdrNode = { id: pane.id, label: pane.title, target: 'pane', cwd: pane.cwd };
       return <li key={pane.id} className="herdr-pane-row" data-selected={pane.id === selected || undefined}>
         <a href={`#${herdrPanePath(pane.id)}`} aria-current={selected === pane.id ? 'page' : undefined}>
           <strong className="coding-row-title">{pane.title}</strong>
@@ -83,7 +83,8 @@ function TabRows({ tab, selected, onAction }: { tab: HerdrTabView; selected: str
 
 export function HerdrRoster({ workspaces, selected, onAction }: { workspaces: readonly HerdrWorkspaceView[]; selected: string | null; onAction(action: RosterAction): void }) {
   return workspaces.map(workspace => {
-    const node: HerdrNode = { id: workspace.id, label: workspace.label, target: 'workspace' };
+    const cwd = workspace.worktree?.path ?? workspace.tabs[0]?.panes[0]?.cwd;
+    const node: HerdrNode = { id: workspace.id, label: workspace.label, target: 'workspace', cwd };
     return <section key={workspace.id} className="coding-roster-group" aria-label={`스페이스 · ${workspace.label}`}>
       <div className="herdr-node-head">
         <h2>{workspace.label}</h2>

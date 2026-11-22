@@ -802,7 +802,7 @@ async function codingFixture(options: { installed?: ("omp" | "claude" | "codex")
       server: options.server === false ? null : { version: "0.9.5", compatible: true, restartNeeded: false },
       agents: (["omp", "claude", "codex"] as const).map((id) => ({ id, name: id, path: (options.installed ?? ["omp"]).includes(id) ? `/bin/${id}` : null, integration: "current" as const })),
       kinds: [],
-      prefs: { session: null, agent: null },
+      prefs: { session: null, agent: null, notify: "blocked" },
     }),
     installIntegration: async () => {},
     start: async (input, wait?) => {
@@ -824,7 +824,7 @@ async function codingFixture(options: { installed?: ("omp" | "claude" | "codex")
       commit(tree.get(id)!.checkout);
       return result(id, null);
     },
-    createWorkspace: unused, createTab: unused, split: unused, startAgent: unused, rename: unused, close: unused, input: unused, terminal: unused,
+    changes: unused, diff: unused, createWorkspace: unused, createTab: unused, split: unused, startAgent: unused, rename: unused, close: unused, input: unused, terminal: unused,
   };
   const tools = createCodingTools(s.core, herdr).tools!;
   const call = async (name: string, args: object, callId: string) => {

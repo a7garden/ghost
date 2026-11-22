@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import type { CodingPrefs, CodingSetup, Decision, HerdrAgentStart, HerdrClose, HerdrFrame, HerdrInput, HerdrIntegrationInstall, HerdrOutput, HerdrPaneView, HerdrPrompt, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrView, HerdrWorkspaceCreate, HerdrWorkspaceView, VaultItem } from '@ghost/contract';
+import type { CodingPrefs, CodingSetup, Decision, HerdrAgentStart, HerdrChanges, HerdrClose, HerdrDiff, HerdrFrame, HerdrInput, HerdrIntegrationInstall, HerdrOutput, HerdrPaneView, HerdrPrompt, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrUpload, HerdrView, HerdrWorkspaceCreate, HerdrWorkspaceView, OmpInfo, VaultItem } from '@ghost/contract';
 import { readRunState } from './run-state';
 
 /** The synthetic decision ids the decision-surface screens focus. */
@@ -87,6 +87,40 @@ export async function mockVaultApi(page: Page): Promise<void> {
 
 export const visualCodingIds = { finished: 'w79:pA', running: 'w79:pB', blocked: 'w80:pA', shell: 'w79:pC', started: 'w81:p81' };
 
+const checkoutChanges: HerdrChanges = {
+  git: true, branch: 'fix/login-message', base: '0b147e38b47cd99dec7c90e80ed060f58d801db4', truncated: false,
+  commits: [{ sha: '8dc27e1a1443baa8ec1deb7326a6d300c2f6d813', subject: 'Show a fallback on login errors' }],
+  files: [
+    { path: 'src/auth/login.ts', status: 'modified', additions: 2, deletions: 1 },
+    { path: 'src/auth/login.test.ts', status: 'untracked', additions: 17, deletions: 0 },
+    { path: 'src/auth/legacy.ts', status: 'deleted', additions: 0, deletions: 6 },
+  ],
+};
+const loginDiff = [
+  'diff --git a/src/auth/login.ts b/src/auth/login.ts',
+  'index 0b147e3..8dc27e1 100644',
+  '--- a/src/auth/login.ts',
+  '+++ b/src/auth/login.ts',
+  '@@ -18,4 +18,5 @@ export function login() {',
+  '   if (!response.ok) {',
+  '-    return showError(error.message);',
+  '+    const message = error.message || \"로그인할 수 없습니다. 다시 시도해 주세요.\";',
+  '+    return showError(message);',
+  '   }',
+  ' }',
+].join('\n');
+
+const ompModels: OmpInfo['models'] = [
+  { selector: 'anthropic/claude-sonnet-4-6', name: 'Claude Sonnet 4.6', provider: 'Anthropic', thinking: ['low', 'medium', 'high'] },
+  { selector: 'zai/glm-5.1', name: 'GLM 5.1', provider: 'Z.AI', thinking: ['low', 'high'] },
+  { selector: 'local/qwen3', name: 'Qwen3', provider: 'Local', thinking: [] },
+];
+
+function colourTerminal(text: string) {
+  const colors = [36, 0, 32, 0, 33];
+  return text.split('\n').map((line, index) => `\x1b[${colors[index % colors.length]}m${line}\x1b[0m`).join('\n');
+}
+
 export function fulfillHerdrFrame(route: Route, text: string, { end = false }: { end?: boolean } = {}) {
   const url = new URL(route.request().url());
   const width = Number(url.searchParams.get('cols')), height = Number(url.searchParams.get('rows'));
@@ -116,7 +150,7 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
       { id: 'codex', name: 'Codex', path: null, integration: 'missing' },
     ],
     kinds: ['omp', 'claude', 'pi', 'gemini'],
-    prefs: { session: null, agent: 'claude' },
+    prefs: { session: null, agent: 'claude', notify: 'blocked' },
   };
   const entries = new Map<string, HerdrOutput>();
   for (const output of [
@@ -211,6 +245,16 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
   const error = (route: Route, status: number, message: string) =>
     fulfillJson(route, status, { error: { code: status === 409 ? 'conflict' : status === 404 ? 'not_found' : 'invalid', message } });
   await page.route('**/api/coding', route => fulfillJson(route, 200, setup));
+  await page.route('**/api/coding/omp?*', route => {
+    const cwd = new URL(route.request().url()).searchParams.get('cwd');
+    const { fixedNow } = readRunState();
+    return fulfillJson(route, 200, {
+      models: ompModels, sessions: cwd === '/Projects/app' ? [
+        { id: 'omp-login-session', title: '로그인 실패 테스트', updatedAt: fixedNow - 15_000 },
+        { id: 'omp-checkout-session', title: '결제 화면 점검', updatedAt: fixedNow - 300_000 },
+      ] : [],
+    } satisfies OmpInfo);
+  });
   await page.route('**/api/coding/integrations', route => {
     const { agent } = route.request().postDataJSON() as HerdrIntegrationInstall;
     const item = setup.agents.find(item => item.id === agent);
@@ -221,7 +265,8 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
   await page.route('**/api/commands', route => {
     const { command } = route.request().postDataJSON() as { command: { type: string } & CodingPrefs };
     if (command.type !== 'coding.set') return route.fallback();
-    setup.prefs = { session: command.session, agent: command.agent };
+    if (!['off', 'blocked', 'all'].includes(command.notify)) return error(route, 400, '알림 값을 확인하세요.');
+    setup.prefs = { session: command.session, agent: command.agent, notify: command.notify };
     setup.session = command.session ?? 'default';
     setup.server = setup.sessions.find(session => session.name === setup.session)?.running ? server : null;
     return fulfillJson(route, 200, { ok: true, result: {} });
@@ -237,9 +282,27 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
     return fulfillHerdrFrame(route, text);
   });
   await page.route('**/api/herdr/output?*', route => {
+    const query = new URL(route.request().url()).searchParams;
+    const entry = entries.get(query.get('pane') ?? '');
+    return setup.server && entry ? fulfillJson(route, 200, query.get('format') === 'ansi' ? { ...entry, text: colourTerminal(entry.text) } : entry)
+      : error(route, 404, '패널을 찾을 수 없습니다.');
+  });
+  await page.route('**/api/herdr/changes?*', route => {
     const pane = new URL(route.request().url()).searchParams.get('pane');
-    const entry = entries.get(pane ?? '');
-    return setup.server && entry ? fulfillJson(route, 200, entry) : error(route, 404, '패널을 찾을 수 없습니다.');
+    return fulfillJson(route, 200, pane === visualCodingIds.finished ? checkoutChanges : {
+      git: false, branch: null, base: null, commits: [], files: [], truncated: false,
+    } satisfies HerdrChanges);
+  });
+  await page.route('**/api/herdr/diff?*', route => {
+    const path = new URL(route.request().url()).searchParams.get('path');
+    if (!path || !checkoutChanges.files.some(file => file.path === path)) return error(route, 404, '파일을 찾을 수 없습니다.');
+    return fulfillJson(route, 200, { path, diff: path === 'src/auth/login.ts' ? loginDiff : '', truncated: false } satisfies HerdrDiff);
+  });
+  await page.route('**/api/herdr/upload?*', route => {
+    const file = route.request().postDataBuffer();
+    const name = new URL(route.request().url()).searchParams.get('name') ?? 'file';
+    if (!file?.length) return error(route, 400, '빈 파일은 첨부할 수 없습니다.');
+    return fulfillJson(route, 200, { name, path: `/Ghost/uploads/a1b2c3d4-${name}`, size: file.length } satisfies HerdrUpload);
   });
   await page.route('**/api/herdr/workspaces', route => {
     const { cwd, label, branch, worktree, agent, task } = route.request().postDataJSON() as HerdrWorkspaceCreate;

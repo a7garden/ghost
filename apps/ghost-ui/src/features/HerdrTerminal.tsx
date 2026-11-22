@@ -1,53 +1,31 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
-import { Terminal, type ITheme } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
 import { useHost } from '../host/context';
 import { HostError } from '../host/client';
 import { decodeHerdrFrame } from './herdrTerminalProtocol';
-import '@xterm/xterm/css/xterm.css';
+import { openHerdrXterm } from './herdrXterm';
 
-Terminal.strings.promptLabel = '터미널 입력';
-Terminal.strings.tooMuchOutput = '터미널 출력이 너무 많습니다.';
-
-function terminalTheme(node: HTMLElement): ITheme {
-  const css = getComputedStyle(node);
-  const color = (token: string) => css.getPropertyValue(`--ghost-${token}`).trim();
-  const foreground = color('ink');
-  return {
-    background: color('canvas'), foreground, cursor: foreground, cursorAccent: color('canvas'),
-    selectionBackground: `${color('signal')}55`,
-    black: color('ansi-black'), brightBlack: color('ansi-gray'), white: color('ansi-white'), brightWhite: color('ansi-bright-white'),
-    red: color('danger-ink'), brightRed: color('danger'), yellow: color('amber-ink'), brightYellow: color('amber'),
-    green: color('success-ink'), brightGreen: color('success'), blue: color('signal-ink'), brightBlue: color('signal'),
-    magenta: color('ansi-magenta'), brightMagenta: color('ansi-magenta'), cyan: color('ansi-cyan'), brightCyan: color('ansi-cyan'),
-  };
-}
-
-export default function HerdrTerminal({ pane, onData, onGone }: {
-  pane: string; onData(data: string): void; onGone(): void;
+export default function HerdrTerminal({ pane, onData, onModifiedKey, onGone }: {
+  pane: string; onData(data: string): void; onModifiedKey(key: string): boolean; onGone(): void;
 }) {
   const { client } = useHost();
   const mount = useRef<HTMLDivElement>(null);
   const data = useEffectEvent(onData);
+  const modifiedKey = useEffectEvent(onModifiedKey);
   const gone = useEffectEvent(onGone);
   const [status, setStatus] = useState('터미널을 불러오는 중…');
   const [networkNote, setNetworkNote] = useState('');
 
   useEffect(() => {
     const node = mount.current!;
-    const fit = new FitAddon();
-    const terminal = new Terminal({
-      fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 1.25,
-      scrollback: 0, theme: terminalTheme(node), minimumContrastRatio: 4.5, screenReaderMode: true, cursorBlink: false,
-    });
-    terminal.loadAddon(fit);
-    terminal.open(node);
-    // Terminal output is remote text; OSC 8 must not create navigable links in Ghost.
-    const links = terminal.parser.registerOscHandler(8, () => true);
+    const { terminal, fit, dispose } = openHerdrXterm(node, { scrollback: 0 });
     // Keep Ghost's global shortcuts out of the terminal. Shift+Esc exits terminal focus without sending input.
     terminal.textarea?.setAttribute('aria-keyshortcuts', 'Shift+Escape');
     terminal.textarea?.setAttribute('title', 'Shift+Esc: 터미널에서 포커스 나가기');
     terminal.attachCustomKeyEventHandler(event => {
+      if (event.type === 'keydown' && !event.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && modifiedKey(event.key)) {
+        event.preventDefault();
+        return false;
+      }
       if (event.key !== 'Escape' || !event.shiftKey) return true;
       if (event.type === 'keydown') {
         event.preventDefault();
@@ -56,10 +34,12 @@ export default function HerdrTerminal({ pane, onData, onGone }: {
       return false;
     });
     const keys = (event: KeyboardEvent) => event.stopPropagation();
+    const softKey = (event: InputEvent) => {
+      if (event.cancelable && !event.isComposing && event.inputType === 'insertText' && event.data && modifiedKey(event.data)) event.preventDefault();
+    };
+    node.addEventListener('beforeinput', softKey, true);
     node.addEventListener('keydown', keys);
     const input = terminal.onData(value => data(value));
-    const appearance = new MutationObserver(() => { terminal.options.theme = terminalTheme(node); });
-    appearance.observe(document.documentElement, { attributeFilter: ['class'] });
 
     let stream: AbortController | undefined;
     let resizeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -144,12 +124,11 @@ export default function HerdrTerminal({ pane, onData, onGone }: {
       clearTimeout(retryTimer);
       clearTimeout(quietTimer);
       geometry.disconnect();
-      appearance.disconnect();
       node.removeEventListener('keydown', keys);
+      node.removeEventListener('beforeinput', softKey, true);
       node.removeEventListener('click', focus);
       input.dispose();
-      links.dispose();
-      terminal.dispose();
+      dispose();
     };
   }, [client, pane]);
 

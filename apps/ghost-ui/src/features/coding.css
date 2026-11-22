@@ -51,10 +51,6 @@
   .herdr-view-actions { display: flex; align-items: center; gap: 8px; flex: none; }
   .coding-context { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px; color: var(--ghost-ink3); font-size: var(--text-caption); overflow-wrap: anywhere; }
   .coding-directory { display: block; margin-top: 7px; color: var(--ghost-ink3); overflow-wrap: anywhere; font-size: var(--text-caption); }
-  .herdr-screen {
-    flex: 1; min-height: 0; margin: 0; overflow: auto; overscroll-behavior: contain; padding: 16px 24px; outline-offset: -2px;
-    color: var(--ghost-ink2); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-caption); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
-  }
   .herdr-live {
     --ghost-ansi-black: #141518; --ghost-ansi-gray: #68696e; --ghost-ansi-white: #595b61; --ghost-ansi-bright-white: #141518;
     --ghost-ansi-magenta: #85429b; --ghost-ansi-cyan: #0b6b77;
@@ -72,14 +68,63 @@
     padding: 6px 10px; border-radius: var(--radius-control); background: var(--ghost-surface); color: var(--ghost-ink2); font-size: var(--text-caption);
   }
   .herdr-live-status span { display: block; }
+  .herdr-history-scroll { height: 100%; overflow-y: auto; overflow-anchor: none; overscroll-behavior: contain; scrollbar-width: thin; }
+  .herdr-history-scroll > .herdr-xterm { position: sticky; top: 0; }
+  .herdr-history-scroll .xterm-scrollable-element > .scrollbar { display: none; }
+  .herdr-history-bottom { position: absolute; inset-inline-end: 24px; bottom: 12px; }
+  .herdr-history-error { position: absolute; inset: 8px 16px auto; }
   .coding-dock { padding: 12px 24px 16px; border-top: 1px solid var(--ghost-line); }
   .coding-dock > * { max-width: 48rem; margin-inline: auto; }
   .coding-dock > [role='alert'] { margin-bottom: 8px; }
   .coding-compose { display: flex; align-items: flex-end; gap: 8px; }
   .coding-compose textarea { min-height: 48px; max-height: min(128px, 25dvh); overflow: auto; resize: none; }
   .coding-compose button { flex: none; min-height: 44px; min-width: 44px; }
-  .herdr-keys { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
-  .herdr-keys button { min-width: 36px; font-family: var(--font-mono, ui-monospace, monospace); }
+  .herdr-keypad { margin-bottom: 8px; }
+  .herdr-keys, .herdr-keys-extended { display: flex; gap: 4px; }
+  .herdr-keys { flex-wrap: wrap; }
+  .herdr-keys-extended { overflow-x: auto; margin-top: 4px; padding-block: 2px; scrollbar-width: thin; overscroll-behavior-inline: contain; }
+  .herdr-keys button, .herdr-keys-extended button { flex: none; min-width: 36px; font-family: var(--font-mono, ui-monospace, monospace); }
+  .herdr-keys-extended button[aria-pressed='true'] { background: var(--ghost-signal-tint); color: var(--ghost-signal-ink); border-color: var(--ghost-signal); }
+
+  .herdr-changes { display: flex; flex: 1; min-height: 0; flex-direction: column; font-size: var(--text-ui); }
+  .herdr-changes-head { display: flex; flex: none; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 24px; border-bottom: 1px solid var(--ghost-line); }
+  .herdr-branch { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 14px; row-gap: 4px; overflow-wrap: anywhere; }
+  .herdr-branch strong { display: inline; font-weight: 650; }
+  .herdr-branch svg { display: inline; vertical-align: -.16em; margin-right: 6px; }
+  .herdr-branch > span { color: var(--ghost-ink3); font-size: var(--text-caption); }
+  .herdr-change-work { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+  .herdr-change-work[data-file] { grid-template-columns: clamp(13rem, 36%, 21rem) minmax(0, 1fr); }
+  .herdr-change-index { overflow: auto; overscroll-behavior: contain; padding: 10px 16px 16px; min-width: 0; }
+  .herdr-change-index > p { padding: 8px; }
+  .herdr-commits { margin: 0 8px 10px; padding: 0 0 8px; border-bottom: 1px solid var(--ghost-line); }
+  .herdr-commits summary { cursor: pointer; padding-block: 7px; font-weight: 550; }
+  .herdr-commits summary span { margin-inline-start: 4px; color: var(--ghost-ink3); }
+  .herdr-commits ol, .herdr-changed-files { margin: 0; padding: 0; list-style: none; }
+  .herdr-commits li { display: flex; align-items: baseline; gap: 10px; padding-block: 5px; overflow-wrap: anywhere; }
+  .herdr-commits code { flex: none; color: var(--ghost-ink3); font-size: var(--text-caption); }
+  .herdr-changed-files button { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 8px; align-items: center;
+    text-align: start; cursor: pointer; min-height: 44px; padding: 8px; border-radius: var(--radius-control); }
+  .herdr-changed-files button:hover, .herdr-changed-files button[aria-current] { background: var(--ghost-hover); }
+  .herdr-changed-files button:focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: -2px; }
+  .herdr-changed-files button > code { overflow-wrap: anywhere; }
+  .herdr-changed-files svg { color: var(--ghost-ink3); }
+  .herdr-file-status { width: 19px; height: 19px; display: grid; place-content: center; border-radius: 4px;
+    background: var(--ghost-inset); color: var(--ghost-ink2); font-family: var(--font-mono, monospace); font-size: var(--text-caption); }
+  .herdr-file-status[data-tone='positive'] { color: var(--ghost-success-ink); background: var(--ghost-success-tint); }
+  .herdr-file-status[data-tone='negative'] { color: var(--ghost-danger-ink); background: var(--ghost-danger-tint); }
+  .herdr-file-counts { display: flex; gap: 6px; font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+  .herdr-changes [data-kind='addition'] { color: var(--ghost-success-ink); }
+  .herdr-changes [data-kind='deletion'] { color: var(--ghost-danger-ink); }
+  .herdr-file-diff { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-inline-start: 1px solid var(--ghost-line); }
+  .herdr-file-diff header { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 8px 12px 8px 16px; border-bottom: 1px solid var(--ghost-line); }
+  .herdr-file-diff header code { overflow-wrap: anywhere; margin-inline-end: auto; }
+  .herdr-file-diff header button { flex: none; }
+  .herdr-file-diff header button[aria-pressed='true'] { background: var(--ghost-hover); }
+  .herdr-diff { flex: 1; margin: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 12px 16px; font-size: var(--text-caption); line-height: 1.6; }
+  .herdr-diff[data-wrap] { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .herdr-diff [data-kind='meta'] { color: var(--ghost-ink3); }
+  .herdr-diff [data-kind='hunk'] { color: var(--ghost-signal-ink); }
+  .herdr-file-diff > p, .herdr-changes > [role='alert'], .herdr-file-diff > [role='alert'] { margin: 8px 16px; }
 
   .coding-pane-setup { overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; }
   .coding-pane-setup:not(:only-child):not(.coding-pane) { flex: none; max-height: 45%; border-bottom: 1px solid var(--ghost-line); }
@@ -105,6 +150,7 @@
 
   .coding-new { overflow-y: auto; overscroll-behavior: contain; padding: 24px; }
   .coding-new-form, .coding-new fieldset { display: grid; min-width: 0; gap: 14px; }
+  .coding-new-form:has(.herdr-agent-options[open]), .coding-new-form fieldset:has(.herdr-agent-options[open]) { gap: 10px; }
   .coding-new-form { max-width: 34rem; margin-inline: auto; }
   .coding-new fieldset { padding: 0; margin: 0; border: 0; }
   .coding-new :is(input[data-slot='input'], button[data-slot='select-trigger']) { min-height: 36px; }
@@ -117,6 +163,19 @@
   .coding-worktree, .coding-new-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .coding-new-actions { justify-content: flex-end; }
   .coding-worktree label { font-size: var(--text-ui); cursor: pointer; }
+  .herdr-agent-options > summary { cursor: pointer; width: fit-content; padding-block: 5px; font-weight: 550; font-size: var(--text-ui); }
+  .herdr-agent-option-fields { display: grid; gap: 10px; margin: 4px 0; padding-inline-start: 12px; border-inline-start: 1px solid var(--ghost-line-strong); }
+  .herdr-agent-check { display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: var(--text-ui); }
+  .herdr-agent-check input { width: 16px; height: 16px; accent-color: var(--ghost-ink); }
+  .herdr-agent-check small { color: var(--ghost-ink3); }
+  .herdr-model-trigger span { overflow: hidden; text-overflow: ellipsis; }
+  .herdr-models { width: min(26rem, calc(100vw - 32px)); display: grid; gap: 6px; padding: 6px; }
+  .herdr-model-list { max-height: 38dvh; overflow-y: auto; overscroll-behavior: contain; }
+  .herdr-model-list button { width: 100%; text-align: start; }
+  .herdr-model-list button span { overflow: hidden; text-overflow: ellipsis; }
+  .herdr-model-list small { color: var(--ghost-ink3); }
+  .herdr-model-list button[aria-pressed='true'] { background: var(--ghost-hover); }
+  .herdr-yolo-confirm { justify-self: start; color: var(--ghost-danger-ink); }
 
   .coding-page[data-compact] { grid-template-columns: minmax(0, 1fr); }
   .coding-page[data-compact] .coding-roster { border: 0; }
@@ -131,7 +190,15 @@
   .coding-page[data-compact] .herdr-pane-row a { min-height: 44px; align-content: center; }
   .coding-page[data-compact] .coding-pane-setup { padding: 12px 16px; }
   .coding-page[data-compact] .herdr-keys { display: grid; grid-template-columns: repeat(4, minmax(44px, 1fr)); }
-  .coding-page[data-compact] .herdr-screen { padding: 12px 16px max(12px, env(safe-area-inset-bottom)); }
+  .coding-page[data-compact] .herdr-keys-extended { padding-inline: 2px; }
+  .coding-page[data-compact] .herdr-keys-extended button { min-width: 45px; }
+  .coding-page[data-compact] .herdr-history-bottom { inset-inline-end: 16px; }
+  .coding-page[data-compact] .herdr-changes-head { padding-inline: 16px; }
+  .coding-page[data-compact] .herdr-change-work { grid-template-columns: minmax(0, 1fr); }
+  .coding-page[data-compact] .herdr-change-index { padding-inline: 8px; }
+  .coding-page[data-compact] .herdr-file-diff { border-inline-start: 0; }
+  .coding-page[data-compact] .herdr-file-diff header { padding-inline: 8px 12px; }
+  .coding-page[data-compact] .herdr-agent-options > summary { padding-block: 10px; }
   .coding-page[data-compact] .coding-dock { padding: 8px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
   :root[data-keyboard='open'] .coding-page[data-compact] .coding-dock { padding-bottom: 6px; }
   :root[data-keyboard='open'] .coding-page[data-compact] .herdr-keys { grid-template-columns: repeat(8, minmax(44px, 1fr)); gap: 2px; overflow-x: auto; }

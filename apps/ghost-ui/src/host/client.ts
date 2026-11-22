@@ -22,6 +22,10 @@ import type {
   HerdrWorkspaceCreate,
   HerdrPaneView,
   HerdrPrompt,
+  HerdrChanges,
+  HerdrDiff,
+  HerdrUpload,
+  OmpInfo,
   ConversationPage,
   LedgerEvent,
   LiveEvent,
@@ -225,11 +229,25 @@ export class HostClient {
   }
 
   /** The workspace tree of the herdr session in use. */
-  herdr(): Promise<HerdrView> {
-    return this.json('/api/herdr');
+  herdr(signal?: AbortSignal): Promise<HerdrView> {
+    return this.json('/api/herdr', { signal });
   }
-  herdrOutput(pane: string): Promise<HerdrOutput> {
-    return this.json(`/api/herdr/output?pane=${encodeURIComponent(pane)}`);
+  ompInfo(cwd: string, signal?: AbortSignal): Promise<OmpInfo> {
+    return this.json(`/api/coding/omp?${new URLSearchParams({ cwd })}`, { signal });
+  }
+  herdrOutput(pane: string, signal?: AbortSignal): Promise<HerdrOutput> {
+    return this.json(`/api/herdr/output?${new URLSearchParams({ pane, format: 'ansi', lines: '2000' })}`, { signal });
+  }
+  herdrChanges(pane: string, signal?: AbortSignal): Promise<HerdrChanges> {
+    return this.json(`/api/herdr/changes?${new URLSearchParams({ pane })}`, { signal });
+  }
+  herdrDiff(pane: string, path: string, signal?: AbortSignal): Promise<HerdrDiff> {
+    return this.json(`/api/herdr/diff?${new URLSearchParams({ pane, path })}`, { signal });
+  }
+  herdrUpload(file: File): Promise<HerdrUpload> {
+    return this.json(`/api/herdr/upload?${new URLSearchParams({ name: file.name })}`, {
+      method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file,
+    });
   }
   createHerdrWorkspace(input: HerdrWorkspaceCreate): Promise<HerdrPaneView> {
     return this.postHerdr('workspaces', input);

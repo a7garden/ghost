@@ -31,6 +31,7 @@ import { HostView } from './features/HostView';
 import { CodingSettings } from './features/CodingSetup';
 import { CodingPage } from './features/Coding';
 import { herdrPanePath } from './features/herdrDisplay';
+import { useHerdrAttention } from './features/herdrAttention';
 import { GhostSettings } from './features/GhostSettings';
 import { MobilePairing } from './features/MobilePairing';
 import { VaultView } from './features/VaultView';
@@ -163,6 +164,7 @@ function Shell() {
   const [path, query = ''] = route.split('?');
   const params = new URLSearchParams(query);
   const section = path.split('/')[1]?.split('?')[0] || 'home';
+  const codingAttention = useHerdrAttention(Boolean(state) && connection === 'live', section === 'coding');
   useEffect(() => {
     if (section === 'workspace' && !compact) {
       history.replaceState(history.state, '', '#/');
@@ -268,14 +270,14 @@ function Shell() {
 
   const runtimeDown = Boolean(state && !state.runtime.ready);
   const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null}
-    selectedScope={params.has('new') ? undefined : selectedScope} attentionCount={attentionCount}
+    selectedScope={params.has('new') ? undefined : selectedScope} attentionCount={attentionCount} blockedAgents={codingAttention.count}
     status={status} navigate={navigate} openGhost={switchGhost}/>;
 
   return <div className="ghost-root">
     <PortraitAppearances.Provider value={portraits}>
       <AvatarProvider animate={preferences.animate}>
         <AppFrame desktop={desktopShell} macOSInset={desktopMac ? 80 : 0}
-          section={section} attentionCount={attentionCount} navigate={navigate}
+          section={section} attentionCount={attentionCount} blockedAgents={codingAttention.count} navigate={navigate}
           hideDock={codingDetail || section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
           location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
             compactBack={section === 'settings' && params.has('tab') ? '/settings'
@@ -298,12 +300,13 @@ function Shell() {
           <UpdatePrompt monitor={update} navigate={navigate}/>
           {runtimeDown && state && section !== 'home' && section !== 'coding' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={status.state !== 'offline'}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
-            {section === 'home' && <Overview state={state} navigate={navigate}/>}
+            {section === 'home' && <Overview state={state} navigate={navigate} codingSession={codingAttention.session}/>}
             {section === 'conversations' && <Conversations ghosts={ghosts} openGhost={switchGhost} openWorkspace={() => navigate('/workspace')}/>}
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
-            {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
+            {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')} codingSession={codingAttention.session}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
             {section === 'coding' && <CodingPage scopes={state.scopes} herdrPane={params.get('herdr')} creating={params.get('new') === '1'} compact={compact}
+              onRoster={codingAttention.reportRoster}
               onCancel={() => closeCodingForm('/coding')} onOpen={id => {
                 if (currentRoute() !== route) return;
                 if (params.get('new') === '1') closeCodingForm(herdrPanePath(id));

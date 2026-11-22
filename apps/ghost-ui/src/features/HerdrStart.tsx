@@ -4,6 +4,7 @@ import { HERDR_AGENT_KINDS, type CodingSetup, type HerdrAgentKind, type HerdrPan
 import { Button, FormField, InlineError, Input, Popover, PopoverContent, PopoverTrigger, SelectField, Switch, Textarea } from '../ui';
 import { useHost } from '../host/context';
 import { submitCodingOnShortcut } from './herdrDisplay';
+import { useAgentLaunch } from './HerdrAgentOptions';
 
 const kindNames: Record<HerdrAgentKind, string> = {
   omp: 'omp', claude: 'Claude Code', codex: 'Codex', pi: 'Pi', gemini: 'Gemini CLI', cursor: 'Cursor',
@@ -29,9 +30,9 @@ export function workspaceInput(data: FormData, agent?: HerdrAgentKind): HerdrWor
   return { cwd: field('cwd'), worktree, ...(label && { label }), ...(branch && { branch }), ...(agent && { agent }), ...(task && { task }) };
 }
 
-export function AgentFields({ setup, value, onChange, required = false, pending }: {
+export function AgentFields({ setup, value, onChange, required = false, pending, optionsDisclosure }: {
   setup: CodingSetup | null; value: HerdrAgentKind | undefined; onChange(value: HerdrAgentKind | undefined): void;
-  required?: boolean; pending: boolean;
+  required?: boolean; pending: boolean; optionsDisclosure: React.ReactNode;
 }) {
   const installed = setup?.kinds ?? [];
   const options = [...(required ? [] : [{ value: 'shell', label: '셸' }]), ...herdrAgentOptions(installed)];
@@ -40,6 +41,7 @@ export function AgentFields({ setup, value, onChange, required = false, pending 
       value={value ?? (required ? '' : 'shell')} onValueChange={next => onChange(installed.find(kind => kind === next))}
       disabled={!setup || pending || (required && installed.length === 0)} options={options}/>}</FormField>
     {required && installed.length === 0 && <p className="coding-hint">설치된 에이전트가 없습니다.</p>}
+    {optionsDisclosure}
     {value && <FormField label="첫 지시 (선택)">{props => <Textarea {...props} name="task" rows={3} maxLength={24_000}
       className="field-sizing-fixed min-h-20 resize-y" aria-keyshortcuts="Meta+Enter Control+Enter" onKeyDown={submitCodingOnShortcut}/>}</FormField>}
   </>;
@@ -78,6 +80,7 @@ export function NewHerdrWorkspace({ scopes, setup, onStarted, onCancel }: {
   const titleId = useId();
   const preferred = setup?.prefs.agent;
   const selected = setup?.kinds.find(kind => kind === (agent ?? preferred));
+  const launch = useAgentLaunch(selected, repo, !worktree);
   const canStart = Boolean(setup?.herdr.path && setup.config.ok && setup.server?.compatible);
 
   async function start(event: FormEvent<HTMLFormElement>) {
@@ -85,10 +88,16 @@ export function NewHerdrWorkspace({ scopes, setup, onStarted, onCancel }: {
     if (pendingRef.current || !canStart) return;
     const input = workspaceInput(new FormData(event.currentTarget), selected);
     if (!input.cwd.startsWith('/')) { setError('경로는 /로 시작하는 절대 경로를 입력하세요.'); return; }
+    const args = launch.prepare();
+    if (!args) return;
     setError('');
     pendingRef.current = true;
     setPending(true);
-    try { onStarted(await client.createHerdrWorkspace(input)); }
+    try {
+      const pane = await client.createHerdrWorkspace(args.length ? { ...input, args } : input);
+      launch.remember();
+      onStarted(pane);
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : '스페이스를 만들지 못했습니다.'); }
     finally { pendingRef.current = false; setPending(false); }
   }
@@ -103,7 +112,7 @@ export function NewHerdrWorkspace({ scopes, setup, onStarted, onCancel }: {
           <Switch id={worktreeId} name="worktree" checked={worktree} onCheckedChange={setWorktree}/>
         </div>
         {worktree && <FormField label="브랜치 이름 (선택)">{props => <Input {...props} name="branch" value={branch} onChange={event => setBranch(event.currentTarget.value)} maxLength={80} autoCapitalize="none" spellCheck={false}/>}</FormField>}
-        <AgentFields setup={setup} value={selected} pending={pending} onChange={value => setAgent(value ?? 'shell')}/>
+        <AgentFields setup={setup} value={selected} pending={pending} onChange={value => setAgent(value ?? 'shell')} optionsDisclosure={launch.disclosure}/>
       </fieldset>
       {error && <InlineError>{error}</InlineError>}
       <div className="coding-new-actions">

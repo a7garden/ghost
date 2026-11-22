@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { nullable } from "./entities.ts";
+import { nullable, Timestamp } from "./entities.ts";
 
 /**
  * Coding is herdr, the terminal workspace manager the owner already works in: the Host never runs a coding agent of
@@ -9,10 +9,15 @@ import { nullable } from "./entities.ts";
 export const CodingAgentId = Type.Union([Type.Literal("omp"), Type.Literal("claude"), Type.Literal("codex")]);
 export type CodingAgentId = Static<typeof CodingAgentId>;
 
-/** The owner's choices: which herdr session coding uses (null: herdr's default session, the one `herdr` attaches to) and the agent a new session starts with. */
+/** When an agent in the session in use tells the owner (a push and an inbox entry): never, only when it waits for an answer, or also when it finishes. */
+export const CodingNotify = Type.Union([Type.Literal("off"), Type.Literal("blocked"), Type.Literal("all")]);
+export type CodingNotify = Static<typeof CodingNotify>;
+
+/** The owner's choices: which herdr session coding uses (null: herdr's default session, the one `herdr` attaches to), the agent a new session starts with, and when agents notify. */
 export const CodingPrefs = Type.Object({
   session: nullable(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" })),
   agent: nullable(CodingAgentId),
+  notify: CodingNotify,
 });
 export type CodingPrefs = Static<typeof CodingPrefs>;
 
@@ -164,6 +169,8 @@ const Ref = Type.String({ pattern: "^[A-Za-z0-9]{1,16}(:[A-Za-z0-9]{1,16})?$" })
 const Label = Type.String({ minLength: 1, maxLength: 80 });
 const Dir = Type.String({ minLength: 1, maxLength: 4096 });
 const Task = Type.String({ minLength: 1, maxLength: 24_000 });
+/** The agent's own command-line arguments (`omp --continue`, `--model …`), passed after `--` to `herdr agent start`. */
+const AgentArgs = Type.Array(Type.String({ maxLength: 400 }), { maxItems: 16 });
 
 /**
  * A new workspace in herdr, the owner's "space": a directory, a label (default: herdr's own), and for a git repository
@@ -176,6 +183,7 @@ export const HerdrWorkspaceCreate = Type.Object({
   worktree: Type.Optional(Type.Boolean()),
   branch: Type.Optional(Label),
   agent: Type.Optional(HerdrAgentKind),
+  args: Type.Optional(AgentArgs),
   task: Type.Optional(Task),
 });
 export type HerdrWorkspaceCreate = Static<typeof HerdrWorkspaceCreate>;
@@ -186,6 +194,7 @@ export const HerdrTabCreate = Type.Object({
   label: Type.Optional(Label),
   cwd: Type.Optional(Dir),
   agent: Type.Optional(HerdrAgentKind),
+  args: Type.Optional(AgentArgs),
   task: Type.Optional(Task),
 });
 export type HerdrTabCreate = Static<typeof HerdrTabCreate>;
@@ -195,12 +204,13 @@ export const HerdrSplit = Type.Object({
   ...PaneRef,
   direction: Type.Union([Type.Literal("right"), Type.Literal("down")]),
   agent: Type.Optional(HerdrAgentKind),
+  args: Type.Optional(AgentArgs),
   task: Type.Optional(Task),
 });
 export type HerdrSplit = Static<typeof HerdrSplit>;
 
 /** Start an agent in a pane that is a shell at its prompt, and optionally give it its first instruction. */
-export const HerdrAgentStart = Type.Object({ ...PaneRef, agent: HerdrAgentKind, task: Type.Optional(Task) });
+export const HerdrAgentStart = Type.Object({ ...PaneRef, agent: HerdrAgentKind, args: Type.Optional(AgentArgs), task: Type.Optional(Task) });
 export type HerdrAgentStart = Static<typeof HerdrAgentStart>;
 
 /** What can be renamed or closed. A workspace id is `w1`, a tab `w1:t1`, a pane `w1:p1`. Closing ends the processes in it. */
@@ -239,3 +249,45 @@ export type HerdrFrame = Static<typeof HerdrFrame>;
 /** Install herdr's hook for one agent (writes into that agent's own config folder, as `herdr integration install` does). */
 export const HerdrIntegrationInstall = Type.Object({ agent: CodingAgentId });
 export type HerdrIntegrationInstall = Static<typeof HerdrIntegrationInstall>;
+
+/**
+ * What omp offers for starting a session in a directory, for the start form: the models it can use (`omp models`) with
+ * the thinking levels each supports, and the directory's most recent conversations to continue (`omp --resume <id>`).
+ */
+export const OmpInfo = Type.Object({
+  models: Type.Array(Type.Object({ selector: Type.String(), name: Type.String(), provider: Type.String(), thinking: Type.Array(Type.String()) })),
+  sessions: Type.Array(Type.Object({ id: Type.String(), title: Type.String(), updatedAt: Timestamp })),
+});
+export type OmpInfo = Static<typeof OmpInfo>;
+
+/** One file a pane's work changed, relative to the commit its worktree was cut from (uncommitted and untracked included). */
+export const HerdrChangedFile = Type.Object({
+  path: Type.String(),
+  status: Type.Union([Type.Literal("added"), Type.Literal("modified"), Type.Literal("deleted"), Type.Literal("renamed"), Type.Literal("untracked")]),
+  additions: nullable(Type.Integer()),
+  deletions: nullable(Type.Integer()),
+});
+export type HerdrChangedFile = Static<typeof HerdrChangedFile>;
+
+/**
+ * What the agent in a pane has changed, read from git in the pane's directory: the branch, the commits since the
+ * base, the files. `git` is false when the directory is not in a repository.
+ */
+export const HerdrChanges = Type.Object({
+  git: Type.Boolean(),
+  branch: nullable(Type.String()),
+  base: nullable(Type.String()),
+  commits: Type.Array(Type.Object({ sha: Type.String(), subject: Type.String() })),
+  files: Type.Array(HerdrChangedFile),
+  /** True when the file list was cut short. */
+  truncated: Type.Boolean(),
+});
+export type HerdrChanges = Static<typeof HerdrChanges>;
+
+/** One file's unified diff against the same base; cut at 200 KB. */
+export const HerdrDiff = Type.Object({ path: Type.String(), diff: Type.String(), truncated: Type.Boolean() });
+export type HerdrDiff = Static<typeof HerdrDiff>;
+
+/** A file the owner sent from the app (a screenshot from the phone): where it was saved on the Mac, for an agent to read by path (`@path`). */
+export const HerdrUpload = Type.Object({ path: Type.String(), name: Type.String(), size: Type.Integer() });
+export type HerdrUpload = Static<typeof HerdrUpload>;

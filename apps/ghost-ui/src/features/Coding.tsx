@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useReducer, useState } from 'react';
+import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import type { HerdrPaneView, HerdrView, Scope } from '@ghost/contract';
 import { Button, InlineError } from '../ui';
@@ -10,9 +10,18 @@ import { findHerdrPane, HerdrRoster, type HerdrNode, type RosterAction } from '.
 import { parseHerdrPane } from './herdrDisplay';
 import './coding.css';
 
-export function CodingPage({ scopes, herdrPane, creating, onOpen, onCancel, compact }: {
+function lastPane(session: string, pane?: string) {
+  const key = `ghost.coding.last-pane:${session}`;
+  try {
+    if (pane) localStorage.setItem(key, pane);
+    else return parseHerdrPane(localStorage.getItem(key));
+  } catch { /* Storage can be unavailable. */ }
+  return null;
+}
+
+export function CodingPage({ scopes, herdrPane, creating, onOpen, onCancel, compact, onRoster }: {
   scopes: Scope[]; herdrPane: string | null; creating: boolean; compact: boolean;
-  onOpen(id: string): void; onCancel(): void;
+  onOpen(id: string): void; onCancel(): void; onRoster(view: HerdrView): void;
 }) {
   const showDetail = creating || herdrPane !== null;
   const [revision, refresh] = useReducer((count: number) => count + 1, 0);
@@ -24,10 +33,24 @@ export function CodingPage({ scopes, herdrPane, creating, onOpen, onCancel, comp
     refresh();
   });
   const { view, error } = useHerdr(revision);
+  const report = useEffectEvent(onRoster);
+  useEffect(() => { if (view) report(view); }, [view]);
   const roster = setup && view?.session !== setup.session ? null : view;
   const paneId = parseHerdrPane(herdrPane);
   const workspaces = roster?.workspaces ?? [];
   const pane = created?.snapshot === view && created.pane.id === paneId ? created.pane : findHerdrPane(workspaces, paneId);
+  const restore = useRef(!creating && herdrPane === null);
+  const open = useEffectEvent(onOpen);
+  const session = roster?.available && !roster.note ? roster.session : null;
+  const resolvedId = pane?.id;
+  useEffect(() => { if (session && resolvedId) lastPane(session, resolvedId); }, [session, resolvedId]);
+  useEffect(() => {
+    if (herdrPane !== null || creating) restore.current = false;
+    if (!restore.current || !session || !roster) return;
+    restore.current = false;
+    const remembered = findHerdrPane(roster.workspaces, lastPane(session));
+    if (remembered) open(remembered.id);
+  }, [creating, herdrPane, roster, session]);
   const sessionChanged = Boolean(setup && view && setup.session !== view.session);
   const needsSetup = sessionChanged || Boolean(setup && !required && (view?.available === false || view?.note));
   // A ready setup stops polling; the roster can tell us the server stopped or the owner switched sessions.

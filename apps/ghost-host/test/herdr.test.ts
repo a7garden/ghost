@@ -1,11 +1,15 @@
 import { expect, test } from "bun:test";
-import { chmodSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { CodingSetup, HerdrFrame, HerdrOutput, HerdrPaneView, HerdrView, parse } from "@ghost/contract";
+import { CodingSetup, HerdrChanges, HerdrFrame, HerdrOutput, HerdrPaneView, HerdrUpload, HerdrView, OmpInfo, parse } from "@ghost/contract";
 import { startServer } from "../src/api/server.ts";
 import type { Config } from "../src/config.ts";
-import { codingPrefs, Herdr, HerdrStartError, terminalText } from "../src/integrations/herdr.ts";
+import { ansiText, codingPrefs, Herdr, HerdrStartError, mergeFrames, terminalText } from "../src/integrations/herdr.ts";
+import { OmpInfoProvider } from "../src/integrations/omp.ts";
+import { CodingWatcher } from "../src/integrations/coding-watch.ts";
+import { saveUpload, safeUploadName } from "../src/integrations/uploads.ts";
+import type { HerdrPort } from "../src/integrations/ports.ts";
 import { harness, tempDir } from "./support.ts";
 
 const OWNER = "owner-herdr-token";
@@ -120,10 +124,10 @@ test("the session in use is the owner's choice, herdr's default otherwise, and a
   const dir = tempDir();
   const fake = fakeHerdr(dir);
   try {
-    expect((await new Herdr(fake.path, { prefs: () => ({ session: "work", agent: null }) }).overview()).session).toBe("work");
+    expect((await new Herdr(fake.path, { prefs: () => ({ session: "work", agent: null, notify: "blocked" }) }).overview()).session).toBe("work");
     const runs = await fake.runs();
     expect(runs.some((run) => run.join(" ") === "--session work api snapshot")).toBe(true);
-    const missing = await new Herdr(fake.path, { prefs: () => ({ session: "nope", agent: null }) }).overview();
+    const missing = await new Herdr(fake.path, { prefs: () => ({ session: "nope", agent: null, notify: "blocked" }) }).overview();
     expect(missing).toMatchObject({ available: true, session: "nope", workspaces: [] });
     expect(missing.note).toContain("unexpected");
     expect(await new Herdr(null).overview()).toEqual({ available: false, session: "default", note: null, workspaces: [] });
@@ -193,7 +197,7 @@ test("starting an agent opens a worktree workspace in herdr, starts the agent th
   const repo = join(dir, "repo");
   gitRepo(repo);
   try {
-    const herdr = new Herdr(fake.path, { agentDirs: [bin], prefs: () => ({ session: null, agent: "codex" }) });
+    const herdr = new Herdr(fake.path, { agentDirs: [bin], prefs: () => ({ session: null, agent: "codex", notify: "blocked" }) });
     const started = await herdr.start({ repo, task: "Fix the login\nwith care", branch: "fix" });
     expect(started).toMatchObject({ checkout: "/wt/repo-fix", branch: "ghost/fix", settled: "unwaited", pane: { id: "w9:p1", agent: "omp" } });
     expect(started.base).toMatch(/^[0-9a-f]{40}$/);
@@ -410,10 +414,10 @@ test("terminal text keeps the end, drops control bytes and trailing blanks", () 
 });
 
 test("a choice saved before coding became herdr keeps its default agent and drops the rest", () => {
-  expect(codingPrefs({ default: "claude", disabled: ["omp"] })).toEqual({ session: null, agent: "claude" });
-  expect(codingPrefs({ session: "work", agent: "codex" })).toEqual({ session: "work", agent: "codex" });
-  expect(codingPrefs({ session: "../x", agent: "vim" })).toEqual({ session: null, agent: null });
-  expect(codingPrefs(null)).toEqual({ session: null, agent: null });
+  expect(codingPrefs({ default: "claude", disabled: ["omp"] })).toEqual({ session: null, agent: "claude", notify: "blocked" });
+  expect(codingPrefs({ session: "work", agent: "codex", notify: "all" })).toEqual({ session: "work", agent: "codex", notify: "all" });
+  expect(codingPrefs({ session: "../x", agent: "vim", notify: "sometimes" })).toEqual({ session: null, agent: null, notify: "blocked" });
+  expect(codingPrefs(null)).toEqual({ session: null, agent: null, notify: "blocked" });
 });
 
 test("the herdr routes need the owner token and answer with the contract's shapes", async () => {
@@ -464,8 +468,11 @@ test("the herdr routes need the owner token and answer with the contract's shape
     expect(live.status).toBe(200);
     expect(live.headers.get("content-type")).toBe("text/event-stream");
     const events = (await live.text()).split("\n\n").filter((entry) => entry.startsWith("event:"));
-    expect(events.map((entry) => entry.split("\n")[0])).toEqual(["event: frame", "event: frame", "event: end"]);
-    expect(parse(HerdrFrame, JSON.parse(events[0]!.split("\n")[1]!.slice("data: ".length))).full).toBe(true);
+    // The two frames the fake sends arrive together, so they leave as one: still a repaint, with both writes in order.
+    expect(events.map((entry) => entry.split("\n")[0])).toEqual(["event: frame", "event: end"]);
+    const first = parse(HerdrFrame, JSON.parse(events[0]!.split("\n")[1]!.slice("data: ".length)));
+    expect(first).toMatchObject({ full: true, seq: 2 });
+    expect(Buffer.from(first.bytes, "base64").toString()).toBe("hi!");
     expect((await get("/api/herdr/terminal?pane=w1%3ApZ", OWNER)).status).toBe(404);
     expect((await get("/api/herdr/terminal?pane=w1%3ApA")).status).toBe(401);
     expect(parse(CodingSetup, await (await post("/api/coding/integrations", { agent: "claude" })).json()).agents).toHaveLength(3);
@@ -486,6 +493,288 @@ test("a Host without the herdr port says so", async () => {
     for (const path of ["/api/herdr", "/api/coding"]) expect((await fetch(`http://127.0.0.1:${server.port}${path}`, { headers: { authorization: `Bearer ${OWNER}` } })).status).toBe(503);
   } finally {
     await server.stop();
+    rmSync(config.root, { recursive: true, force: true });
+  }
+});
+
+test("an agent's own arguments go after `--`, and only to an agent", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  const plain = join(dir, "plain");
+  mkdirSync(plain);
+  try {
+    const herdr = new Herdr(fake.path);
+    await herdr.createWorkspace({ cwd: plain, agent: "omp", args: ["--resume", "01a2", "--model", "anthropic/claude x", "--thinking", "high"] });
+    const start = (await fake.runs()).filter((run) => run.includes("start")).at(-1)!;
+    expect(start.slice(start.indexOf("--timeout") + 2)).toEqual(["--", "--resume", "01a2", "--model", "anthropic/claude x", "--thinking", "high"]);
+    await herdr.createWorkspace({ cwd: plain, agent: "omp" });
+    expect((await fake.runs()).filter((run) => run.includes("start")).at(-1)).not.toContain("--");
+    await expect(herdr.createWorkspace({ cwd: plain, args: ["--continue"] })).rejects.toMatchObject({ code: "invalid" });
+    await herdr.startAgent({ pane: "w1:p2", agent: "claude", args: ["--continue"] });
+    expect((await fake.runs()).filter((run) => run.includes("start")).at(-1)!.slice(-2)).toEqual(["--", "--continue"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the history view keeps the colours and reaches back as far as asked, within limits", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  try {
+    const herdr = new Herdr(fake.path);
+    const history = await herdr.output("w1:pA", { ansi: true, lines: 99_999 });
+    expect(history.text).toBe("  working on it\n\u001b[31mred");
+    const run = (await fake.runs()).filter((entry) => entry.includes("read")).at(-1)!;
+    expect(run.slice(-4)).toEqual(["--lines", "2000", "--format", "ansi"]);
+    expect((await herdr.output("w1:pA", { lines: 5 })).text).toBe("working on it\nred".replace("working", "  working"));
+    expect((await fake.runs()).filter((entry) => entry.includes("read")).at(-1)!.slice(-2)).toEqual(["--lines", "5"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ansiText keeps colours and drops every other escape sequence", () => {
+  expect(ansiText("\u001b[2J\u001b[1;1H\u001b[1;31mred\u001b[0m  \n\u001b]8;;http://x\u0007link\u001b]8;;\u0007\u001b[?25l\u001b[38;2;1;2;3mtrue\u001b[m\u0007\n\n", 10, 1000)).toBe("\u001b[1;31mred\u001b[0m\nlink\u001b[38;2;1;2;3mtrue\u001b[m");
+  expect(ansiText(["a", "b", "c", "d"].join("\n"), 2, 1000)).toBe("c\nd");
+  // Cut by size, it starts at a line and never inside a sequence.
+  const cut = ansiText(Array.from({ length: 50 }, (_, index) => `\u001b[32mline ${index}\u001b[0m`).join("\n"), 100, 200);
+  expect(cut.startsWith("\u001b[32mline ")).toBe(true);
+  expect(cut.length).toBeLessThanOrEqual(200);
+});
+
+test("frames that arrive together are one write, and a full repaint replaces what came before it", () => {
+  const frame = (seq: number, text: string, full = false, width = 80): { seq: number; full: boolean; width: number; height: number; bytes: string } => ({ seq, full, width, height: 24, bytes: Buffer.from(text).toString("base64") });
+  const text = (value: { bytes: string }) => Buffer.from(value.bytes, "base64").toString();
+  let pending = mergeFrames(null, frame(1, "a"));
+  pending = mergeFrames(pending, frame(2, "b"));
+  expect(text(pending)).toBe("ab");
+  expect(pending).toMatchObject({ seq: 2, full: false });
+  pending = mergeFrames(pending, frame(3, "FULL", true));
+  expect(text(pending)).toBe("FULL");
+  expect(pending.full).toBe(true);
+  // What follows a repaint joins it and the whole is still a repaint, since it starts with one.
+  expect(mergeFrames(pending, frame(4, "!"))).toMatchObject({ full: true, seq: 4 });
+  expect(text(mergeFrames(pending, frame(4, "!")))).toBe("FULL!");
+  // A different size is a different screen: nothing is joined across it.
+  expect(text(mergeFrames(frame(5, "x"), frame(6, "y", false, 100)))).toBe("y");
+});
+
+test("what a pane's agent changed is read from git against the commit its worktree was cut from", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  const git = (cwd: string, ...args: string[]) => execFileSync("/usr/bin/git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8" });
+  mkdirSync(join(dir, "repo"));
+  const repo = realpathSync(join(dir, "repo"));
+  git(repo, "init", "-q", "-b", "main");
+  writeFileSync(join(repo, "keep.txt"), "one\ntwo\n");
+  writeFileSync(join(repo, "old.txt"), "gone\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "init");
+  const tree = join(realpathSync(dir), "wt-fix");
+  git(repo, "worktree", "add", "-q", "-b", "ghost/fix", tree);
+  writeFileSync(join(tree, "new.txt"), "added\n");
+  git(tree, "add", "new.txt");
+  git(tree, "commit", "-qm", "Add new");
+  writeFileSync(join(tree, "keep.txt"), "one\nTWO\nthree\n");
+  git(tree, "rm", "-q", "old.txt");
+  writeFileSync(join(tree, "loose.txt"), "untracked\nlines\n");
+  const setCwd = (cwd: string | null) => writeFileSync(join(dir, "snapshot.json"), JSON.stringify({ ...snapshot, result: { snapshot: { ...snapshot.result.snapshot, panes: snapshot.result.snapshot.panes.map((pane) => (pane.pane_id === "w1:pA" ? { ...pane, foreground_cwd: cwd, cwd } : pane)) } } }));
+  try {
+    const herdr = new Herdr(fake.path);
+    setCwd(tree);
+    const changes = await herdr.changes("w1:pA");
+    expect(changes).toMatchObject({ git: true, branch: "ghost/fix", truncated: false });
+    expect(changes.commits.map((commit) => commit.subject)).toEqual(["Add new"]);
+    expect(changes.base).toBe(git(repo, "rev-parse", "HEAD").trim().slice(0, 12));
+    expect(Object.fromEntries(changes.files.map((file) => [file.path, [file.status, file.additions, file.deletions]]))).toEqual({
+      "keep.txt": ["modified", 2, 1],
+      "new.txt": ["added", 1, 0],
+      "old.txt": ["deleted", 0, 1],
+      "loose.txt": ["untracked", null, null],
+    });
+    expect((await herdr.diff("w1:pA", "keep.txt")).diff).toContain("+TWO");
+    expect((await herdr.diff("w1:pA", "new.txt")).diff).toContain("+added");
+    expect((await herdr.diff("w1:pA", "loose.txt")).diff).toContain("+untracked");
+    // Only a path the change list names is answered.
+    await expect(herdr.diff("w1:pA", "../../etc/passwd")).rejects.toMatchObject({ code: "not_found" });
+    await expect(herdr.diff("w1:pA", "untouched.txt")).rejects.toMatchObject({ code: "not_found" });
+    await expect(herdr.diff("w1:pA", "--output=/tmp/x")).rejects.toMatchObject({ code: "not_found" });
+
+    // The main checkout is measured from its own HEAD: only what is uncommitted.
+    writeFileSync(join(repo, "keep.txt"), "one\ntwo\nmain edit\n");
+    setCwd(repo);
+    const main = await herdr.changes("w1:pA");
+    expect(main.files.map((file) => [file.path, file.status])).toEqual([["keep.txt", "modified"]]);
+    expect(main.commits).toEqual([]);
+
+    setCwd(dir);
+    expect(await herdr.changes("w1:pA")).toEqual({ git: false, branch: null, base: null, commits: [], files: [], truncated: false });
+    setCwd(null);
+    expect((await herdr.changes("w1:pA")).git).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("omp offers its models and a directory's recent conversations, newest first, without reading whole conversations", () => {
+  const dir = tempDir();
+  const home = realpathSync(dir);
+  const sessions = join(home, ".omp/agent/sessions");
+  const projects = join(home, "Work/app");
+  mkdirSync(projects, { recursive: true });
+  const folder = join(sessions, "-Work-app");
+  mkdirSync(folder, { recursive: true });
+  const write = (name: string, id: string, title: string, at: number) => {
+    const path = join(folder, name);
+    writeFileSync(path, `${JSON.stringify({ type: "title", title, pad: " ".repeat(40) })}\n${JSON.stringify({ type: "session", id, cwd: projects })}\n${"x".repeat(2_000_000)}\n`);
+    utimesSync(path, at / 1000, at / 1000);
+  };
+  write("a.jsonl", "01aaaaaa-0000-7000-8000-000000000001", "older", 1_000_000);
+  write("b.jsonl", "01bbbbbb-0000-7000-8000-000000000002", "title>newer", 2_000_000);
+  writeFileSync(join(folder, "broken.jsonl"), "not json\n");
+  writeFileSync(join(folder, "notes.txt"), "x");
+  const outside = join(sessions, "--private-tmp-elsewhere--");
+  try {
+    const provider = new OmpInfoProvider({ executable: null, home });
+    expect(provider.sessionsDir(projects)).toBe(folder);
+    expect(provider.sessionsDir("/private/tmp/elsewhere")).toBe(outside);
+    return provider.info(projects).then((info) => {
+      expect(info.sessions).toEqual([
+        { id: "01bbbbbb-0000-7000-8000-000000000002", title: "newer", updatedAt: 2_000_000 },
+        { id: "01aaaaaa-0000-7000-8000-000000000001", title: "older", updatedAt: 1_000_000 },
+      ]);
+      expect(info.models).toEqual([]);
+      return provider.info(join(home, "Work/none")).then((none) => expect(none.sessions).toEqual([]));
+    }).finally(() => rmSync(dir, { recursive: true, force: true }));
+  } catch (error) {
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
+});
+
+test("omp's models come from omp itself, chat models only, and a broken omp is no models rather than an error", async () => {
+  const dir = tempDir();
+  const script = join(dir, "omp");
+  writeFileSync(script, `#!/bin/sh
+echo '{"models":[{"provider":"anthropic","kind":"chat","selector":"anthropic/claude-x","name":"Claude X","thinking":["low","high"]},{"provider":"voyage","kind":"embedding","selector":"voyage/e","name":"E"},{"provider":"openai","selector":"openai/gpt-y","thinking":null}]}'
+`);
+  chmodSync(script, 0o755);
+  const bad = join(dir, "bad");
+  mkdirSync(bad);
+  writeFileSync(join(bad, "omp"), "#!/bin/sh\necho nope; exit 3\n");
+  chmodSync(join(bad, "omp"), 0o755);
+  try {
+    const info = await new OmpInfoProvider({ executable: script, home: dir }).info(dir);
+    expect(info.models).toEqual([
+      { selector: "anthropic/claude-x", name: "Claude X", provider: "anthropic", thinking: ["low", "high"] },
+      { selector: "openai/gpt-y", name: "openai/gpt-y", provider: "openai", thinking: [] },
+    ]);
+    expect((await new OmpInfoProvider({ executable: join(bad, "omp"), home: dir }).info(dir)).models).toEqual([]);
+    await expect(new OmpInfoProvider({ executable: null }).info("relative")).rejects.toMatchObject({ code: "invalid" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a file sent from the app is saved where an agent can read it, under a name that is safe as a path", () => {
+  const root = tempDir();
+  try {
+    expect(safeUploadName("../../etc/Screen Shot 2026.png")).toBe("Screen-Shot-2026.png");
+    expect(safeUploadName("-rf")).toBe("rf");
+    expect(safeUploadName("화면 캡처.png")).toBe("화면-캡처.png");
+    expect(safeUploadName("...")).toBe("file");
+    const saved = saveUpload(root, "../shot one.png", new Uint8Array([1, 2, 3]));
+    expect(saved).toMatchObject({ name: "shot-one.png", size: 3 });
+    expect(saved.path.startsWith(join(root, "uploads"))).toBe(true);
+    expect([...readFileSync(saved.path)]).toEqual([1, 2, 3]);
+    expect(statSync(saved.path).mode & 0o777).toBe(0o600);
+    expect(() => saveUpload(root, "x", new Uint8Array(0))).toThrow("empty");
+    expect(() => saveUpload(root, "x", new Uint8Array(10 * 1024 * 1024 + 1))).toThrow("larger than 10 MB");
+    // A week later it is gone when the next one arrives, and the new one is not.
+    const later = saveUpload(root, "next.png", new Uint8Array([9]), Date.now() + 8 * 24 * 3600_000);
+    expect(existsSync(saved.path)).toBe(false);
+    expect(existsSync(later.path)).toBe(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the watcher tells the owner once when an agent that was working starts waiting for an answer, and only as the owner chose", async () => {
+  const h = harness(":memory:");
+  const ghost = h.core.createGhost({ name: "Main", persona: "" });
+  type Status = "idle" | "working" | "blocked" | "done" | "unknown";
+  const state: { panes: [string, Status, string | null][]; session: string } = { panes: [["w1:pA", "working", "claude"], ["w1:p2", "unknown", null]], session: "default" };
+  const herdr = {
+    overview: async () => ({
+      available: true, session: state.session, note: null,
+      workspaces: [{ id: "w1", label: "ghost", status: "idle" as const, worktree: null, tabs: [{ id: "w1:t1", label: "로그인 고치기", status: "idle" as const, panes: state.panes.map(([id, status, agent]) => ({ id, workspaceId: "w1", tabId: "w1:t1", workspace: "ghost", tab: "로그인 고치기", agent, status, cwd: "/work", title: "로그인 고치기", focused: false })) }] }],
+    }),
+  } as unknown as HerdrPort;
+  let time = 1_000_000;
+  const watcher = new CodingWatcher(h.core, herdr, { clock: { now: () => time, repeat: () => () => {} } });
+  const told = () => h.ledger.notificationsForState().filter((entry) => entry.id.startsWith("coding:"));
+  const set = (status: Status) => { state.panes[0]![1] = status; };
+  try {
+    await watcher.poll();
+    expect(told()).toEqual([]);
+    set("blocked");
+    await watcher.poll();
+    expect(told()).toHaveLength(1);
+    expect(told()[0]).toMatchObject({ kind: "message", ghostId: ghost.id, conversationId: ghost.directConversationId, title: "에이전트가 답을 기다려요", body: "로그인 고치기\nclaude · ghost" });
+    // Still blocked, or answered and blocked again within a minute: not another one.
+    await watcher.poll();
+    set("working"); await watcher.poll();
+    time += 10_000; set("blocked"); await watcher.poll();
+    expect(told()).toHaveLength(1);
+    // Finishing is only news when the owner asked for it.
+    time += 120_000; set("working"); await watcher.poll();
+    set("done"); await watcher.poll();
+    expect(told()).toHaveLength(1);
+    h.ledger.tx(() => h.ledger.putSetting("coding", { session: null, agent: null, notify: "all" }));
+    time += 120_000; set("working"); await watcher.poll();
+    set("done"); await watcher.poll();
+    expect(told().map((entry) => entry.title).sort()).toEqual(["에이전트가 끝났어요", "에이전트가 답을 기다려요"]);
+    // Off is off, and a plain shell is never news.
+    h.ledger.tx(() => h.ledger.putSetting("coding", { session: null, agent: null, notify: "off" }));
+    time += 120_000; set("working"); await watcher.poll();
+    set("blocked"); await watcher.poll();
+    state.panes[1]![1] = "working"; await watcher.poll(); state.panes[1]![1] = "blocked"; await watcher.poll();
+    expect(told()).toHaveLength(2);
+  } finally {
+    h.core.stop();
+    h.ledger.close();
+  }
+});
+
+test("the history, change, omp and upload routes need the owner token, answer in the contract's shapes and refuse bad input", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  const h = harness(":memory:");
+  const config: Config = { root: tempDir(), host: "127.0.0.1", port: 0, publicOrigin: "http://127.0.0.1", uiDir: null, sandbox: { kind: "local" }, voice: null, apns: null, skills: null, reach: null, browser: null };
+  const server = startServer({ core: h.core, config, ownerToken: OWNER, documents: null, skills: null, herdr: new Herdr(fake.path), omp: new OmpInfoProvider({ executable: null, home: dir }) });
+  const base = `http://127.0.0.1:${server.port}`;
+  const get = (path: string, token: string | null = OWNER) => fetch(`${base}${path}`, { headers: token === null ? {} : { authorization: `Bearer ${token}` } });
+  const upload = (name: string, body: BodyInit, token: string | null = OWNER) => fetch(`${base}/api/herdr/upload?name=${encodeURIComponent(name)}`, { method: "POST", headers: token === null ? {} : { authorization: `Bearer ${token}` }, body });
+  try {
+    for (const path of ["/api/herdr/changes?pane=w1%3ApA", "/api/herdr/diff?pane=w1%3ApA&path=a", `/api/coding/omp?cwd=${encodeURIComponent(dir)}`]) expect((await get(path, null)).status).toBe(401);
+    expect((await upload("a.png", new Uint8Array([1]), null)).status).toBe(401);
+
+    const history = parse(HerdrOutput, await (await get("/api/herdr/output?pane=w1%3ApA&format=ansi&lines=2000")).json());
+    expect(history.text).toContain("\u001b[31mred");
+    expect(parse(HerdrChanges, await (await get("/api/herdr/changes?pane=w1%3ApA")).json()).git).toBe(false);
+    expect((await get("/api/herdr/changes?pane=w1%3ApZ")).status).toBe(404);
+    expect((await get("/api/herdr/diff?pane=w1%3ApA&path=a.txt")).status).toBe(404);
+    expect(parse(OmpInfo, await (await get(`/api/coding/omp?cwd=${encodeURIComponent(dir)}`)).json())).toEqual({ models: [], sessions: [] });
+    expect((await get("/api/coding/omp?cwd=relative")).status).toBe(400);
+
+    const saved = parse(HerdrUpload, await (await upload("../shot one.png", new Uint8Array([1, 2, 3]))).json());
+    expect(saved).toMatchObject({ name: "shot-one.png", size: 3 });
+    expect([...readFileSync(saved.path)]).toEqual([1, 2, 3]);
+    expect((await upload("empty.png", new Uint8Array(0))).status).toBe(400);
+    expect((await upload("big.bin", new Uint8Array(10 * 1024 * 1024 + 1))).status).toBe(400);
+  } finally {
+    await server.stop();
+    rmSync(dir, { recursive: true, force: true });
     rmSync(config.root, { recursive: true, force: true });
   }
 });
