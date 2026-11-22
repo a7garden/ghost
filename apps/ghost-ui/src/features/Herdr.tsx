@@ -14,9 +14,9 @@ import { CodingSkeleton } from './HerdrInbox';
 import { readCodingValue, writeCodingValue } from './herdrInboxModel';
 import { HerdrPaneHeader, herdrModes, type HerdrMode, type PaneNavigation } from './HerdrPaneHeader';
 import { readTerminalSize, TerminalKeyRail } from './HerdrTerminalControls';
+import type { HerdrTerminalControls } from './HerdrTerminal';
 
-const LiveTerminal = lazy(() => import('./HerdrTerminal'));
-const HistoryTerminal = lazy(() => import('./HerdrHistory'));
+const Terminal = lazy(() => import('./HerdrTerminal'));
 
 export function useHerdr(revision: number) {
   const { client } = useHost();
@@ -51,7 +51,7 @@ export function useHerdr(revision: number) {
 
 export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = false, chat = false, pending = false, error,
   onPrompt, onKey, onText, modifiers = noModifiers, onModifier, onModifiedKey = () => false, onUpload, fontSize = 13, onFontSize,
-  branch, navigation, asks, draftKey }: {
+  branch, navigation, asks, draftKey, terminal }: {
   pane: HerdrPaneView; screen: ReactNode; mode: HerdrMode; onMode(mode: HerdrMode): void; compact: boolean;
   changes?: boolean; chat?: boolean; pending?: boolean; error?: string;
   onPrompt(text: string): Promise<boolean>; onKey(key: string): void;
@@ -59,6 +59,7 @@ export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = f
   onModifiedKey?(text: string): boolean; onUpload?(file: File): Promise<HerdrUpload>;
   fontSize?: number; onFontSize?(size: number): void; branch?: string | null; navigation?: PaneNavigation;
   asks?: HerdrAsks; draftKey?: string;
+  terminal?: React.RefObject<HerdrTerminalControls | null>;
 }) {
   const draft = useHerdrDraft(draftKey, onUpload);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -73,11 +74,12 @@ export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = f
   });
   useEffect(() => { focusComposer(); }, [pane.id, pane.agent]);
   return <section ref={root} className="coding-detail" aria-label={pane.title} data-pane-mode={mode}
+    onInputCapture={event => { if (event.target === field.current) terminal?.current?.latest(true); }}
     onPasteCapture={event => draft.paste(event, uploadEnabled)} onDragOver={draft.drag}
     onDrop={event => draft.drop(event, uploadEnabled)}>
     <HerdrPaneHeader pane={pane} mode={mode} onMode={onMode} chat={chat} changes={changes} compact={compact} branch={branch}
       navigation={navigation} fontSize={fontSize} onFontSize={size => onFontSize?.(size)}
-      onEsc={pane.agent && !keysVisible && (mode === 'live' || mode === 'history' || (mode === 'chat' && working)) ? () => onKey('esc') : undefined}/>
+      onEsc={pane.agent && !keysVisible && (mode === 'live' || (mode === 'chat' && working)) ? () => onKey('esc') : undefined}/>
     <div className="herdr-pane-content" key={mode}>{screen}</div>
     {(error || mode !== 'changes') && <div className="coding-dock" aria-busy={pending || undefined}>
       {error && <InlineError>{error}</InlineError>}
@@ -85,10 +87,12 @@ export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = f
         {approval ? <HerdrAskCard entry={approval} answer={index => void asks?.answer(pane.id, index)}/>
           : <Button type="button" variant="outline" onClick={() => onMode('live')}>터미널 열기</Button>}
       </div>}
-      {keysVisible && <TerminalKeyRail compact={compact} modifiers={modifiers} onKey={onKey} onText={text => onText?.(text)} onModifier={key => {
+      {keysVisible && <TerminalKeyRail compact={compact} modifiers={modifiers} onKey={onKey}
+        onText={text => onText?.(text)} onPageUp={text => { if (!terminal?.current?.pageUp()) onText?.(text); }} onModifier={key => {
         onModifier?.(key);
         if (!document.activeElement?.classList.contains('xterm-helper-textarea')) {
-          const next = field.current && !field.current.disabled ? field.current : root.current?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
+          const next = field.current && !field.current.disabled ? field.current
+            : root.current?.querySelector<HTMLTextAreaElement>('.herdr-terminal-live .xterm-helper-textarea');
           next?.focus({ preventScroll: true });
         }
       }} onDismiss={() => {
@@ -112,6 +116,7 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
   const [pending, setPending] = useState(false);
   const [reply, setReply] = useState<{ snapshot: HerdrPaneView; pane: HerdrPaneView } | null>(null);
   const queue = useRef<HerdrInputQueue | null>(null);
+  const terminal = useRef<HerdrTerminalControls>(null);
   const busy = useRef(false);
   const modifierRef = useRef(noModifiers);
   const [modifiers, setModifiers] = useState(noModifiers);
@@ -143,6 +148,7 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
   }, [client, id]);
 
   async function prompt(text: string) {
+    terminal.current?.latest(true);
     const writer = queue.current;
     if (!writer || busy.current) return false;
     busy.current = true;
@@ -191,15 +197,16 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
   const activeMode = (requested === 'changes' && !changesVisible) || (requested === 'chat' && !chatVisible) ? 'live' : requested;
   const checkingChat = Boolean(pane.agent) && (mode === undefined || mode === 'chat') && chat.source === undefined && !chatError;
   return <HerdrPaneBody pane={displayed} compact={compact} mode={activeMode} onMode={select} pending={pending} error={error}
-    onPrompt={prompt} onKey={key => { setError(''); queue.current?.key(key); }} onText={sendText}
-    onModifiedKey={modifiedKey} modifiers={modifiers} onModifier={key => setSticky({ ...modifierRef.current, [key]: !modifierRef.current[key] })}
+    onPrompt={prompt} onKey={key => { terminal.current?.latest(); setError(''); queue.current?.key(key); }}
+    onText={text => { terminal.current?.latest(); sendText(text); }}
+    onModifiedKey={modifiedKey} modifiers={modifiers}
+    onModifier={key => { terminal.current?.latest(); setSticky({ ...modifierRef.current, [key]: !modifierRef.current[key] }); }}
     onUpload={file => client.herdrUpload(file)} changes={changesVisible} chat={chatVisible} fontSize={fontSize} onFontSize={setFontSize}
-    branch={changes?.branch ?? branch} navigation={navigation} asks={asks} draftKey={`draft:${preferencesKey}`}
+    branch={changes?.branch ?? branch} navigation={navigation} asks={asks} draftKey={`draft:${preferencesKey}`} terminal={terminal}
     screen={activeMode === 'chat' ? <HerdrConversation items={chat.items} busy={displayed.status === 'working'} since={since} error={chatError}/>
       : activeMode === 'changes' ? <HerdrChangesView pane={displayed} compact={compact} data={changes} error={changesError}
         onRefresh={refreshChanges} revision={changesRevision}/>
       : checkingChat ? <CodingSkeleton detail/> : <Suspense fallback={<CodingSkeleton detail/>}>
-        {activeMode === 'history' ? <HistoryTerminal pane={id} onGone={onGone} fontSize={fontSize}/>
-          : <LiveTerminal pane={id} onData={sendText} onModifiedKey={modifiedKey} onGone={onGone} fontSize={fontSize}/>}
+        <Terminal key={id} ref={terminal} pane={id} onData={sendText} onModifiedKey={modifiedKey} onGone={onGone} fontSize={fontSize}/>
       </Suspense>}/>;
 }

@@ -12,6 +12,8 @@ struct WebShellView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var controller: ShellController
     @State private var confirmingForget = false
+    /// The page is shown: the loading mark has recognised it (`GhostAwake.recognition`) after `ready`.
+    @State private var revealed = false
 
     init(model: GhostModel, connection: Connection) {
         self.model = model
@@ -25,21 +27,23 @@ struct WebShellView: View {
             // page's own layout keeps the composer directly above the keyboard without offsets.
             ShellWebView(webView: controller.webView)
                 .ignoresSafeArea(.container)
-                .opacity(controller.phase == .ready ? 1 : 0)
+                .opacity(revealed ? 1 : 0)
                 // The page comes up just behind the leaving mark, so the two never sit half-faded on each other.
-                .animation(controller.phase == .ready ? .easeOut(duration: 0.45).delay(0.12) : .easeOut(duration: 0.2), value: controller.phase)
-                .accessibilityHidden(controller.phase != .ready)
-            switch controller.phase {
-            case .loading:
-                ShellLoadingView()
-                    .transition(.asymmetric(insertion: .opacity, removal: MarkDissolve.removal))
-            case .unreachable: unreachable
-            case .ready: EmptyView()
+                .animation(revealed ? .easeOut(duration: 0.45).delay(0.12) : .easeOut(duration: 0.2), value: revealed)
+                .accessibilityHidden(!revealed)
+            if controller.phase == .unreachable {
+                unreachable
+            } else if !revealed {
+                ShellLoadingView(ready: controller.phase == .ready) {
+                    withAnimation(.easeOut(duration: 0.2)) { revealed = true }
+                }
+                .transition(.asymmetric(insertion: .opacity, removal: MarkDissolve.removal))
             }
         }
         .background(GhostStyle.canvas.ignoresSafeArea())
         .preferredColorScheme(controller.scheme)
         .animation(.easeOut(duration: 0.2), value: controller.phase)
+        .onChange(of: controller.phase) { if controller.phase != .ready { revealed = false } }
         .onChange(of: model.outbox) { controller.flush() }
         .task { await renewPush() }
         .onChange(of: scenePhase) {
@@ -93,15 +97,23 @@ struct WebShellView: View {
 }
 
 /// The launch screen come alive: the same mark at the same size and place (the middle of the whole screen, not of the
-/// safe area), so its first frame is the launch image; then it wakes while the page loads.
+/// safe area), so its first frame is the launch image; then it wakes and looks for the PC while the page loads. Once
+/// `ready`, it recognises the page and calls `recognised` to let it in.
 struct ShellLoadingView: View {
+    var ready = false
+    var recognised: () -> Void = {}
     var body: some View {
-        GhostAwake(size: GhostMark.launchSize, wakes: true)
+        GhostAwake(size: GhostMark.launchSize, wakes: true, ready: ready)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
             .accessibilityElement()
             .accessibilityLabel("PC Ghost를 여는 중")
             .accessibilityIdentifier("shell-loading")
+            .task(id: ready) {
+                guard ready else { return }
+                try? await Task.sleep(for: .seconds(GhostAwake.recognition))
+                if !Task.isCancelled { recognised() }
+            }
     }
 }
 

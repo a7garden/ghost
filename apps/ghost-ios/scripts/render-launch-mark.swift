@@ -1,7 +1,7 @@
 // Renders App/Assets.xcassets/LaunchMark: the Ghost mark as the launch screen's image, light and dark, at 2x and 3x,
-// with the slit eyes and resting arc the first-load view (`GhostAwake` in App/MobileComponents.swift) starts from. A
-// launch screen runs no code, so it is drawn here by the same `GhostMarkArt` the app draws with; run this again
-// whenever App/GhostMarkArt.swift or `GhostMark.launchSize` changes.
+// with the slit eyes the first-load view (`GhostAwake` in App/MobileComponents.swift) wakes from. A launch screen runs
+// no code, so it is drawn here by the same `GhostMarkArt` the app draws with; run this again whenever
+// App/GhostMarkArt.swift or `GhostMark.launchSize` changes.
 //
 //   cd apps/ghost-ios
 //   xcrun swiftc -parse-as-library App/GhostMarkArt.swift scripts/render-launch-mark.swift -o /tmp/render-launch-mark

@@ -17,21 +17,33 @@ struct GhostMark: View {
     }
 }
 
-/// The mark alive: the glow breathes, the eyes blink and, with `arc`, the icon's working arc travels round every 1.6 s.
-/// With `wakes` the first frame is the launch image (slit eyes, arc at rest), then the eyes open with a small settle.
-/// Reduce Motion keeps everything in place and lets the arc and glow pulse in opacity instead.
+/// The mark alive: the wait is the face's own behaviour, not a widget. It breathes (the glow swells and the disc floats a
+/// little above it), blinks now and then and looks around: `.searching` glances from side to side as if looking for the
+/// PC, `.idle` mostly looks at the owner and glances away rarely. With `wakes` the first frame is the launch image (slit
+/// eyes) and the eyes spring open after 0.15 s. When `ready` turns true the face recognises: the eyes come to the centre
+/// and widen and the mouth smiles, over `recognition`. Reduce Motion moves nothing: the eyes open in place and the glow
+/// and the face breathe in brightness.
 struct GhostAwake: View {
+    /// How long recognising takes once `ready`, before the caller lets the page in.
+    static let recognition: TimeInterval = 0.3
+
     let size: CGFloat
     var wakes = false
-    var arc = true
+    var mood = GhostMarkPose.Mood.searching
+    var ready = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var start = Date.now
+    @State private var readyAt: Date?
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: arc ? nil : 1.0 / 30)) { timeline in
+        TimelineView(.animation) { timeline in
             let t = elapsed(timeline.date)
-            GhostMarkLayers(size: size, pose: reduceMotion ? .still(t, wakes: wakes, arc: arc) : .moving(t, wakes: wakes, arc: arc))
+            let greeting = recognised(timeline.date, t)
+            GhostMarkLayers(size: size, pose: reduceMotion
+                ? .still(t, wakes: wakes, greeting: greeting)
+                : .moving(t, wakes: wakes, mood: mood, greeting: greeting))
         }
+        .onChange(of: ready, initial: true) { readyAt = ready ? .now : nil }
     }
 
     private func elapsed(_ date: Date) -> TimeInterval {
@@ -40,44 +52,113 @@ struct GhostAwake: View {
         #endif
         return max(date.timeIntervalSince(start), 0)
     }
+
+    /// Seconds since `ready` turned true, or nil before it.
+    private func recognised(_ date: Date, _ t: TimeInterval) -> TimeInterval? {
+        #if DEBUG
+        if let at = MobileUIFixture.markReadyAt { return t >= at ? t - at : nil }
+        #endif
+        return readyAt.map { max(date.timeIntervalSince($0), 0) }
+    }
 }
 
 /// One moment of the mark. Every motion starts from the launch image's values, so time zero is that picture.
 struct GhostMarkPose {
+    enum Mood { case searching, idle }
+
     var open: CGFloat = 1
+    /// Where the face looks, -1...1 each way (`GhostMarkArt.eyes`).
+    var gaze: CGPoint = .zero
+    var smile: CGFloat = 0
+    var face: Double = 1
     var glow: Double = 1
     var glowScale: CGFloat = 1
     var discScale: CGFloat = 1
-    /// Degrees travelled from the icon's place; nil hides the arc.
-    var arc: Double?
-    var arcOpacity: Double = 1
+    /// Vertical offset of the disc and face over the glow, in diameters (negative is up).
+    var float: CGFloat = 0
 
     private static let wakeDelay = 0.15
-    private static let breath = 3.6
-    private static let turn = 1.6
+    private static let breath = 4.2
 
-    static func moving(_ t: TimeInterval, wakes: Bool, arc: Bool) -> GhostMarkPose {
+    /// Where the face looks and for how long, in order; the last glance returns to the first, so the loop has no seam.
+    /// Uneven holds and targets keep a long wait from reading as a cycle.
+    private static let glances: [Mood: (move: Double, steps: [(x: Double, y: Double, hold: Double)])] = [
+        .searching: (0.34, [(0, 0, 0.9), (-0.85, 0.05, 1.1), (0.75, -0.12, 1.3), (0.15, 0.22, 0.8),
+                            (-0.5, -0.2, 1.2), (0.9, 0.08, 1.0), (0, 0, 1.4)]),
+        .idle: (0.42, [(0, 0, 3.4), (-0.6, 0.1, 1.3), (0, 0, 3.8), (0.55, -0.1, 1.1)]),
+    ]
+    /// Seconds between blinks, repeating.
+    private static let blinks = [3.4, 4.6, 2.6, 5.2, 3.9]
+
+    static func moving(_ t: TimeInterval, wakes: Bool, mood: Mood, greeting: TimeInterval?) -> GhostMarkPose {
         let woke = max(t - (wakes ? wakeDelay : 0), 0)
         let breathing = (1 - cos(2 * .pi * t / breath)) / 2
         // The eyes spring open (slightly past, then back), and the disc and glow lift a little as they do.
-        let open = wakes ? spring(woke) : 1
-        let lift = wakes ? pulse(woke / 0.22) : 0
-        return GhostMarkPose(
-            open: open * blink(t, after: wakes ? 2.4 : 1.6),
-            glow: 1 - 0.22 * breathing,
-            glowScale: 1 + 0.07 * (wakes ? pulse(woke / 0.32) : 0) + 0.05 * breathing,
-            discScale: 1 + 0.04 * lift + 0.012 * breathing,
-            // Gathers speed from rest instead of jumping to a full turn rate.
-            arc: arc ? 360 / turn * (woke - 0.4 * (1 - exp(-woke / 0.4))) : nil)
+        var pose = GhostMarkPose(
+            open: (wakes ? spring(woke) : 1) * blink(t - (wakes ? 1.9 : 1.2)),
+            gaze: look(woke, mood: mood),
+            glow: 1 - 0.2 * breathing,
+            glowScale: 1 + 0.07 * (wakes ? pulse(woke / 0.32) : 0) + 0.045 * breathing,
+            discScale: 1 + 0.035 * (wakes ? pulse(woke / 0.22) : 0),
+            float: -0.014 * breathing)
+        if let greeting {
+            // Recognition: the gaze comes home, the eyes widen past awake, the mouth smiles and the glow comes up.
+            let settle = smootherstep(greeting / 0.18)
+            pose.gaze = CGPoint(x: pose.gaze.x * (1 - settle), y: pose.gaze.y * (1 - settle))
+            pose.open += (1 + 0.22 * spring(greeting) - pose.open) * settle
+            pose.smile = smootherstep(greeting / 0.22)
+            pose.glow += (1 - pose.glow) * settle
+            pose.glowScale += 0.06 * smootherstep(greeting / 0.25)
+        }
+        return pose
     }
 
-    static func still(_ t: TimeInterval, wakes: Bool, arc: Bool) -> GhostMarkPose {
-        let rise = min(max((t - wakeDelay) / 0.35, 0), 1)
-        return GhostMarkPose(
-            open: wakes ? rise * rise * (3 - 2 * rise) : 1,
-            glow: 1 - 0.3 * (1 - cos(2 * .pi * t / 2.4)) / 2,
-            arc: arc ? 0 : nil,
-            arcOpacity: 1 - 0.6 * (1 - cos(2 * .pi * t / turn)) / 2)
+    static func still(_ t: TimeInterval, wakes: Bool, greeting: TimeInterval?) -> GhostMarkPose {
+        let breathing = (1 - cos(2 * .pi * t / breath)) / 2
+        var pose = GhostMarkPose(
+            open: wakes ? smootherstep((t - wakeDelay) / 0.35) : 1,
+            face: 1 - 0.2 * breathing,
+            glow: 1 - 0.32 * breathing)
+        if let greeting {
+            let settle = smootherstep(greeting / 0.2)
+            pose.smile = settle
+            pose.face += (1 - pose.face) * settle
+            pose.glow += (1 - pose.glow) * settle
+        }
+        return pose
+    }
+
+    /// The glance sequence eased between targets, with a slow drift so a hold is never dead still.
+    private static func look(_ t: Double, mood: Mood) -> CGPoint {
+        let (move, steps) = glances[mood]!
+        let cycle = steps.reduce(0) { $0 + $1.hold + move }
+        var time = t.truncatingRemainder(dividingBy: cycle)
+        var x = 0.0, y = 0.0
+        for (index, step) in steps.enumerated() {
+            let next = steps[(index + 1) % steps.count]
+            if time < step.hold { x = step.x; y = step.y; break }
+            time -= step.hold
+            if time < move {
+                let k = smootherstep(time / move)
+                x = step.x + (next.x - step.x) * k
+                y = step.y + (next.y - step.y) * k
+                break
+            }
+            time -= move
+        }
+        return CGPoint(x: x + 0.05 * sin(1.1 * t), y: y + 0.04 * sin(0.83 * t))
+    }
+
+    /// Closes the eyes to slits for 0.17 s at each of the uneven `blinks` intervals, from `t` = 0.
+    private static func blink(_ t: Double) -> CGFloat {
+        guard t > 0 else { return 1 }
+        var time = t.truncatingRemainder(dividingBy: blinks.reduce(0, +))
+        for interval in blinks {
+            if time < 0.17 { return 1 - sin(.pi * time / 0.17) }
+            if time < interval { return 1 }
+            time -= interval
+        }
+        return 1
     }
 
     /// A damped spring from 0 to 1 that overshoots by about 12 %.
@@ -90,16 +171,14 @@ struct GhostMarkPose {
     /// Rises from 0 to 1 at `x` = 1 and eases back to 0.
     private static func pulse(_ x: Double) -> Double { x * exp(1 - x) }
 
-    /// Closes the eyes to slits for a fifth of a second every 4.8 s.
-    private static func blink(_ t: Double, after: Double) -> CGFloat {
-        guard t > after else { return 1 }
-        let phase = (t - after).truncatingRemainder(dividingBy: 4.8)
-        return phase < 0.2 ? 1 - sin(.pi * phase / 0.2) : 1
+    private static func smootherstep(_ x: Double) -> Double {
+        let x = min(max(x, 0), 1)
+        return x * x * x * (x * (x * 6 - 15) + 10)
     }
 }
 
-/// The mark's layers in one `GhostMarkArt.side * size` square centred on the disc. Glow, arc and disc are images
-/// rendered once by `GhostMarkArt`; the face is the same path drawn live so the eyes can open.
+/// The mark's layers in one `GhostMarkArt.side * size` square centred on the disc. Glow and disc are images rendered
+/// once by `GhostMarkArt`; the face is the same path drawn live so it can wake, look and smile.
 struct GhostMarkLayers: View {
     let size: CGFloat
     let pose: GhostMarkPose
@@ -110,14 +189,14 @@ struct GhostMarkLayers: View {
         let look = scheme == .dark ? GhostMarkArt.Look.dark : .light
         ZStack {
             layer(.glow, look).scaleEffect(pose.glowScale).opacity(pose.glow)
-            if let arc = pose.arc {
-                layer(.arc, look).rotationEffect(.degrees(arc)).opacity(pose.arcOpacity)
-            }
             ZStack {
                 layer(.disc, look)
-                GhostFace(size: size, open: pose.open).fill(Color(cgColor: GhostMarkArt.color(look.eye)))
+                GhostFace(size: size, open: pose.open, gaze: pose.gaze, smile: pose.smile)
+                    .fill(Color(cgColor: GhostMarkArt.color(look.eye)))
+                    .opacity(pose.face)
             }
             .scaleEffect(pose.discScale)
+            .offset(y: pose.float * size)
         }
         .frame(width: size * GhostMarkArt.side, height: size * GhostMarkArt.side)
         .frame(width: size, height: size)
@@ -132,8 +211,10 @@ struct GhostMarkLayers: View {
 private struct GhostFace: Shape {
     let size: CGFloat
     let open: CGFloat
+    let gaze: CGPoint
+    let smile: CGFloat
     func path(in rect: CGRect) -> Path {
-        Path(GhostMarkArt.facePath(d: size, open: open)).offsetBy(dx: rect.midX, dy: rect.midY)
+        Path(GhostMarkArt.facePath(d: size, open: open, gaze: gaze, smile: smile)).offsetBy(dx: rect.midX, dy: rect.midY)
     }
 }
 

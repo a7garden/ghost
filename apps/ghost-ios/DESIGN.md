@@ -22,21 +22,27 @@ live in `apps/ghost-ui`; this app owns only what a web page cannot.
   `notification.open` page event; the web UI routes it exactly as its inbox does.
 - **The moments the page cannot draw.** Launch, first load and an unreachable Host
   (retry, or forget the connection). Launch and first load are one picture: the face from
-  the app icon alone in the middle of the whole screen, no words. The disc has a soft
-  top-to-bottom gradient and a faint sheen (and in the dark a hairline of light on its top
-  edge), the eyes are near-white, and a halo of the signal blue glows behind it;
-  the icon's working arc rests where the icon draws it, its tail fading. The launch screen is
-  the canvas colour and `LaunchMark` (declared as `UILaunchScreen` in `App/Info.plist`, light
-  and dark), which shows the icon's slit eyes. The first-load view (`GhostAwake`) starts on
-  exactly that picture at the same size and place, then wakes: after 0.15 s the eyes spring
-  open, the disc and halo lift a little and settle, the arc gathers speed into a turn every
-  1.6 s, the halo breathes and the eyes blink now and then. When the page says it is ready the
-  mark swells, softens and fades as the page fades in just behind it. Reduce Motion turns and
-  scales nothing: the eyes simply open, the arc stays in place and pulses in opacity with the
-  halo, and the mark only fades out. The pairing screen shows the same mark awake and breathing
-  without the arc, connecting adds the arc, and an unreachable Host shows it asleep (slit eyes,
-  no halo). Everything is drawn by `App/GhostMarkArt.swift`, which
-  `scripts/render-launch-mark.swift` also compiles to render `LaunchMark`; run it again
+  the app icon alone in the middle of the whole screen, no words and no progress widget; the
+  wait is the face's own behaviour. The disc has a soft top-to-bottom gradient and a faint
+  sheen (and in the dark a hairline of light on its top edge), the eyes are near-white, and a
+  halo of the signal blue glows behind it. The launch screen is the canvas colour and
+  `LaunchMark` (declared as `UILaunchScreen` in `App/Info.plist`, light and dark): the face
+  asleep, with the icon's slit eyes. The first-load view (`GhostAwake`) starts on exactly that
+  picture at the same size and place, then wakes: after 0.15 s the eyes spring open and the
+  disc and halo lift a little and settle. While the page loads it looks for the PC: unhurried
+  glances left and right (the eyes travel further than the mouth and the far eye narrows, as
+  if the head turned under a fixed light, so the sheen and rim stay put), a blink at uneven
+  intervals, and one slow breath every 4.2 s that swells the halo while the disc floats a
+  point or two above it. The glances and blinks run on uneven ten- and twenty-second
+  sequences that end where they begin, so a slow connection never shows a seam or looks hung.
+  When the page says it is ready the face recognises it: the gaze comes to the centre, the eyes
+  widen and the mouth turns into a small smile (0.3 s), then the mark swells, softens and fades
+  as the page fades in just behind it. Reduce Motion moves nothing: the eyes open in place, the
+  halo and the face breathe in brightness, recognition is only the smile, and the mark only
+  fades out. The pairing screen shows the same face awake and breathing, mostly looking at the
+  owner with a rare glance away; connecting looks for the PC like first load; an unreachable
+  Host shows it asleep (slit eyes, no halo). Everything is drawn by `App/GhostMarkArt.swift`,
+  which `scripts/render-launch-mark.swift` also compiles to render `LaunchMark`; run it again
   whenever that file or `GhostMark.launchSize` changes.
 
 ## Shell rules

@@ -10,9 +10,9 @@ const keys = [
 ] as const;
 const symbols = ['|', '~', '/', '-'] as const;
 
-export function TerminalKeyRail({ compact, modifiers, onModifier, onKey, onText, onDismiss }: {
+export function TerminalKeyRail({ compact, modifiers, onModifier, onKey, onText, onPageUp, onDismiss }: {
   compact: boolean; modifiers: TerminalModifiers; onModifier(key: keyof TerminalModifiers): void;
-  onKey(key: string): void; onText(text: string): void; onDismiss(): void;
+  onKey(key: string): void; onText(text: string): void; onPageUp(text: string): void; onDismiss(): void;
 }) {
   return <div className="herdr-keypad" onPointerDown={event => {
     if ((event.target as HTMLElement).closest('button') && document.activeElement instanceof HTMLTextAreaElement) event.preventDefault();
@@ -25,7 +25,7 @@ export function TerminalKeyRail({ compact, modifiers, onModifier, onKey, onText,
         onClick={() => onModifier(key)}>{key === 'ctrl' ? 'Ctrl' : 'Alt'}</Button>)}
       {keys.map(key => <Button key={key.key} type="button" variant="outline" size="sm" aria-label={key.name} onClick={() => onKey(key.key)}>{key.label}</Button>)}
       {extendedTerminalKeys.map(key => <Button key={key.name} type="button" variant="outline" size="sm"
-        aria-label={key.name} onClick={() => onText(key.text)}>{key.label}</Button>)}
+        aria-label={key.name} onClick={() => (key.name === 'Page Up' ? onPageUp : onText)(key.text)}>{key.label}</Button>)}
       {symbols.map(key => <Button key={key} type="button" variant="outline" size="sm" onClick={() => onText(key)}>{key}</Button>)}
     </div>
     {compact && <Button type="button" variant="ghost" size="icon" className="herdr-keyboard-dismiss" aria-label="키보드 닫기" onClick={onDismiss}>

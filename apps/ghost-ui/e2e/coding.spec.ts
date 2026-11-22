@@ -26,9 +26,11 @@ async function captureCoding(page: Page, name: string) {
 
 const post = (page: Page, path: string) => page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname === path);
 const paneRoute = (id: string) => `/coding?herdr=${encodeURIComponent(id)}`;
-const terminal = (page: Page) => page.locator('.xterm-rows');
+const terminal = (page: Page) => page.locator('.herdr-terminal-live .xterm-rows');
+const liveScreen = (page: Page) => page.locator('.herdr-live-viewport');
 const input = (page: Page) => page.getByRole('textbox', { name: '터미널 입력' });
 const history = (page: Page) => page.getByRole('region', { name: '터미널 기록', exact: true });
+const latest = (page: Page) => page.getByRole('button', { name: '실시간으로 돌아가기', exact: true });
 const back = (page: Page) => page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true });
 const codingNav = (page: Page, touch: boolean) => page.getByRole('navigation', { name: touch ? '주요 화면' : '작업실', exact: true });
 const spaces = (page: Page) => page.getByRole('radio', { name: '스페이스', exact: true }).click();
@@ -113,7 +115,9 @@ for (const { name, width, height, touch } of sizes) {
         await expect(terminal(page).locator('b')).toHaveCount(0);
         await captureCoding(page, `finished-${theme}-${name}.png`);
 
-        await page.getByRole('button', { name: '기록', exact: true }).click();
+        await expect(page.getByRole('button', { name: '기록', exact: true })).toHaveCount(0);
+        await liveScreen(page).hover();
+        await page.mouse.wheel(0, -19);
         await expect(history(page).locator('.xterm-rows')).toContainText('3 pass');
         await expect(history(page).locator('.xterm-rows .xterm-fg-6').first()).toBeVisible();
         await expect(history(page).locator('.xterm-rows b')).toHaveCount(0);
@@ -273,7 +277,7 @@ for (const { name, width, height, touch } of sizes) {
           window.visualViewport!.dispatchEvent(new Event('resize'));
         });
         await expect(page.locator('html')).toHaveAttribute('data-keyboard', 'open');
-        const live = await page.locator('.herdr-xterm').boundingBox();
+        const live = await liveScreen(page).boundingBox();
         const bar = await keys.boundingBox();
         expect(live!.height).toBeGreaterThan(150);
         expect(bar!.y + bar!.height).toBeLessThanOrEqual(460);
@@ -359,6 +363,7 @@ test('forwards native terminal input, including bracketed paste, and refits with
   }, 'light');
   await expect(terminal(page)).toContainText('git status --short');
   expect(requests[0]?.searchParams.get('pane')).toBe(visualCodingIds.shell);
+  expect(requests[0]?.searchParams.get('rows')).toBe('120');
   const enter = post(page, '/api/herdr/input');
   await input(page).press('Enter');
   expect((await enter).postDataJSON()).toEqual({ pane: visualCodingIds.shell, text: '\r' });
@@ -378,7 +383,7 @@ test('forwards native terminal input, including bracketed paste, and refits with
   const refitted = page.waitForRequest(request => {
     const url = new URL(request.url());
     return url.pathname === '/api/herdr/terminal' && url.searchParams.get('pane') === visualCodingIds.shell &&
-      Number(url.searchParams.get('cols')) < Number(initial.get('cols')) && Number(url.searchParams.get('rows')) < Number(initial.get('rows'));
+      Number(url.searchParams.get('cols')) < Number(initial.get('cols')) && url.searchParams.get('rows') === '120';
   });
   await page.setViewportSize({ width: 1120, height: 720 });
   const resized = await refitted;
@@ -464,7 +469,7 @@ test('manages workspaces, tabs, splits and shell agents through the roster', asy
   await expect(page.getByRole('region', { name: '탭 · 실험' })).toHaveCount(0);
 });
 
-test('colour history follows the bottom and preserves the visible lines through a rolling capture', async ({ page }) => {
+test('preloads colour history, applies the original wheel delta, and keeps the anchor as output rolls', async ({ page }) => {
   let first = 0;
   let tail = 'first';
   const makeText = () => `${Array.from({ length: 150 - first }, (_, index) => `line ${index + first}`).join('\n')}\n\x1b[32m${tail}\x1b[0m`;
@@ -483,29 +488,81 @@ test('colour history follows the bottom and preserves the visible lines through 
       });
     },
   }, 'light');
-  await page.getByRole('button', { name: '기록', exact: true }).click();
+  await page.getByRole('radio', { name: '터미널' }).click();
   const screen = history(page);
+  const preloaded = page.locator('.herdr-terminal-history .xterm-rows');
   const rows = screen.locator('.xterm-rows');
   const scroller = screen.locator('.herdr-history-scroll');
-  const bottom = screen.getByRole('button', { name: '맨 아래로' });
-  await expect(rows.locator('.xterm-fg-2')).toHaveText('first');
+  await expect(preloaded.locator('.xterm-fg-2')).toHaveText('first');
   expect(Object.fromEntries(requests[0]!.searchParams)).toEqual({ pane: output.pane.id, format: 'ansi', lines: '2000' });
-  await expect(bottom).toHaveCount(0);
-  tail += '\nsecond';
-  await expect(rows).toContainText('second');
-  await expect(bottom).toHaveCount(0);
-  await scroller.hover();
-  await page.mouse.wheel(0, -1000);
-  await expect(bottom).toBeVisible();
+  await expect(latest(page)).toBeHidden();
+  const end = await page.locator('.herdr-history-scroll').evaluate(node => node.scrollTop);
+  const count = requests.length;
+  await liveScreen(page).hover();
+  await page.mouse.wheel(0, -240);
+  await expect(latest(page)).toBeVisible();
+  await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBe(end - 240);
+  await expect.poll(() => requests.length).toBeGreaterThan(count);
   const top = await rows.locator('> div').first().textContent();
   expect(top).toMatch(/line \d+/);
   first = 5;
   tail += '\nthird';
-  await expect.poll(() => requests.length).toBeGreaterThan(2);
+  await expect(preloaded).not.toContainText('third');
+  await expect.poll(() => requests.length).toBeGreaterThan(count + 1);
   await expect(rows.locator('> div').first()).toHaveText(top!);
-  await bottom.click();
-  await expect(rows).toContainText('third');
-  await expect(bottom).toHaveCount(0);
+  await page.mouse.wheel(0, 2000);
+  await expect(latest(page)).toBeHidden();
+  await expect(input(page)).toBeFocused();
+  await expect(terminal(page)).toContainText('3 pass');
+});
+
+test('keeps the live frame visible while the first history capture is pending', async ({ page }) => {
+  const response = Promise.withResolvers<void>();
+  await openScreen(page, { ...richCoding, route: () => paneRoute(visualCodingIds.finished), waits: () => [], prepare: async page => {
+    await mockCodingApi(page, { rich: true });
+    await page.route('**/api/herdr/output?*', async route => { await response.promise; await route.fallback(); });
+  } }, 'light');
+  try {
+    await page.getByRole('radio', { name: '터미널' }).click();
+    await expect(terminal(page)).toContainText('3 pass');
+    await liveScreen(page).hover();
+    await page.mouse.wheel(0, -140);
+    await expect(terminal(page)).toBeVisible();
+    await expect(latest(page)).toBeHidden();
+  } finally { response.resolve(); }
+  await expect(history(page).locator('.xterm-rows')).toContainText('실행 로그');
+  await expect(latest(page)).toBeVisible();
+});
+
+test('Shift+PageUp scrolls locally and the first typed key returns to live', async ({ page }) => {
+  await openScreen(page, { ...richCoding, route: () => paneRoute(visualCodingIds.finished), waits: () => [] }, 'light');
+  await page.getByRole('radio', { name: '터미널' }).click();
+  await expect(terminal(page)).toContainText('3 pass');
+  await input(page).focus();
+  await page.keyboard.press('Shift+PageUp');
+  await expect(history(page).locator('.xterm-rows')).toContainText('실행 로그');
+  const typed = post(page, '/api/herdr/input');
+  await page.keyboard.press('x');
+  expect((await typed).postDataJSON()).toEqual({ pane: visualCodingIds.finished, text: 'x' });
+  await expect(latest(page)).toBeHidden();
+  await expect(input(page)).toBeFocused();
+  await page.keyboard.press('Shift+PageUp');
+  await latest(page).click();
+  await expect(input(page)).toBeFocused();
+});
+
+test('live wheel events still reach applications that track the mouse', async ({ page }) => {
+  await openScreen(page, { ...richCoding, route: () => paneRoute(visualCodingIds.finished), waits: () => [], prepare: async page => {
+    await mockCodingApi(page, { rich: true });
+    await page.route('**/api/herdr/terminal?*', route => fulfillHerdrFrame(route, 'mouse mode', { tracksMouse: true }));
+  } }, 'light');
+  await page.getByRole('radio', { name: '터미널' }).click();
+  await expect(terminal(page)).toContainText('mouse mode');
+  await liveScreen(page).hover({ position: { x: 40, y: 8 } });
+  const wheel = post(page, '/api/herdr/input');
+  await page.mouse.wheel(0, -160);
+  expect((await wheel).postDataJSON().text).toMatch(/\x1b\[<64;/);
+  await expect(latest(page)).toBeHidden();
 });
 
 test('starts omp with the chosen options, and never reuses approval bypass without confirmation', async ({ page }) => {
@@ -587,37 +644,121 @@ test.describe('mobile pane controls', () => {
     await expect(composer).toHaveValue('');
   });
 
-  test('scrolls colour history with a touch swipe without sending terminal input', async ({ page }) => {
+  test('clips the observer padding, follows the prompt through keyboard resize, and preserves a paused position', async ({ page }) => {
+    let output = Array.from({ length: 40 }, (_, index) => `canonical line ${index + 1}`).join('\n') + '\nshell prompt';
+    await openScreen(page, { ...coding, route: () => paneRoute(visualCodingIds.shell), waits: () => [], prepare: async page => {
+      await mockCodingApi(page);
+      await page.route('**/api/herdr/terminal?*', route => fulfillHerdrFrame(route, output));
+    } }, 'light');
+    const state = () => liveScreen(page).evaluate(port => {
+      const clip = port.querySelector<HTMLElement>('.herdr-live-clip')!;
+      const grid = port.querySelector<HTMLElement>('.xterm-screen')!;
+      const rows = Array.from(grid.querySelector('.xterm-rows')!.children);
+      const tail = rows.findLast(row => row.textContent?.trim())!;
+      const rect = port.getBoundingClientRect();
+      return {
+        rows: rows.length, used: Math.round(clip.clientHeight * rows.length / grid.clientHeight),
+        tailVisible: tail.getBoundingClientRect().bottom <= rect.bottom + 1 && tail.getBoundingClientRect().top >= rect.top - 1,
+        top: port.scrollTop, end: port.scrollHeight - port.clientHeight,
+      };
+    });
+    await expect(terminal(page)).toContainText('shell prompt');
+    await expect.poll(state).toMatchObject({ rows: 120, used: 41, tailVisible: true });
+    const before = await state();
+    expect(before.top).toBe(before.end);
+    expect(before.end).toBeGreaterThan(0);
+    await expect(latest(page)).toBeHidden();
+    await input(page).focus();
+    await page.evaluate(() => {
+      Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 460 });
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+    });
+    await expect.poll(async () => {
+      const next = await state();
+      return next.end > before.end && next.top === next.end && next.tailVisible;
+    }).toBe(true);
+    await liveScreen(page).hover();
+    await page.mouse.wheel(0, -80);
+    await expect(latest(page)).toBeVisible();
+    await expect(history(page)).toHaveCount(0);
+    const paused = (await state()).top;
+    output += '\nmore output\nnew prompt';
+    await expect(terminal(page)).toContainText('new prompt');
+    await expect.poll(state).toMatchObject({ top: paused, used: 43, tailVisible: false });
+    await page.mouse.wheel(0, 1200);
+    await expect(latest(page)).toBeHidden();
+    expect(await state()).toMatchObject({ used: 43, tailVisible: true });
+  });
+
+  test('continues a touch drag from live through history and keeps Page Up local', async ({ page }) => {
     let writes = 0;
     page.on('request', request => { if (new URL(request.url()).pathname === '/api/herdr/input') writes++; });
     await openScreen(page, {
       ...coding, route: () => paneRoute(visualCodingIds.finished), waits: () => [], prepare: async page => {
         await mockCodingApi(page);
+        await page.route('**/api/herdr/terminal?*', route => fulfillHerdrFrame(route,
+          `${Array.from({ length: 34 }, (_, index) => `line ${index + 116}`).join('\n')}\nshell prompt`, { padded: true }));
         await page.route('**/api/herdr/output?*', route => route.fulfill({ json: {
           text: `${Array.from({ length: 150 }, (_, index) => `line ${index}`).join('\n')}\n\x1b[32m최근 출력\x1b[0m`,
         } }));
       },
     }, 'dark');
-    await page.getByRole('button', { name: '기록', exact: true }).click();
+    await page.getByRole('radio', { name: '터미널' }).click();
     const screen = history(page);
-    await expect(screen.locator('.xterm-rows')).toContainText('최근 출력');
-    const scrollport = await screen.locator('.herdr-history-scroll').boundingBox();
+    const scroller = page.locator('.herdr-history-scroll');
+    await expect(scroller.locator('.xterm-rows')).toContainText('최근 출력');
+    const liveTop = () => liveScreen(page).evaluate(node => node.scrollTop);
+    await expect(terminal(page)).toContainText('shell prompt');
+    await expect.poll(liveTop).toBeGreaterThan(0);
+    const liveEnd = await liveTop();
+    const scrollport = await liveScreen(page).boundingBox();
     const x = scrollport!.x + 60;
     const y = scrollport!.y + 125;
     const cdp = await page.context().newCDPSession(page);
     try {
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-      for (let step = 1; step <= 5; step++) await cdp.send('Input.dispatchTouchEvent', {
+      const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', at?: number) =>
+        cdp.send('Input.dispatchTouchEvent', { type, touchPoints: at === undefined ? [] : [{ x, y: at }] });
+      await touch('touchStart', y);
+      for (let step = 1; step <= 6; step++) await touch('touchMove', y + 48 * step);
+      await touch('touchEnd');
+      await expect.poll(liveTop).toBe(0);
+      // Finish Chrome's native fling at the top before beginning the independent edge gesture.
+      await page.evaluate(() => new Promise<void>(resolve => {
+        let remaining = 12;
+        const frame = () => { if (--remaining) requestAnimationFrame(frame); else resolve(); };
+        requestAnimationFrame(frame);
+      }));
+      await expect(history(page)).toHaveCount(0);
+      await touch('touchStart', y);
+      await touch('touchMove', y + 40);
+      await expect(screen).toBeVisible();
+      const historyEnd = await scroller.evaluate(node => node.scrollHeight - node.clientHeight);
+      await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBe(historyEnd - 40);
+      await expect(screen.locator('.xterm-rows > div').first()).toHaveText('line 114');
+      for (let step = 2; step <= 5; step++) await cdp.send('Input.dispatchTouchEvent', {
         type: 'touchMove', touchPoints: [{ x, y: y + 40 * step }],
       });
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     } finally { await cdp.detach(); }
-    const bottom = screen.getByRole('button', { name: '맨 아래로' });
-    await expect(bottom).toBeVisible();
+    await expect.poll(() => scroller.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBe(200);
     await expect(screen.locator('.xterm-rows')).not.toContainText('최근 출력');
-    await bottom.tap();
-    await expect(screen.locator('.xterm-rows')).toContainText('최근 출력');
+    await latest(page).tap();
+    await expect(input(page)).toBeFocused();
+    await expect(latest(page)).toBeHidden();
+    await expect.poll(liveTop).toBe(liveEnd);
+    const rail = page.getByRole('group', { name: '터미널 키', exact: true });
+    await rail.getByRole('button', { name: 'Page Up', exact: true }).tap();
+    await expect.poll(liveTop).toBe(0);
+    await expect(history(page)).toHaveCount(0);
+    await rail.getByRole('button', { name: 'Page Up', exact: true }).tap();
+    await expect(screen).toBeVisible();
+    await expect(latest(page)).toBeVisible();
     expect(writes).toBe(0);
+    const enter = post(page, '/api/herdr/input');
+    await rail.getByRole('button', { name: 'Enter', exact: true }).tap();
+    expect((await enter).postDataJSON()).toEqual({ pane: visualCodingIds.finished, keys: ['enter'] });
+    await expect(input(page)).toBeFocused();
+    await expect(latest(page)).toBeHidden();
   });
 });
 

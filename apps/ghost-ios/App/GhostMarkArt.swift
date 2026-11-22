@@ -9,13 +9,12 @@ enum GhostMarkArt {
     /// The square around the disc, in diameters: room for the glow to fade to nothing.
     static let side: CGFloat = 3
 
-    /// One appearance. Colours are sRGB hex; `canvas`, the eye colour of the light look and `signal` match `GhostStyle`.
+    /// One appearance. Colours are sRGB hex; `canvas` and the eye colour of the light look match `GhostStyle.canvas`.
     struct Look: Sendable {
         var canvas: UInt32
         var discTop: UInt32
         var discBottom: UInt32
         var eye: UInt32
-        var signal: UInt32
         var glow: UInt32
         /// Peak opacity of the glow behind the disc.
         var glowStrength: CGFloat
@@ -23,35 +22,54 @@ enum GhostMarkArt {
         var sheen: CGFloat
         /// Opacity of the hairline catching the light along the disc's top edge.
         var rim: CGFloat
+
         static let light = Look(canvas: 0xfafaf9, discTop: 0x2c2e36, discBottom: 0x0c0d10, eye: 0xfafaf9,
-                                signal: 0x3d5cf5, glow: 0x4a68ff, glowStrength: 0.30, sheen: 0.10, rim: 0.0)
+                                glow: 0x4a68ff, glowStrength: 0.30, sheen: 0.10, rim: 0.0)
         static let dark = Look(canvas: 0x121214, discTop: 0x2e3039, discBottom: 0x16161b, eye: 0xf2f3f7,
-                               signal: 0x7088ff, glow: 0x4d68ff, glowStrength: 0.46, sheen: 0.07, rim: 0.16)
+                               glow: 0x4d68ff, glowStrength: 0.46, sheen: 0.07, rim: 0.16)
     }
 
-    /// The static layers, back to front. The face is drawn live on top (`face`) so the eyes can open.
-    enum Layer: CaseIterable, Sendable { case glow, arc, disc }
+    /// The static layers, back to front. The face is drawn live on top (`facePath`) so it can wake, look and smile.
+    enum Layer: CaseIterable, Sendable { case glow, disc }
 
     // MARK: Geometry
-    /// The icon's eye bars when `open` is 0 (slits); upright, rounder eyes at 1. Values past 1 overshoot.
-    static func eyes(d: CGFloat, open: CGFloat) -> [CGRect] {
-        let width = d * (0.170 - 0.052 * open)
+
+    /// The icon's eye bars when `open` is 0 (slits); upright, rounder eyes at 1; values past 1 widen them. `gaze` turns
+    /// the face (-1...1 each way): the eyes travel further than the mouth, and the eye on the far side narrows, as on a
+    /// sphere turning under a fixed light (the sheen and rim stay put).
+    static func eyes(d: CGFloat, open: CGFloat, gaze: CGPoint = .zero) -> [CGRect] {
         let height = d * (0.058 + 0.090 * open)
         return [-1.0, 1.0].map { side in
-            CGRect(x: side * d * 0.167 - width / 2, y: -d * 0.158 - height / 2, width: width, height: height)
+            let width = d * (0.170 - 0.052 * min(open, 1)) * (1 - 0.14 * max(0, side * gaze.x))
+            let x = side * d * 0.167 + gaze.x * d * 0.055
+            let y = -d * 0.158 + gaze.y * d * 0.035
+            return CGRect(x: x - width / 2, y: y - height / 2, width: width, height: height)
         }
     }
 
-    static func mouth(d: CGFloat) -> CGRect {
-        let size = d * 0.066
-        return CGRect(x: -size / 2, y: -d * 0.012 - size / 2, width: size, height: size)
+    /// The mouth: the icon's dot at `smile` 0, a small upturned curve at 1.
+    static func mouth(d: CGFloat, gaze: CGPoint = .zero, smile: CGFloat = 0) -> CGPath {
+        let center = CGPoint(x: gaze.x * d * 0.045, y: -d * 0.012 + gaze.y * d * 0.030)
+        let dot = d * 0.066
+        guard smile > 0 else {
+            return CGPath(ellipseIn: CGRect(x: center.x - dot / 2, y: center.y - dot / 2, width: dot, height: dot), transform: nil)
+        }
+        let half = d * 0.075 * smile, sag = d * 0.032 * smile
+        let curve = CGMutablePath()
+        curve.move(to: CGPoint(x: center.x - half, y: center.y - sag / 2))
+        curve.addQuadCurve(to: CGPoint(x: center.x + half, y: center.y - sag / 2), control: CGPoint(x: center.x, y: center.y + sag * 1.5))
+        return curve.copy(strokingWithWidth: dot - d * 0.016 * smile, lineCap: .round, lineJoin: .round, miterLimit: 1)
     }
 
-    /// The working arc: a ring segment outside the disc, from the upper right clockwise, as on the icon.
-    static let arcStart: CGFloat = -62
-    static let arcSweep: CGFloat = 95
-    static func arcRadius(d: CGFloat) -> CGFloat { d * 0.595 }
-    static func arcWidth(d: CGFloat) -> CGFloat { d * 0.054 }
+    static func facePath(d: CGFloat, open: CGFloat, gaze: CGPoint = .zero, smile: CGFloat = 0) -> CGPath {
+        let path = CGMutablePath()
+        for eye in eyes(d: d, open: open, gaze: gaze) {
+            let radius = min(eye.width, eye.height) / 2
+            path.addRoundedRect(in: eye, cornerWidth: radius, cornerHeight: radius)
+        }
+        path.addPath(mouth(d: d, gaze: gaze, smile: smile))
+        return path
+    }
 
     // MARK: Drawing
 
@@ -60,28 +78,17 @@ enum GhostMarkArt {
         defer { context.restoreGState() }
         switch layer {
         case .glow: drawGlow(context, d: d, look: look)
-        case .arc: drawArc(context, d: d, look: look)
         case .disc: drawDisc(context, d: d, look: look)
         }
     }
 
-    /// The eyes and mouth, cut in the eye colour.
+    /// The eyes and mouth in the eye colour.
     static func drawFace(in context: CGContext, d: CGFloat, look: Look, open: CGFloat) {
         context.saveGState()
         defer { context.restoreGState() }
         context.setFillColor(color(look.eye))
         context.addPath(facePath(d: d, open: open))
         context.fillPath()
-    }
-
-    static func facePath(d: CGFloat, open: CGFloat) -> CGPath {
-        let path = CGMutablePath()
-        for eye in eyes(d: d, open: open) {
-            let radius = min(eye.width, eye.height) / 2
-            path.addRoundedRect(in: eye, cornerWidth: radius, cornerHeight: radius)
-        }
-        path.addEllipse(in: mouth(d: d))
-        return path
     }
 
     /// A soft halo in the signal blue: brightest just outside the disc's edge, then a wide Gaussian falloff that is gone
@@ -122,27 +129,9 @@ enum GhostMarkArt {
         context.drawLinearGradient(rim, start: CGPoint(x: -r * 0.3, y: -r), end: CGPoint(x: 0, y: -r * 0.2), options: [])
     }
 
-    /// The arc, fading in along its tail so it reads as travelling clockwise.
-    private static func drawArc(_ context: CGContext, d: CGFloat, look: Look) {
-        let radius = arcRadius(d: d), width = arcWidth(d: d)
-        let start = arcStart * .pi / 180, sweep = arcSweep * .pi / 180
-        let arc = CGMutablePath()
-        arc.addArc(center: .zero, radius: radius, startAngle: start, endAngle: start + sweep, clockwise: false)
-        context.addPath(arc.copy(strokingWithWidth: width, lineCap: .round, lineJoin: .round, miterLimit: 1))
-        context.clip()
-        // An arc under 180° projects monotonically onto its chord, so a gradient along the chord fades the tail evenly.
-        let tail = CGPoint(x: cos(start) * radius, y: sin(start) * radius)
-        let head = CGPoint(x: cos(start + sweep) * radius, y: sin(start + sweep) * radius)
-        let stops = 12
-        let locations = (0...stops).map { CGFloat($0) / CGFloat(stops) }
-        let colors = locations.map { x in color(look.signal, alpha: 0.28 + 0.72 * x * x * (3 - 2 * x)) }
-        let ramp = CGGradient(colorsSpace: sRGB, colors: colors as CFArray, locations: locations)!
-        context.drawLinearGradient(ramp, start: tail, end: head, options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-    }
-
     // MARK: Raster
 
-    /// One layer as an image of `side * d` points at `scale`, y down, centred on the disc.
+    /// Layers as one image of `side * d` points at `scale`, y down, centred on the disc; `face` adds the face at rest.
     static func image(_ layers: [Layer], face open: CGFloat? = nil, d: CGFloat, look: Look, scale: CGFloat) -> CGImage? {
         let pixels = Int((d * side * scale).rounded())
         guard let context = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0, space: sRGB,

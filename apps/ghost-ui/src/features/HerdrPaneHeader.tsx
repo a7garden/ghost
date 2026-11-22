@@ -5,8 +5,8 @@ import { Button, SegmentedControl } from '../ui';
 import { HerdrState } from './herdrDisplay';
 import { TerminalTextSize } from './HerdrTerminalControls';
 
-export type HerdrMode = 'chat' | 'live' | 'history' | 'changes';
-export const herdrModes: readonly HerdrMode[] = ['chat', 'live', 'history', 'changes'];
+export type HerdrMode = 'chat' | 'live' | 'changes';
+export const herdrModes: readonly HerdrMode[] = ['chat', 'live', 'changes'];
 const modes = [{ value: 'chat', label: '대화' }, { value: 'live', label: '터미널' }, { value: 'changes', label: '변경' }] as const;
 export type PaneNavigation = { panes: readonly HerdrPaneView[]; onNavigate(id: string): void };
 
@@ -19,7 +19,6 @@ export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, br
   const siblings = navigation?.panes ?? [];
   const current = siblings.findIndex(item => item.id === pane.id);
   const canSwipe = compact && siblings.length > 1 && current >= 0;
-  const inTerminal = mode === 'live' || mode === 'history';
   const buttons = modes.filter(item => item.value === 'chat' ? chat : item.value === 'changes' ? changes : true);
   return <header className="coding-detail-head">
     <div className="coding-detail-top" data-swipe={canSwipe || undefined}
@@ -49,13 +48,9 @@ export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, br
       </nav>}
     </div>
     <div className="herdr-view-actions">
-      <SegmentedControl aria-label="패널 보기" value={mode === 'history' ? 'live' : mode} options={buttons} onValueChange={next => onMode(next)}/>
+      <SegmentedControl aria-label="패널 보기" value={mode} options={buttons} onValueChange={onMode}/>
       <div className="herdr-pane-tools">
-        {inTerminal && <>
-          <Button type="button" size="sm" variant={mode === 'history' ? 'secondary' : 'ghost'} aria-pressed={mode === 'history'}
-            onClick={() => onMode(mode === 'history' ? 'live' : 'history')}>기록</Button>
-          <TerminalTextSize size={fontSize} onSize={onFontSize}/>
-        </>}
+        {mode === 'live' && <TerminalTextSize size={fontSize} onSize={onFontSize}/>}
         {onEsc && <Button type="button" variant="outline" size="sm" aria-label="중단 (Esc)" onClick={onEsc}>Esc</Button>}
       </div>
     </div>

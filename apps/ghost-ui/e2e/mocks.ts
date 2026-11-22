@@ -122,13 +122,16 @@ function colourTerminal(text: string) {
   return text.split('\n').map((line, index) => `\x1b[${colors[index % colors.length]}m${line}\x1b[0m`).join('\n');
 }
 
-export function fulfillHerdrFrame(route: Route, text: string, { end = false }: { end?: boolean } = {}) {
+export function fulfillHerdrFrame(route: Route, text: string, { end = false, tracksMouse = false, padded = false }: {
+  end?: boolean; tracksMouse?: boolean; padded?: boolean;
+} = {}) {
   const url = new URL(route.request().url());
   const width = Number(url.searchParams.get('cols')), height = Number(url.searchParams.get('rows'));
   const colors = [36, 0, 32, 0, 33];
   const lines = text.split('\n').slice(-height);
-  const body = lines.map((line, index) => `\x1b[${colors[index % colors.length]}m${line}\x1b[0m`).join('\r\n');
-  const bytes = Buffer.from(`\x1b[?25l\x1b[2J\x1b[H\x1b[?2004h${body}\x1b[?25h`).toString('base64');
+  const body = lines.map((line, index) => `\x1b[${colors[index % colors.length]}m${padded ? line.padEnd(width) : line}\x1b[0m`).join('\r\n');
+  const mouse = tracksMouse ? '\x1b[?1000h\x1b[?1006h' : '';
+  const bytes = Buffer.from(`\x1b[?25l\x1b[2J\x1b[H\x1b[?2004h${mouse}${body}\x1b[?25h`).toString('base64');
   const frame: HerdrFrame = { seq: 1, full: true, bytes, width, height };
   return route.fulfill({
     status: 200, contentType: 'text/event-stream',
@@ -332,13 +335,20 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false 
     if (!setup.server || !entry) return error(route, 404, '패널을 찾을 수 없습니다.');
     const text = id === visualCodingIds.blocked && entry.pane.status === 'blocked' && approval > 1
       ? entry.text.replace('❯ 1.', '  1.').replace(`  ${approval}.`, `❯ ${approval}.`) : entry.text;
+    if (rich && id === visualCodingIds.shell) {
+      const log = Array.from({ length: 42 }, (_, index) => `  checkout: verified shard ${String(index + 1).padStart(2, '0')}`).join('\n');
+      return fulfillHerdrFrame(route, `${log}\n${text}`);
+    }
     return fulfillHerdrFrame(route, text);
   });
   await page.route('**/api/herdr/output?*', route => {
     const query = new URL(route.request().url()).searchParams;
     const entry = entries.get(query.get('pane') ?? '');
-    return setup.server && entry ? fulfillJson(route, 200, query.get('format') === 'ansi' ? { ...entry, text: colourTerminal(entry.text) } : entry)
-      : error(route, 404, '패널을 찾을 수 없습니다.');
+    if (!setup.server || !entry) return error(route, 404, '패널을 찾을 수 없습니다.');
+    if (query.get('format') !== 'ansi') return fulfillJson(route, 200, entry);
+    const text = rich && entry.pane.id === visualCodingIds.finished
+      ? `${Array.from({ length: 60 }, (_, index) => `  실행 로그 · ${String(index + 1).padStart(2, '0')}`).join('\n')}\n${entry.text}` : entry.text;
+    return fulfillJson(route, 200, { ...entry, text: colourTerminal(text) });
   });
   await page.route('**/api/herdr/changes?*', route => {
     const pane = new URL(route.request().url()).searchParams.get('pane');

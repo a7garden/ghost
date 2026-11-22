@@ -1,22 +1,30 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
-import { ArrowDown } from 'lucide-react';
+import { useEffect, useEffectEvent, useRef, useState, type RefObject } from 'react';
 import { useHost } from '../host/context';
 import { HostError } from '../host/client';
-import { Button, InlineError } from '../ui';
+import { InlineError } from '../ui';
 import { openHerdrXterm } from './herdrXterm';
-import { CodingSkeleton } from './HerdrInbox';
+import { terminalHistoryBoundary, type TerminalAnchor } from './herdrTerminalScroll';
 
-export default function HerdrHistory({ pane, onGone, fontSize }: { pane: string; onGone(): void; fontSize: number }) {
+export type HistoryViewport = {
+  scroll(offset: number, open: () => void, liveAnchor: () => TerminalAnchor | null): void;
+  reset(): void;
+  page(): number;
+  row(): number;
+  focus(): void;
+  hasSelection(): boolean;
+};
+
+export default function HerdrHistory({ pane, onGone, onBottom, controls, fontSize }: {
+  pane: string; onGone(): void; onBottom(): void; controls: RefObject<HistoryViewport | null>; fontSize: number;
+}) {
   const { client } = useHost();
   const mount = useRef<HTMLDivElement>(null);
   const scrollport = useRef<HTMLDivElement>(null);
   const spacer = useRef<HTMLDivElement>(null);
-  const jumpToBottom = useRef<() => void>(null);
   const gone = useEffectEvent(onGone);
+  const bottom = useEffectEvent(onBottom);
   const initialSize = useEffectEvent(() => fontSize);
   const resizeFont = useRef<(size: number) => void>(null);
-  const [loading, setLoading] = useState(true);
-  const [scrolled, setScrolled] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -32,43 +40,94 @@ export default function HerdrHistory({ pane, onGone, fontSize }: { pane: string;
     let writing = false;
     let pinned = true;
     let projecting = false;
-    let jumpRequested = false;
+    let reachedHistory = false;
+    let pendingOffset = 0;
+    let loading = false;
+    let scrolled = false;
+    let top = 0;
+    let open: (() => void) | undefined;
+    let liveBoundary: TerminalAnchor | null = null;
+    let lastRow = 0;
+    const textAt = (row: number) => terminal.buffer.active.getLine(row)?.translateToString(true).trimEnd();
     let rowHeight = 0;
     // Use the browser's scrollport for wheel and touch momentum; xterm renders its corresponding rows.
-    function projectScroll() {
+    function projectScroll(user = false) {
       if (!rowHeight || writing) return;
-      const { baseY } = terminal.buffer.active;
+      const last = lastRow;
       const end = viewport.scrollHeight - viewport.clientHeight;
-      if (jumpRequested && viewport.scrollTop < end - 1) viewport.scrollTop = end;
-      const firstRow = jumpRequested || viewport.scrollTop >= end - 1 ? baseY
-        : Math.min(baseY, Math.max(0, Math.round(viewport.scrollTop / rowHeight)));
+      pinned = viewport.scrollTop >= end - 1;
+      const firstRow = pinned ? last : Math.min(last, Math.max(0, Math.round(viewport.scrollTop / rowHeight)));
       projecting = true;
       terminal.scrollToLine(firstRow);
       projecting = false;
-      pinned = firstRow === baseY;
-      setScrolled(!pinned);
+      const moved = viewport.scrollTop !== top;
+      top = viewport.scrollTop;
+      if (scrolled && user && moved && pinned && reachedHistory) bottom();
+      else if (scrolled && !pinned) reachedHistory = true;
     }
     function sizeScrollRange() {
-      space.style.height = `${terminal.buffer.active.baseY * rowHeight}px`;
+      const { baseY } = terminal.buffer.active;
+      lastRow = scrolled ? terminalHistoryBoundary(baseY, terminal.rows, liveBoundary, textAt) : baseY;
+      space.style.height = `${lastRow * rowHeight}px`;
     }
     function setScrollPosition(line: number) {
       sizeScrollRange();
-      viewport.scrollTop = line === terminal.buffer.active.baseY ? viewport.scrollHeight : line * rowHeight;
+      viewport.scrollTop = Math.min(line, lastRow) * rowHeight;
       projectScroll();
     }
-    const userScroll = () => { jumpRequested = false; };
-    const wheel = (event: WheelEvent) => { userScroll(); event.stopPropagation(); };
-    viewport.addEventListener('pointerdown', userScroll);
-    viewport.addEventListener('keydown', userScroll);
+    function scrollBy(offset: number) {
+      viewport.scrollTop += offset;
+      projectScroll(true);
+    }
+    function applyEntry() {
+      if (!open || !rowHeight || !terminal.buffer.active.baseY) return;
+      const enter = open;
+      const offset = pendingOffset;
+      open = undefined;
+      pendingOffset = 0;
+      if (offset >= 0) return;
+      // Where possible, align the cut to the top of the observed screen, not the tail of the capture.
+      scrolled = true;
+      setScrollPosition(terminal.buffer.active.baseY);
+      if (!lastRow) { scrolled = false; setScrollPosition(terminal.buffer.active.baseY); return; }
+      scrollBy(offset);
+      enter();
+    }
+    const wheel = (event: WheelEvent) => event.stopPropagation();
+    const nativeScroll = () => projectScroll(true);
     viewport.addEventListener('wheel', wheel, { capture: true, passive: true });
-    viewport.addEventListener('scroll', projectScroll, { passive: true });
+    viewport.addEventListener('scroll', nativeScroll, { passive: true });
     const scroll = terminal.onScroll(() => {
       if (!writing && !projecting && rowHeight) setScrollPosition(terminal.buffer.active.viewportY);
     });
-    jumpToBottom.current = () => {
-      // A phone can still deliver scroll events from the preceding swipe after the tap.
-      jumpRequested = true;
-      setScrollPosition(terminal.buffer.active.baseY);
+    controls.current = {
+      scroll(offset, enter, liveAnchor) {
+        if (scrolled) { scrollBy(offset); return; }
+        if (!open) {
+          if (offset >= 0) return;
+          open = enter;
+          liveBoundary = liveAnchor();
+          pendingOffset = offset;
+          applyEntry();
+          void load();
+        } else {
+          pendingOffset += offset;
+          if (pendingOffset >= 0) { open = undefined; pendingOffset = 0; }
+        }
+      },
+      reset() {
+        if (!open && !scrolled) return;
+        open = undefined;
+        pendingOffset = 0;
+        scrolled = false;
+        reachedHistory = false;
+        liveBoundary = null;
+        setScrollPosition(terminal.buffer.active.baseY);
+      },
+      page: () => viewport.clientHeight,
+      row: () => rowHeight || 16,
+      focus: () => viewport.focus({ preventScroll: true }),
+      hasSelection: () => terminal.hasSelection(),
     };
     const resize = () => {
       if (request.signal.aborted || !node.clientHeight) return;
@@ -76,6 +135,7 @@ export default function HerdrHistory({ pane, onGone, fontSize }: { pane: string;
       fit.fit();
       rowHeight = screen.getBoundingClientRect().height / terminal.rows;
       setScrollPosition(follow ? terminal.buffer.active.baseY : terminal.buffer.active.viewportY);
+      applyEntry();
     };
     resizeFont.current = size => {
       if (terminal.options.fontSize !== size) {
@@ -127,46 +187,47 @@ export default function HerdrHistory({ pane, onGone, fontSize }: { pane: string;
       } else setScrollPosition(target);
     }
     async function load() {
+      if (request.signal.aborted || loading) return;
+      clearTimeout(timer);
+      loading = true;
       try {
         const output = await client.herdrOutput(pane, request.signal);
         if (request.signal.aborted) return;
         await repaint(output.text);
         if (request.signal.aborted) return;
+        applyEntry();
         setError('');
       } catch (reason) {
         if (request.signal.aborted) return;
         if (reason instanceof HostError && reason.code === 'not_found') { gone(); return; }
         setError(reason instanceof Error ? reason.message : '기록을 불러오지 못했습니다.');
+      } finally {
+        open = undefined;
+        pendingOffset = 0;
+        loading = false;
+        if (!request.signal.aborted) timer = setTimeout(() => void load(), 3000);
       }
-      setLoading(false);
-      timer = setTimeout(() => void load(), 3000);
     }
     void load();
     return () => {
       request.abort();
       clearTimeout(timer);
       viewport.removeEventListener('wheel', wheel, true);
-      viewport.removeEventListener('pointerdown', userScroll);
-      viewport.removeEventListener('keydown', userScroll);
-      viewport.removeEventListener('scroll', projectScroll);
+      viewport.removeEventListener('scroll', nativeScroll);
       geometry.disconnect();
       scroll.dispose();
       dispose();
-      jumpToBottom.current = null;
+      controls.current = null;
       resizeFont.current = null;
     };
-  }, [client, pane]);
+  }, [client, pane, controls]);
   useEffect(() => resizeFont.current?.(fontSize), [fontSize]);
 
   return <section className="herdr-live herdr-history" aria-label="터미널 기록">
-    <div className="herdr-history-scroll" ref={scrollport} tabIndex={0} aria-label="기록 스크롤">
+    <div className="herdr-history-scroll" ref={scrollport} tabIndex={-1} aria-label="기록 스크롤">
       <div className="herdr-xterm" ref={mount}/>
       <div aria-hidden="true" ref={spacer}/>
     </div>
-    {loading && <div className="herdr-terminal-skeleton"><CodingSkeleton detail/></div>}
     {error && <InlineError className="herdr-history-error">{error}</InlineError>}
-    {scrolled && <Button className="herdr-history-bottom" type="button" size="sm" variant="outline" onClick={() => jumpToBottom.current?.()}>
-      <ArrowDown aria-hidden="true"/>맨 아래로
-    </Button>}
   </section>;
 }

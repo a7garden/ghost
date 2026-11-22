@@ -70,7 +70,7 @@ struct PairingFlowView: View {
 
     private var hero: some View {
         VStack(spacing: 20) {
-            GhostAwake(size: 72, arc: false)
+            GhostAwake(size: 72, mood: .idle)
             Text("내 Ghost와 연결")
                 .font(.system(.largeTitle, design: .rounded, weight: .semibold)).tracking(-0.6)
                 .multilineTextAlignment(.center)
@@ -157,7 +157,7 @@ private struct SettingsPath: View {
     }
 }
 
-/// The claim in flight: the Ghost mark with the working arc and where it is going.
+/// The claim in flight: the Ghost mark looking for the PC, and where it is going.
 private struct ConnectingState: View {
     let origin: URL?
     var body: some View {

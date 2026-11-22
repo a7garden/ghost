@@ -1,4 +1,4 @@
-import { Terminal, type ITheme, type ITerminalOptions } from '@xterm/xterm';
+import { Terminal, type ITheme, type ITerminalInitOnlyOptions, type ITerminalOptions } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
@@ -19,7 +19,7 @@ function terminalTheme(node: HTMLElement): ITheme {
   };
 }
 
-export function openHerdrXterm(node: HTMLElement, options: ITerminalOptions) {
+export function openHerdrXterm(node: HTMLElement, options: ITerminalOptions & ITerminalInitOnlyOptions) {
   const terminal = new Terminal({
     fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 1.25,
     theme: terminalTheme(node), minimumContrastRatio: 4.5, screenReaderMode: true, cursorBlink: false,
