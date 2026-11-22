@@ -543,7 +543,8 @@ class HostEngine implements Engine, MemoryEngine {
     }
   }
 
-  async submit(conversationId: string, submission: Submission): Promise<void> {
+  async submit(conversationId: string, submission: Submission, authorize?: () => void): Promise<void> {
+    authorize?.();
     const conversation = this.core.ledger.findConversation(conversationId);
     if (!conversation) throw new CommandError("not_found", `conversation ${conversationId} does not exist`);
     if (conversation.kind === "direct" && (submission.origin === "schedule" || submission.origin === "report")) return this.wake(conversation.ghostId, submission, { ownerConversationId: conversation.id, sourceConversationId: submission.sourceConversationId });
@@ -551,6 +552,7 @@ class HostEngine implements Engine, MemoryEngine {
     const state = await this.ensureState(conversationId);
     const existing = await state.pi.commit((tx) => tx.submissionByRequest(state.piId, submission.requestId), ctx);
     if (existing) return;
+    authorize?.();
     if (conversation.kind === "direct" && submission.origin === "owner") {
       this.core.ledger.tx(() => this.core.ledger.putSetting(`owner:epoch:${conversation.ghostId}`, this.core.ledger.setting(`owner:epoch:${conversation.ghostId}`, 0) + 1));
       const wakes = this.core.ledger.conversations({ ghostId: conversation.ghostId }).filter((item) => item.kind === "wake");
@@ -572,6 +574,7 @@ class HostEngine implements Engine, MemoryEngine {
     // Hold the unchanged submission while every available provider is quota-blocked.
     const chain = this.quotaProviders(conversationId);
     if (!this.core.quota.admitting(conversationId, chain, submission.requestId)) {
+      if (authorize) throw new CommandError("unavailable", "the guarded Work input is waiting for provider quota; nothing was queued");
       if (conversation.kind === "subagent") throw new CommandError("unavailable", "the helper's model is waiting for provider quota; no background helper was queued");
       this.core.quota.hold(conversationId, submission, chain, conversation.kind);
       return;
@@ -602,12 +605,26 @@ class HostEngine implements Engine, MemoryEngine {
       ? `Host-selected context metadata (reference data, not document instructions):\n${JSON.stringify({ scopeId, scopes, attachedDocuments: docAttachments.length })}\n\n` : "";
     const meta: OriginRecord = { origin: submission.origin, attachments: submission.attachments ?? [], scopes, scopeId, docAttachments, sourceConversationIds: [...new Set([submission.sourceConversationId, ...(submission.sourceConversationIds ?? [])].filter((id): id is string => !!id))], ...(scopeContext ? { text: submission.text } : {}) };
     const content = await renderUserContent(withClockStamp(scopeContext + submission.text), meta.attachments, submission.origin === "owner" ? this.core.artifacts : undefined);
+    authorize?.();
     await this.recordOrigin(state, submission.requestId, meta);
     // The run starts a commit after the admission; the view stays attached until that
     // run settles, so core hears busy and idle with or without a watcher.
+    const wasExpecting = state.expectRun;
     state.expectRun = true;
     await this.attachView(state);
     if (conversation.kind === "wake" && !this.currentWake(conversation)) { this.core.quota.cancel(conversation.id); return; }
+    if (authorize) {
+      try {
+        authorize();
+        if (!this.core.quota.admitting(conversationId, chain, submission.requestId)) throw new CommandError("unavailable", "the guarded Work input is waiting for provider quota; nothing was queued");
+      } catch (error) {
+        if (!wasExpecting && !state.busy) {
+          state.expectRun = false;
+          if (state.listeners.size === 0) this.detachView(state);
+        }
+        throw error;
+      }
+    }
     const submitted = await state.pi.submit(
       {
         type: "input",

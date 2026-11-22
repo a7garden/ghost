@@ -94,6 +94,18 @@ export const HerdrPaneView = Type.Object({
   focused: Type.Boolean(),
   /** The Host opened this terminal or started its agent. */
   owned: Type.Boolean(),
+  /** The terminal identity herdr reports for the pane, when it does: what a coding run binds to, so a reused terminal is never mistaken for the run's. */
+  terminalId: Type.Optional(Type.String()),
+  /** The 맡긴 일 whose coding run works in this pane; the Host decorates the owner's view with it. */
+  codingWorkId: Type.Optional(Type.String()),
+  /** That run's id, matching WorkDetail.codingRuns. */
+  codingRunId: Type.Optional(Type.String()),
+  /** herdr's own count of the pane's state changes (installed 0.9.5 PaneInfo `state_change_seq`), when it reports one: a watcher compares it to see what it missed between looks. */
+  stateChangeSeq: Type.Optional(Type.Integer({ minimum: 0 })),
+  /** herdr's count of the agent's completed turns (PaneInfo `completion_seq`), null when the pane has no agent; a coding run reads it to observe fast turns without a working poll. */
+  completionSeq: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
+  /** The agent session identity herdr reports for the pane (PaneInfo `agent_session`), when it does. */
+  agentSessionId: Type.Optional(Type.String()),
 });
 export type HerdrPaneView = Static<typeof HerdrPaneView>;
 
@@ -319,7 +331,7 @@ export type HerdrAnswer = Static<typeof HerdrAnswer>;
 
 /** One entry of an agent's own conversation record (not its screen). Tool calls and thinking stay one-liners; the phone folds them. */
 export const HerdrChatItem = Type.Union([
-  Type.Object({ id: Type.String(), kind: Type.Literal("user"), at: nullable(Type.Integer()), text: Type.String() }),
+  Type.Object({ id: Type.String(), kind: Type.Literal("user"), at: nullable(Type.Integer()), text: Type.String(), /** The Host's coding-turn reference when this user record carries a managed prompt, so a long task correlates without reading the whole text. */ codingReference: Type.Optional(Type.String({ maxLength: 160 })) }),
   Type.Object({ id: Type.String(), kind: Type.Literal("agent"), at: nullable(Type.Integer()), text: Type.String() }),
   Type.Object({ id: Type.String(), kind: Type.Literal("tool"), at: nullable(Type.Integer()), name: Type.String(), summary: Type.String(), ok: nullable(Type.Boolean()) }),
   Type.Object({ id: Type.String(), kind: Type.Literal("thinking"), at: nullable(Type.Integer()) }),

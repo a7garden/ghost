@@ -7,7 +7,7 @@ import { NewHerdrWorkspace } from './HerdrStart';
 import { OpenHerdrPane, useHerdr } from './Herdr';
 import { HerdrActionDialog } from './HerdrActions';
 import { findHerdrPane, HerdrRoster, type HerdrNode, type RosterAction } from './HerdrRoster';
-import { parseHerdrPane } from './herdrDisplay';
+import { parseHerdrPane, parseHerdrSession } from './herdrDisplay';
 import { HerdrInbox, useHerdrActivity } from './HerdrInbox';
 import { CodingSkeleton } from './HerdrParts';
 import { useHerdrAsks } from './HerdrAsk';
@@ -24,8 +24,8 @@ function lastPane(session: string, pane?: string) {
   return null;
 }
 
-export function CodingPage({ scopes, herdrPane, creating, onOpen, onCancel, compact, onRoster }: {
-  scopes: Scope[]; herdrPane: string | null; creating: boolean; compact: boolean;
+export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, onCancel, compact, onRoster }: {
+  scopes: Scope[]; herdrPane: string | null; herdrSession: string | null; creating: boolean; compact: boolean;
   onOpen(id: string): void; onCancel(): void; onRoster(view: HerdrView): void;
 }) {
   const showDetail = creating || herdrPane !== null;
@@ -44,10 +44,14 @@ export function CodingPage({ scopes, herdrPane, creating, onOpen, onCancel, comp
   const roster = setup && view?.session !== setup.session ? null : view;
   const paneId = parseHerdrPane(herdrPane);
   const workspaces = roster?.workspaces ?? [];
-  const pane = created?.snapshot === view && created.pane.id === paneId ? created.pane : findHerdrPane(workspaces, paneId);
+  const linkSession = parseHerdrSession(herdrSession);
+  const liveSession = roster?.available && !roster.note ? roster.session : null;
+  // A pane id is unique only inside its herdr session: a link naming another session never opens this session's same-id pane.
+  const foreignSession = linkSession !== null && liveSession !== null && linkSession !== liveSession;
+  const pane = foreignSession ? undefined : created?.snapshot === view && created.pane.id === paneId ? created.pane : findHerdrPane(workspaces, paneId);
   const restore = useRef(!creating && herdrPane === null);
   const open = useEffectEvent(onOpen);
-  const session = roster?.available && !roster.note ? roster.session : null;
+  const session = liveSession;
   const log = useHerdrActivity(session, workspaces, pane?.id ?? null);
   const workspace = pane ? workspaces.find(item => item.id === pane.workspaceId) : undefined;
   const siblings = workspace?.tabs.find(tab => tab.id === pane?.tabId)?.panes ?? [];
@@ -76,11 +80,12 @@ export function CodingPage({ scopes, herdrPane, creating, onOpen, onCancel, comp
   const goBack = useEffectEvent(onCancel);
   const missing = Boolean(!creating && paneId && !pane && roster?.available && !roster.note);
   useEffect(() => {
-    if (!creating && paneId && (sessionChanged || missing)) {
-      if (missing) setNotice('이 패널은 더 이상 없습니다.');
+    if (!creating && paneId && (sessionChanged || missing || foreignSession)) {
+      if (foreignSession) setNotice(`이 링크는 다른 herdr 세션(${linkSession})의 패널을 가리킵니다. herdr의 세션을 바꾼 뒤 다시 열어 주세요.`);
+      else if (missing) setNotice('이 패널은 더 이상 없습니다.');
       goBack();
     }
-  }, [sessionChanged, creating, paneId, missing]);
+  }, [sessionChanged, creating, paneId, missing, foreignSession, linkSession]);
   const showSetupInRoster = (compact && !showDetail) || (!compact && !required);
   const setupNotice = <>{errors}{panel}</>;
   const paneSession = setup?.session ?? roster?.session;

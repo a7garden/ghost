@@ -57,5 +57,6 @@ export function workDetail(core: Core, workId: string): WorkDetail {
     effects: ledger.effectsForWork(work.id),
     decisions: ledger.decisionsForWork(work.id),
     artifacts: ledger.artifactsForWork(work.id),
+    codingRuns: core.coding.list(work.id),
   };
 }

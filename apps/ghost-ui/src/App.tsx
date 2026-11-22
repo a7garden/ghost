@@ -305,7 +305,7 @@ function Shell() {
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')} codingSession={codingAttention.session}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
-            {section === 'coding' && <CodingPage scopes={state.scopes} herdrPane={params.get('herdr')} creating={params.get('new') === '1'} compact={compact}
+            {section === 'coding' && <CodingPage scopes={state.scopes} herdrPane={params.get('herdr')} herdrSession={params.get('herdrSession')} creating={params.get('new') === '1'} compact={compact}
               onRoster={codingAttention.reportRoster}
               onCancel={() => closeCodingForm('/coding')} onOpen={id => {
                 if (currentRoute() !== route) return;

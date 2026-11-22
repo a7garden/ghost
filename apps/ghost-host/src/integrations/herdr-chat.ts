@@ -63,8 +63,8 @@ async function bytes(file: FileHandle, start: number, length: number): Promise<B
 }
 
 /** Project text only; never return raw records, injected context, tool inputs other than a summary, or model metadata. */
-function displayText(value: string, inline = false, limit = HEAD): string {
-  let clean = value
+function cleanText(value: string): string {
+  return value
     .replace(/<(system-reminder|developer-instructions|project-context|harness-context|local-command-caveat|local-command-stdout|local-command-stderr|command-name|command-message|command-args|user-prompt-submit-hook|injected-context)(?:\s[^>]*)?>[\s\S]*?(?:<\/\1\s*>|$)/gi, "")
     .replace(/^\s*# Task\r?\n([\s\S]*?)\r?\n\r?\n# Rules\r?\n- Work only inside the current directory; follow its AGENTS\.md and project conventions\.[\s\S]*$/, "$1")
     .replace(/-----BEGIN [^-\n]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-\n]*PRIVATE KEY-----|$)/gi, "[redacted]")
@@ -73,12 +73,27 @@ function displayText(value: string, inline = false, limit = HEAD): string {
     .replace(/(\b[a-z][a-z+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[redacted]@")
     .replace(/\b(?:sk-[\w-]{12,}|(?:gh[pousr]_|github_pat_|xox[baprs]-|AIza)[\w-]{12,}|(?:AKIA|ASIA)[A-Z0-9]{16}|eyJ[\w-]+\.[\w-]+\.[\w-]+)\b/g, "[redacted]")
     .trim();
+}
+
+function boundedText(clean: string, inline = false, limit = HEAD): string {
   if (inline) clean = clean.split(/\r?\n/, 1)[0]!.trim();
   if (Buffer.byteLength(clean) <= limit) return clean;
   const encoded = Buffer.from(clean);
   let end = limit - 3;
   while ((encoded[end]! & 0xc0) === 0x80) end--;
   return `${encoded.toString("utf8", 0, end)}…`;
+}
+
+function displayText(value: string, inline = false, limit = HEAD): string {
+  return boundedText(cleanText(value), inline, limit);
+}
+
+/** Correlation survives display truncation, without exposing injected context or a machine footer in the UI. */
+function userText(value: string): { text: string; codingReference?: string } {
+  const clean = cleanText(value);
+  const footer = /^Ghost coding reference: (run:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:turn:[1-9][0-9]{0,5})[ \t]*$/m;
+  const codingReference = footer.exec(clean)?.[1];
+  return { text: boundedText(clean.replace(footer, "").trim()), ...(codingReference ? { codingReference } : {}) };
 }
 
 function date(value: unknown): number | null {
@@ -136,16 +151,16 @@ function collect(data: Buffer, start: number, emitFrom: number, source: Source, 
     const kind = message.role === "user" ? "user" : "agent";
     const content = message.content;
     if (typeof content === "string" && visible) {
-      const text = displayText(content);
-      if (text) items.push({ id: `${offset}:0`, kind, at, text });
+      const projection = kind === "user" ? userText(content) : { text: displayText(content) };
+      if (projection.text) items.push({ id: `${offset}:0`, kind, at, ...projection });
     }
     if (!Array.isArray(content)) return;
     for (const [index, block] of content.entries()) {
       if (!object(block)) continue;
       const id = `${offset}:${index}`;
       if (visible && block.type === "text") {
-        const text = displayText(string(block.text));
-        if (text) items.push({ id, kind, at, text });
+        const projection = kind === "user" ? userText(string(block.text)) : { text: displayText(string(block.text)) };
+        if (projection.text) items.push({ id, kind, at, ...projection });
       } else if (kind === "agent" && (block.type === "thinking" || block.type === "redacted_thinking")) {
         if (visible) items.push({ id, kind: "thinking", at });
       } else if (kind === "agent" && block.type === (source === "omp" ? "toolCall" : "tool_use")) {

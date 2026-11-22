@@ -580,7 +580,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (pathname === "/api/herdr" && request.method === "GET") {
       try {
         if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        return json(await herdr.overview() satisfies HerdrView);
+        // The owner's view carries each pane's coding run and the 맡긴 일 it belongs to, matched by exact terminal identity.
+        return json(core.coding.decorate(await herdr.overview()) satisfies HerdrView);
       } catch (caught) {
         return failure(caught);
       }

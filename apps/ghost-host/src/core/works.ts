@@ -192,27 +192,42 @@ export class Works {
     };
   }
 
-  /**
-   * Write a Work and settle its execution-budget clock: the span closes when the Work stops running or a
-   * hold stops it (quota wait, budget pause, repeat block) and reopens when it works again. Every state
-   * change goes through here, so no path can leave the clock running while nothing is being done.
-   */
+  /** Charge the union of Ghost execution and observed agent work, never both clocks. */
+  private consumesBudget(work: Work): boolean {
+    if (work.state !== "running" && work.state !== "waiting") return false;
+    if (this.core.coding.working(work.id)) return true;
+    return work.hold === null && (work.state === "running" || (work.conversationId !== null && this.ledger.conversation(work.conversationId).busy));
+  }
+
   private put(work: Work, now = Date.now()): Work {
-    const consuming = work.state === "running" && work.hold === null && !isTerminal(work);
+    const consuming = this.consumesBudget(work);
     const closed = work.budgetSince !== null && work.budgetSince < now;
     const next: Work = {
       ...work,
       budgetMinutes: Math.max(1, Math.min(MAX_WORK_BUDGET_MINUTES, work.budgetMinutes || DEFAULT_WORK_BUDGET_MINUTES)),
       budgetUsedMs: closed ? work.budgetUsedMs + (now - work.budgetSince!) : work.budgetUsedMs,
-      budgetSince: consuming ? now : null,
+      budgetSince: consuming ? Math.max(work.budgetSince ?? now, now) : null,
     };
     this.ledger.tx(() => {
       const key = `work-continuation:${work.id}`;
       const continuation = this.ledger.setting<WorkContinuation | null>(key, null);
       if (continuation && (work.state !== "running" || continuation.revision !== work.revision || continuation.revisionsUsed !== work.revisionsUsed)) this.ledger.putSetting(key, null);
       this.ledger.putWork(next);
+      if (isTerminal(next) || next.state === "blocked") this.core.coding.cancel(next.id);
     });
     return next;
+  }
+
+  /** Called at the same observation as a coding state or Ghost busy/idle change. */
+  codingActivity(workId: string, at: number) {
+    const work = this.ledger.work(workId);
+    if (work.state !== "waiting" && !(work.state === "running" && work.hold === "quota")) return;
+    const consuming = this.consumesBudget(work);
+    if (work.budgetSince !== null && budgetSpent(work, at) >= work.budgetMinutes * 60_000) {
+      this.pauseForBudget(work.id, at);
+    } else if (consuming !== (work.budgetSince !== null)) {
+      this.put(work, at);
+    }
   }
 
   private checkExecution(ghostId: string, execution: ExecutionTarget | undefined) {
@@ -248,6 +263,7 @@ export class Works {
     this.ledger.tx(() => {
       this.put(next);
       if (resumesBudget) this.tellWork(next, `The owner raised the execution budget to ${next.budgetMinutes} working minutes. Continue from where you paused.`, `work:${next.id}:r${next.revision}:budget-raised`);
+      this.core.coding.invalidate(work.id);
     });
     if (next.conversationId && (next.brief !== work.brief || digestOf(next.acceptance) !== digestOf(work.acceptance))) {
       const conversationId = next.conversationId;
@@ -596,6 +612,7 @@ export class Works {
       this.ledger.putSetting(workEpochKey(work.id), this.ledger.setting<number>(workEpochKey(work.id), 0) + 1);
       this.ledger.setIdleNudges(work.id, 0);
       this.ledger.markReported(work.id, null);
+      this.core.coding.invalidate(work.id);
     });
     if (next.state === "running" && next.conversationId) {
       const conversationId = next.conversationId;
@@ -616,6 +633,7 @@ export class Works {
   complete(workId: string, result: WorkResult): Work {
     const work = this.ledger.work(workId);
     if (work.state !== "running") throw conflict(`Work is ${work.state}`);
+    if (this.core.coding.pending(work.id)) throw conflict("a coding turn, its report, or its stop confirmation is still pending; wait for it before completing");
     if (this.ledger.children(work.id).some((child) => !isTerminal(child))) throw conflict("delegated Work is still live; wait for it before completing");
     if (this.pendingQuestion(work.id)) throw conflict("a question to the parent is pending; wait for its answer before completing");
     const unresolved = this.core.effects.unresolved(work.id);
@@ -791,6 +809,10 @@ export class Works {
     if (work.state !== "running") return;
     // A turn that died on a provider quota is not the Ghost stopping: no nudge, no failure, no state change.
     if (work.hold === "quota") return;
+    if (this.core.coding.pending(work.id)) {
+      this.ledger.tx(() => this.put({ ...work, state: "waiting", updatedAt: Date.now() }));
+      return;
+    }
     const liveChildren = this.ledger.children(work.id).some((child) => !isTerminal(child));
     const pending = this.ledger.pendingDecisions({ workId: work.id }).length > 0;
     const incoming = this.ledger.workQuestions(work.id, true).filter((question) => question.state === "pending");
@@ -860,11 +882,11 @@ export class Works {
    */
   expire(now: number) {
     for (const work of this.ledger.worksInState("queued", "running", "waiting", "verifying", "blocked")) {
-      if (work.state === "running" && work.hold === null && budgetSpent(work, now) >= work.budgetMinutes * 60_000) {
+      if ((work.state === "running" && work.hold === null || (work.state === "running" || work.state === "waiting") && this.core.coding.working(work.id)) && budgetSpent(work, now) >= work.budgetMinutes * 60_000) {
         this.pauseForBudget(work.id, now);
         continue;
       }
-      if (work.deadlineAt !== null && work.deadlineAt <= now && (work.state === "queued" || (work.state === "running" && work.hold !== "quota"))) {
+      if (work.deadlineAt !== null && work.deadlineAt <= now && (work.state === "queued" || (work.state === "running" && work.hold !== "quota") || work.state === "waiting" && this.core.coding.working(work.id))) {
         this.fail(work.id, "the deadline passed");
       }
     }
@@ -873,7 +895,7 @@ export class Works {
   /** The execution budget ran out: pause, then ask the origin once to extend, split or stop. */
   pauseForBudget(workId: string, now = Date.now()) {
     const work = this.ledger.work(workId);
-    if (isTerminal(work) || work.state !== "running" || work.hold !== null) return;
+    if ((work.state !== "running" && work.state !== "waiting") || (work.hold !== null && !(work.hold === "quota" && work.budgetSince !== null))) return;
     this.pause(work, "budget", "the execution budget ran out", `Work "${work.title}" (${work.id}) paused: its execution budget of ${work.budgetMinutes} working minutes ran out. Answer with work_decide: extend once (action "extend"), stop it (action "stop"), or stop it and delegate the remainder as smaller Works (splitting). While it waits, nothing is spent or failed.`, now);
   }
 
@@ -996,7 +1018,10 @@ export class Works {
 
   private async recoverWake(work: Work) {
     if (!work.conversationId || work.state !== "running" || work.hold !== null || this.ledger.conversation(work.conversationId).busy) return;
+    if (this.core.coding.pending(work.id)) return;
     await this.core.openConversation(work.conversationId);
+    const current = this.ledger.work(work.id);
+    if (current.state !== "running" || current.hold !== null || current.revision !== work.revision || current.revisionsUsed !== work.revisionsUsed || this.core.coding.pending(work.id)) return;
     await this.core.engine.submit(work.conversationId, {
       text: `The host restarted. Continue this Work from where you stopped; call \`work_status\` if you need to see what changed.\n\n${this.input(work)}`,
       origin: "work",
@@ -1052,8 +1077,10 @@ export class Works {
         // A crash between the state change and the first submission leaves a running Work
         // with a silent conversation; the start request id makes this a no-op otherwise.
         if (!work.conversationId || work.hold !== null) return;
+        if (this.core.coding.pending(work.id)) return;
         await this.core.openConversation(work.conversationId);
         if (await this.resumeContinuation(work, false)) return;
+        if (this.core.coding.pending(work.id)) return;
         await this.core.engine.submit(work.conversationId, { text: this.input(work), origin: "work", requestId: `work:${work.id}:start` });
         return;
       case "blocked":
@@ -1089,6 +1116,7 @@ export class Works {
 
   /** Crash recovery for a waiting Work whose children and decisions all settled while the host was down. */
   private async wake(work: Work) {
+    if (work.hold !== null || this.core.coding.pending(work.id)) return;
     const children = this.ledger.children(work.id);
     if (children.some((child) => !isTerminal(child))) return;
     if (this.ledger.pendingDecisions({ workId: work.id }).length > 0) return;
@@ -1106,11 +1134,19 @@ export class Works {
   /** Back to running from waiting; a no-op in any other state. */
   resumeFromWaiting(workId: string) {
     const work = this.ledger.work(workId);
-    if (work.state !== "waiting") return;
+    if (work.state !== "waiting" || work.hold !== null || this.core.coding.pending(workId)) return;
     this.ledger.tx(() => {
       this.put({ ...work, state: "running", updatedAt: Date.now() });
       this.ledger.setIdleNudges(work.id, 0);
     });
+  }
+
+  /** A coding report releases only the coding wait, never a child, a question, a decision, or a hold. */
+  codingDelivered(workId: string) {
+    const work = this.ledger.work(workId);
+    if (work.state !== "waiting" || this.ledger.children(workId).some((child) => !isTerminal(child))
+      || this.pendingQuestion(workId) || this.ledger.pendingDecisions({ workId }).length > 0) return;
+    this.resumeFromWaiting(workId);
   }
 
   /** Deliver a settled child's outcome to its parent's conversation. Idempotent per child state. */
@@ -1311,6 +1347,7 @@ export class Works {
     for (const work of this.ledger.worksInState("running")) {
       // A quota-held Work is resumed by the quota queue's own request ids; a budget or repeat hold waits for its origin.
       if (work.hold !== null || (work.conversationId && this.core.quota.awaiting(work.conversationId))) continue;
+      if (this.core.coding.pending(work.id)) continue;
       void this.core.lane(`work:${work.id}`, async () => {
         const current = this.ledger.work(work.id);
         if (!(await this.resumeContinuation(current, true))) await this.recoverWake(current);

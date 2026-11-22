@@ -57,7 +57,8 @@ export interface SubmissionRecovery {
 export interface Engine extends Partial<MemoryEngine> {
   /** Create the conversation if missing and (re)apply its agent: model, instructions, tools. Idempotent. */
   open(setup: ConversationSetup): Promise<void>;
-  submit(conversationId: string, submission: Submission): Promise<void>;
+  /** Guarded Work input rechecks its durable authority immediately before admission and is never quota-deferred. */
+  submit(conversationId: string, submission: Submission, authorize?: () => void): Promise<void>;
   /** Currently configured, credentialed providers in the conversation's primary/fallback chain. */
   quotaProviders?(conversationId: string): string[];
   /** Reconcile a previously released request against durable admissions before replaying or advancing it. */

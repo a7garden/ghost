@@ -3,6 +3,7 @@ import { GitBranch } from 'lucide-react';
 import type { HerdrPaneView } from '@ghost/contract';
 import { Button, SegmentedControl } from '../ui';
 import { HerdrState } from './herdrDisplay';
+import { uiTerms } from '../uiText';
 import { TerminalTextSize } from './HerdrTerminalControls';
 
 export type HerdrMode = 'chat' | 'live' | 'changes';
@@ -37,7 +38,8 @@ export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, br
         if (next) navigation?.onNavigate(next.id);
       }}>
       <div className="coding-detail-title">
-        <div className="coding-context"><HerdrState status={pane.status} size={15} label={false}/><span>{pane.agent ?? '셸'}</span></div>
+        <div className="coding-context"><HerdrState status={pane.status} size={15} label={false}/><span>{pane.agent ?? '셸'}</span>
+          {pane.codingWorkId && <a className="link-quiet coding-work-link" href={`#/work/${encodeURIComponent(pane.codingWorkId)}`}>{uiTerms.work}</a>}</div>
         <h2>{pane.title}</h2>
         {(branch || pane.cwd) && <code className="coding-directory" title={pane.cwd ?? undefined} aria-label={branch ? `브랜치 ${branch}` : `작업 디렉터리 ${pane.cwd}`}>
           {branch && <GitBranch aria-hidden="true" size={13}/>}<span>{branch || (compact ? pane.cwd?.split('/').filter(Boolean).slice(-2).join('/') || '/' : pane.cwd)}</span>

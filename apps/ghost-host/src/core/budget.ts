@@ -1,4 +1,4 @@
-import type { Conversation, MessageOrigin, Work } from "@ghost/contract";
+import { TERMINAL_WORK_STATES, type Conversation, type MessageOrigin, type Work } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import type { Submission } from "./ports.ts";
 import { CommandError, conflict } from "./errors.ts";
@@ -278,9 +278,14 @@ export class Quota {
       .map(([provider, entry]) => ({ provider, reason: entry.reason, resumeAt: entry.resumeAt, conversations: this.records.filter((record) => record.providers.includes(provider)).length }));
   }
 
+  private workAllowsRelease(conversationId: string): boolean {
+    const work = this.core.ledger.workByConversation(conversationId);
+    return !work || (!TERMINAL_WORK_STATES.includes(work.state) && work.hold !== "budget" && work.hold !== "repeat");
+  }
+
   private release(record: DeferredRecord, now: number): void {
     const submission = record.queue[0];
-    if (!submission) return;
+    if (!submission || !this.workAllowsRelease(record.conversationId)) return;
     // A clear fallback needs no probe. Otherwise assign only a due, unowned provider to this release.
     const clear = record.providers.some((candidate) => this.entries[candidate] === undefined);
     const provider = clear ? undefined : record.providers.find((candidate) => {
@@ -294,12 +299,16 @@ export class Quota {
     const conversationId = record.conversationId;
     void this.core.lane(`quota:${conversationId}`, async () => {
       try {
+        const authorize = () => {
+          if (!this.workAllowsRelease(conversationId)) throw conflict("the Work is stopped; provider quota cannot wake it");
+        };
+        authorize();
         this.core.works.holdForQuotaOfWork(conversationId, false);
-        await this.core.engine.submit(conversationId, submission);
+        await this.core.engine.submit(conversationId, submission, this.core.ledger.workByConversation(conversationId) ? authorize : undefined);
       } catch (error) {
         if (!(error instanceof CommandError)) throw error;
-        // The engine refused the release (no model, no credential): probe again later, in order.
-        this.core.log(`quota release of ${conversationId} was refused`, error.message);
+        const paused = !this.workAllowsRelease(conversationId);
+        if (!paused) this.core.log(`quota release of ${conversationId} was refused`, error.message);
         const current = this.records.find((item) => item.conversationId === conversationId);
         if (!current) return;
         current.releasing = null;
@@ -308,7 +317,7 @@ export class Quota {
         current.updatedAt = Date.now() + RELEASE_GRACE_MS;
         for (const provider of current.providers) {
           const entry = this.entries[provider];
-          if (entry) entry.resumeAt = Math.max(entry.resumeAt, current.updatedAt);
+          if (entry && !paused) entry.resumeAt = Math.max(entry.resumeAt, current.updatedAt);
         }
         this.persist();
         this.arm(Date.now());
@@ -320,7 +329,7 @@ export class Quota {
     if (this.stopped) return;
     clearTimeout(this.timer ?? undefined);
     const next = Object.entries(this.entries)
-      .filter(([provider, entry]) => entry.probingBy === null && this.records.some((record) => record.releasing === null && record.providers.includes(provider)))
+      .filter(([provider, entry]) => entry.probingBy === null && this.records.some((record) => record.releasing === null && record.providers.includes(provider) && this.workAllowsRelease(record.conversationId)))
       .map(([, entry]) => entry)
       .reduce((at: number | null, entry) => (at === null || entry.resumeAt < at ? entry.resumeAt : at), null);
     const due = this.records.length > 0 && this.records.some((record) => record.queue.length > 0);

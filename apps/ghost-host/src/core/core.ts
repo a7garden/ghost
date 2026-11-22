@@ -1,5 +1,6 @@
 import { DEFAULT_GHOST_TOOLS, type ArtifactRef, type DocRef, type Conversation, type Ghost, type Notification } from "@ghost/contract";
 import type { Ledger } from "../ledger/ledger.ts";
+import { CodingRuns } from "./coding.ts";
 import { checkAttachments } from "./configuration.ts";
 import { Decisions } from "./decisions.ts";
 import { Effects } from "./effects.ts";
@@ -50,6 +51,7 @@ export class Core implements EngineEvents {
   readonly catalog: ProviderCatalog;
   readonly codexCatalog: CodexCatalog;
   readonly works: Works;
+  readonly coding: CodingRuns;
   readonly effects: Effects;
   readonly decisions: Decisions;
   readonly schedules: Schedules;
@@ -85,6 +87,7 @@ export class Core implements EngineEvents {
     });
     this.log = deps.log ?? ((message, detail) => console.error(`[core] ${message}`, detail ?? ""));
     this.works = new Works(this);
+    this.coding = new CodingRuns(this);
     this.effects = new Effects(this);
     this.decisions = new Decisions(this);
     this.schedules = new Schedules(this);
@@ -186,6 +189,7 @@ export class Core implements EngineEvents {
    * then re-derive engine actions for every live object.
    */
   async start() {
+    this.coding.recover();
     this.effects.recoverInterrupted();
     this.effects.returnSelfCheckable();
     await this.quota.start();
@@ -197,10 +201,12 @@ export class Core implements EngineEvents {
     this.schedules.start();
     this.decisions.start();
     this.duty.start();
+    this.coding.watch();
   }
 
   stop() {
     this.unsubscribeLedgerEvents();
+    this.coding.stop();
     this.quota.stop();
     this.duty.stop();
     this.schedules.stop();
@@ -214,6 +220,7 @@ export class Core implements EngineEvents {
     const conversation = this.ledger.findConversation(conversationId);
     if (!conversation) return;
     this.ledger.tx(() => this.ledger.putConversation({ ...conversation, busy, lastActivityAt: at }));
+    if (conversation.kind === "work" && conversation.workId) this.works.codingActivity(conversation.workId, at);
     if (busy) return;
     // A quota-ended turn is not the Ghost stopping: no nudge, no failure, and a review does not fall back to the owner.
     if (ended?.quota) {

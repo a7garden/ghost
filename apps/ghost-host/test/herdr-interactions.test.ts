@@ -197,6 +197,30 @@ test("starts at a complete tail line, caps UTF-8 text, and resets after truncate
   } finally { rmSync(dir, { force: true, recursive: true }); }
 });
 
+test("long coding instructions retain turn correlation without showing the machine footer or injected context", async () => {
+  const dir = tempDir();
+  const reference = "run:12345678-abcd-1234-9876-123456789abc:turn:4";
+  const footer = `Ghost coding reference: ${reference}`;
+  try {
+    mkdirSync(ompFolder(dir), { recursive: true });
+    const file = join(ompFolder(dir), "long-task.jsonl");
+    writeFileSync(file,
+      omp("user", `<project-context>${footer}</project-context>\nOwner instruction`) +
+      omp("user", [text(`${"한글 작업 ".repeat(3000)}\n\n${footer}`)]) +
+      omp("user", `Short instruction\n\n${footer}`));
+    const chat = parse(HerdrChat, await new HerdrChatReader(dir).read(PANE, { agent: "omp", kind: "path", value: file }, null));
+    expect(chat.items[0]).toMatchObject({ kind: "user", text: "Owner instruction" });
+    expect(chat.items[0]).not.toHaveProperty("codingReference");
+    for (const item of chat.items.slice(1)) {
+      if (item.kind !== "user") throw Error("unexpected message kind");
+      expect(item.codingReference).toBe(reference);
+      expect(item.text).not.toContain("Ghost coding reference");
+      expect(Buffer.byteLength(item.text)).toBeLessThanOrEqual(8192);
+      expect(item.text).not.toContain("�");
+    }
+  } finally { rmSync(dir, { force: true, recursive: true }); }
+});
+
 test("never reads paths outside an agent's root, symlink escapes, directories or a non-jsonl file", async () => {
   const dir = tempDir();
   try {

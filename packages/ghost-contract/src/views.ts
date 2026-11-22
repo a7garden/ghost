@@ -1,4 +1,5 @@
 import { PolicyRule } from "./policy.ts";
+import { CodingRun } from "./coding-run.ts";
 import { McpServer } from "./mcp.ts";
 import { ConfigRevision } from "./entities.ts";
 import { Type, type Static } from "typebox";
@@ -109,6 +110,7 @@ export const WorkDetail = Type.Object({
   effects: Type.Array(Effect),
   decisions: Type.Array(Decision),
   artifacts: Type.Array(ArtifactRef),
+  codingRuns: Type.Optional(Type.Array(CodingRun)),
 });
 export type WorkDetail = Static<typeof WorkDetail>;
 

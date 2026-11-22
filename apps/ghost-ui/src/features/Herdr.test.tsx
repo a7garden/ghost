@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import type { HerdrPaneView, HerdrWorkspaceView } from '@ghost/contract';
 import { HerdrPaneBody } from './Herdr';
 import { HerdrDiffText } from './HerdrChanges';
+import { HerdrPaneHeader } from './HerdrPaneHeader';
 import { findHerdrPane, herdrNodeActions, HerdrRoster } from './HerdrRoster';
 import { herdrAgentOptions, workspaceInput } from './HerdrStart';
-import { codeRunPane, herdrPanePath, parseHerdrPane } from './herdrDisplay';
+import { codeRunPane, codeRunReceiptRun, herdrPanePath, parseHerdrPane, parseHerdrSession } from './herdrDisplay';
 import { decodeHerdrFrame, HerdrInputQueue } from './herdrTerminalProtocol';
 
 const pane: HerdrPaneView = {
@@ -20,6 +21,15 @@ describe('herdr address', () => {
     expect(parseHerdrPane(new URL(path, 'https://example.test').searchParams.get('herdr'))).toBe('w1:pA');
   });
 
+  it('carries the session a pane id belongs to, and never one it cannot be', () => {
+    const path = herdrPanePath(pane.id, 'work-laptop');
+    expect(path).toBe('/coding?herdr=w1%3ApA&herdrSession=work-laptop');
+    const params = new URL(path, 'https://example.test').searchParams;
+    expect(parseHerdrSession(params.get('herdrSession'))).toBe('work-laptop');
+    expect(parseHerdrSession(null)).toBeNull();
+    for (const invalid of ['', 'w1:pA', 'has space', '../escape']) expect(parseHerdrSession(invalid)).toBeNull();
+  });
+
   it.each([null, '', 'w1', 'w1%3ApA', 'default/w1:pA', 'w1:pA:1', 'w1:pA&new=1'])('rejects an invalid pane address: %s', invalid => {
     expect(parseHerdrPane(invalid)).toBeNull();
   });
@@ -28,6 +38,13 @@ describe('herdr address', () => {
     expect(codeRunPane('{"pane":"w1:pA","status":"blocked"}')).toBe('w1:pA');
     for (const result of [null, 'not JSON', 'null', '{"id":"w1:pA"}', '{"pane":"https://example.test"}']) {
       expect(codeRunPane(result)).toBeNull();
+    }
+  });
+
+  it('reads the run an asynchronous code_run receipt names, and nothing else', () => {
+    expect(codeRunReceiptRun('{"runId":"run-7","turn":2}')).toBe('run-7');
+    for (const result of [null, 'not JSON', 'null', '{}', '{"runId":""}', '{"runId":7}']) {
+      expect(codeRunReceiptRun(result)).toBeNull();
     }
   });
 });
@@ -96,6 +113,22 @@ describe('herdr pane', () => {
     expect(markup).toContain('aria-label="셸 명령"');
     expect(markup).not.toContain('후속 지시');
     expect(body('idle', true).match(/<textarea[^>]+>/)?.[0]).toContain('disabled=""');
+  });
+});
+
+describe('the coding agent\'s 맡긴 일 link', () => {
+  const header = (codingWorkId?: string) => renderToStaticMarkup(<HerdrPaneHeader
+    pane={{ ...pane, ...(codingWorkId ? { codingWorkId } : {}) }} mode="live" onMode={() => {}}
+    compact={false} chat={false} changes={false} fontSize={13} onFontSize={() => {}}/>);
+
+  it('links a pane a coding run owns to the 맡긴 일 that owns it', () => {
+    const markup = header('work-1');
+    expect(markup).toContain('href="#/work/work-1"');
+    expect(markup).toContain('>맡긴 일</a>');
+  });
+
+  it('shows no Work link on a pane no coding run owns', () => {
+    expect(header()).not.toContain('#/work/');
   });
 });
 

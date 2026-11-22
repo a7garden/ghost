@@ -347,4 +347,22 @@ export const MIGRATIONS: readonly string[] = [
   UPDATE ghosts SET tools = replace(tools, '"document_spaces"', '"document_scopes"');
   UPDATE works SET tool_scope = replace(tool_scope, '"document_spaces"', '"document_scopes"') WHERE tool_scope IS NOT NULL;
   `,
+  /* 12: managed coding turns, their exact Herdr target, and a durable result or stop intent. */ `
+  CREATE TABLE coding_runs (
+    id TEXT PRIMARY KEY,
+    work_id TEXT NOT NULL REFERENCES works(id),
+    session TEXT NOT NULL,
+    pane TEXT,
+    terminal_id TEXT,
+    reserved INTEGER NOT NULL CHECK (reserved IN (0, 1)),
+    pending INTEGER NOT NULL CHECK (pending IN (0, 1)),
+    started_at INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX coding_runs_by_work ON coding_runs(work_id, started_at, id);
+  CREATE INDEX coding_runs_to_reconcile ON coding_runs(session) WHERE pending = 1 OR reserved = 1;
+  CREATE INDEX coding_runs_by_pane ON coding_runs(session, pane, terminal_id);
+  CREATE UNIQUE INDEX coding_runs_reserve_pane ON coding_runs(session, pane) WHERE reserved = 1 AND pane IS NOT NULL;
+  CREATE UNIQUE INDEX coding_runs_reserve_terminal ON coding_runs(session, terminal_id) WHERE reserved = 1 AND terminal_id IS NOT NULL;
+  `,
 ];

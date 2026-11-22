@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { CodingSetup, HerdrChanges, HerdrFrame, HerdrOutput, HerdrPaneView, HerdrUpload, HerdrView, OmpInfo, parse } from "@ghost/contract";
 import { startServer } from "../src/api/server.ts";
 import type { Config } from "../src/config.ts";
-import { ansiText, codingPrefs, Herdr, HerdrStartError, mergeFrames, terminalText } from "../src/integrations/herdr.ts";
+import { ansiText, codingPrefs, gitReport, Herdr, HerdrStartError, mergeFrames, terminalText } from "../src/integrations/herdr.ts";
 import { OmpInfoProvider } from "../src/integrations/omp.ts";
 import { CodingWatcher } from "../src/integrations/coding-watch.ts";
 import { saveUpload, safeUploadName } from "../src/integrations/uploads.ts";
@@ -76,7 +76,7 @@ case "$*" in
   "--session default workspace close w1") echo '{"error":{"code":"workspace_group_close_required","message":"close the linked worktree workspaces first"}}'; exit 1 ;;
   "--session default workspace rename "*|"--session default tab rename "*|"--session default pane rename "*|"--session default workspace close "*|"--session default tab close "*|"--session default pane close "*) echo '{"result":{}}' ;;
   "--session default pane send-keys w1:p2 nonsense") echo '{"error":{"code":"invalid_params","message":"unknown key nonsense"}}'; exit 1 ;;
-  "--session default pane send-text "*|"--session default pane send-keys "*) echo '{"result":{}}' ;;
+  "--session default pane send-text "*|"--session default pane send-keys "*|"--session default agent send-keys "*) echo '{"result":{}}' ;;
   "--session default terminal session observe w1:pA "*) printf '{"bytes":"aGk=","encoding":"ansi","full":true,"height":24,"seq":1,"type":"terminal.frame","width":80}\n{"bytes":"IQ==","encoding":"ansi","full":false,"height":24,"seq":2,"type":"terminal.frame","width":80}\n{"reason":"terminal attach ended: gone","type":"terminal.closed"}\n' ;;
   "--session default terminal session observe w1:p2 "*) printf '{"bytes":"aGk=","encoding":"ansi","full":true,"height":24,"seq":1,"type":"terminal.frame","width":80}\n' ;;
   *) echo "unexpected: $*" >&2; exit 2 ;;
@@ -777,4 +777,64 @@ test("the history, change, omp and upload routes need the owner token, answer in
     rmSync(dir, { recursive: true, force: true });
     rmSync(config.root, { recursive: true, force: true });
   }
+});
+
+test("coding reads bind the recorded session and guarded input refuses replaced or busy terminals", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  const panes = structuredClone(snapshot);
+  Object.assign(panes.result.snapshot.panes[0]!, { terminal_id: "terminal-original", agent_status: "idle" });
+  writeFileSync(join(dir, "snapshot.json"), JSON.stringify(panes));
+  const herdr = new Herdr(fake.path, { prefs: () => ({ session: "work", agent: null, notify: "off" }) });
+  try {
+    expect((await herdr.overview("default")).session).toBe("default");
+    expect((await herdr.output("w1:pA", { session: "default" })).text).toContain("working on it");
+    let admitted = 0;
+    const guard = { session: "default", terminalId: "terminal-new", agent: "claude", authorize: () => { admitted++; } };
+    await expect(herdr.prompt("w1:pA", "do not send", undefined, guard)).rejects.toThrow("replaced");
+    expect(admitted).toBe(0);
+    Object.assign(panes.result.snapshot.panes[0]!, { agent_status: "working" });
+    writeFileSync(join(dir, "snapshot.json"), JSON.stringify(panes));
+    await expect(herdr.prompt("w1:pA", "do not queue", undefined, { ...guard, terminalId: "terminal-original" })).rejects.toThrow("not ready");
+    await expect(herdr.interrupt("default", "w1:pA", "terminal-new")).rejects.toThrow("replaced");
+    await expect(herdr.interrupt("default", "w1:pA", "terminal-original", { agent: "claude", authorize: () => { throw new Error("cancel target changed"); } })).rejects.toThrow("cancel target changed");
+    const calls = await fake.runs();
+    expect(calls.some((args) => args.includes("prompt") || args.includes("send-keys"))).toBe(false);
+    await herdr.interrupt("default", "w1:pA", "terminal-original");
+    expect((await fake.runs()).at(-1)).toEqual(["--session", "default", "agent", "send-keys", "w1:pA", "Ctrl+c"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("coding start records the opened terminal before launch and rechecks authority before mutations", async () => {
+  const dir = tempDir();
+  const repo = join(dir, "repo");
+  gitRepo(repo);
+  const fake = fakeHerdr(dir);
+  writeFileSync(join(dir, "omp"), "#!/bin/sh\nexit 0\n");
+  chmodSync(join(dir, "omp"), 0o755);
+  const panes = structuredClone(snapshot);
+  Object.assign(panes.result.snapshot.panes[3]!, { terminal_id: "terminal-created" });
+  writeFileSync(join(dir, "snapshot.json"), JSON.stringify(panes));
+  const herdr = new Herdr(fake.path, { agentDirs: [dir] });
+  try {
+    const stages: string[] = [];
+    await expect(herdr.start({ repo, task: "fix", agent: "omp" }, undefined, (opened) => {
+      expect(opened.pane).toMatchObject({ terminalId: "terminal-created", agent: "omp" });
+      stages.push("opened");
+    }, { session: "default", authorize(stage) { if (stage) stages.push(stage); if (stage === "launch") throw new Error("authority revoked"); } })).rejects.toThrow("authority revoked");
+    expect(stages).toEqual(["open", "opened", "launch"]);
+    expect((await fake.runs()).some((args) => args.includes("start") || args.includes("prompt"))).toBe(false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("coding reports publication as local observations rather than claiming who pushed", async () => {
+  const dir = tempDir();
+  const repo = join(dir, "repo");
+  gitRepo(repo);
+  try {
+    execFileSync("/usr/bin/git", ["update-ref", "refs/remotes/example/main", "HEAD"], { cwd: repo });
+    const report = await gitReport(repo, null);
+    expect(report.publication).toMatchObject({ upstream: null, remoteRefsContainingHead: ["example/main"] });
+    expect((report.publication as { basis: string }).basis).toContain("does not prove this agent pushed");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

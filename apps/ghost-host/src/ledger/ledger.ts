@@ -10,6 +10,7 @@ import type {
   ActivityRun,
   Connection,
   Avatar,
+  CodingRun,
   Conversation,
   Decision,
   Device,
@@ -60,6 +61,34 @@ export interface WorkQuestion {
   nudgeCount: number;
   cancellationReason: string | null;
   cancellationSubmittedAt: number | null;
+}
+
+/** Private execution bindings and evidence checkpoints; never included in the owner or model projection. */
+export interface CodingRunRecord {
+  run: CodingRun;
+  effectId: string;
+  conversationId: string;
+  rootId: string;
+  identity: string;
+  attempt: string;
+  turnsInAttempt: number;
+  /** False when the Work used an existing pane rather than creating its own worktree. */
+  isolated: boolean;
+  opening: boolean;
+  launching: boolean;
+  promptAt: number | null;
+  acknowledged: boolean;
+  completionBaseline: number | null | undefined;
+  agentSessionId: string | null;
+  seenPrompt: boolean;
+  foreignPrompt: boolean;
+  claim: string | null;
+  blockedNoticeAt: number | null;
+  finishing: { message: string; tail: string | null } | null;
+  interrupted: boolean;
+  /** Used for reservation and reconciliation indexes, not inferred from an owner's UI state. */
+  reserved: boolean;
+  pending: boolean;
 }
 
 export type ReviseLesson = Pick<Verdict, "source" | "reasons" | "evidence" | "scope" | "at">;
@@ -635,6 +664,45 @@ export class Ledger {
         work.budgetMinutes, work.budgetUsedMs, work.budgetSince, work.budgetExtended ? 1 : 0, work.hold, work.scopeId, json(work.attachments), work.slot, json(work.retry), json(work.scopeReferences ?? []),
       );
     this.emit({ type: "work", work });
+  }
+
+  findCodingRun(id: string): CodingRunRecord | null {
+    const row = this.db.query("SELECT data FROM coding_runs WHERE id = ?").get(id) as Row | null;
+    return row ? parseJson<CodingRunRecord>(row.data) : null;
+  }
+
+  codingRuns(workId?: string): CodingRunRecord[] {
+    const rows = workId === undefined
+      ? this.db.query("SELECT data FROM coding_runs ORDER BY started_at, id").all()
+      : this.db.query("SELECT data FROM coding_runs WHERE work_id = ? ORDER BY started_at, id").all(workId);
+    return (rows as Row[]).map((row) => parseJson<CodingRunRecord>(row.data));
+  }
+
+  codingRunsToReconcile(): CodingRunRecord[] {
+    return (this.db.query("SELECT data FROM coding_runs WHERE pending = 1 OR reserved = 1 ORDER BY session, started_at, id").all() as Row[])
+      .map((row) => parseJson<CodingRunRecord>(row.data));
+  }
+
+  codingRunsForPane(session: string, pane: string, terminalId: string): CodingRunRecord[] {
+    return (this.db.query("SELECT data FROM coding_runs WHERE session = ? AND pane = ? AND terminal_id = ? ORDER BY reserved DESC, started_at DESC, id DESC")
+      .all(session, pane, terminalId) as Row[]).map((row) => parseJson<CodingRunRecord>(row.data));
+  }
+
+  codingPaneHeld(session: string, pane: string, terminalId: string, workId: string): boolean {
+    return this.db.query(`SELECT 1 FROM coding_runs AS run JOIN works AS work ON work.id = run.work_id
+      WHERE run.session = ? AND ((run.reserved = 1 AND (run.pane = ? OR run.terminal_id = ?))
+        OR (run.terminal_id = ? AND run.work_id <> ? AND work.state NOT IN ('done','failed','cancelled'))) LIMIT 1`)
+      .get(session, pane, terminalId, terminalId, workId) !== null;
+  }
+
+  putCodingRun(record: CodingRunRecord) {
+    const { run } = record;
+    this.db.query(`INSERT INTO coding_runs (id,work_id,session,pane,terminal_id,reserved,pending,started_at,data)
+      VALUES (?,?,?,?,?,?,?,?,?)
+      ON CONFLICT (id) DO UPDATE SET pane=excluded.pane, terminal_id=excluded.terminal_id, reserved=excluded.reserved,
+        pending=excluded.pending, started_at=excluded.started_at, data=excluded.data`)
+      .run(run.id, run.workId, run.session, run.pane, run.terminalId, +record.reserved, +record.pending, run.startedAt, JSON.stringify(record));
+    this.emit({ type: "work", work: this.work(run.workId) });
   }
 
   reviseHistory(workId: string): ReviseLesson[] {

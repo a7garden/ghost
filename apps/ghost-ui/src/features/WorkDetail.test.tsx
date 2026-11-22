@@ -1,10 +1,10 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { QUIET_REPLY, type Decision, type Message, type Verdict, type Work } from '@ghost/contract';
+import { QUIET_REPLY, type CodingRun, type Decision, type Message, type Verdict, type Work } from '@ghost/contract';
 import { workGlyph } from '../components/agent';
 import { ToolTrail, Transcript, endsInGhostRun, trailSummary } from '../components/TranscriptMessage';
-import { VerdictStamp, WorkHeader } from './WorkDetail';
+import { VerdictStamp, WorkCodingRuns, WorkHeader } from './WorkDetail';
 import { readVerdict, workReason } from './workText';
 
 const verdict = (patch: Partial<Verdict> = {}): Verdict => ({
@@ -146,5 +146,32 @@ describe('work conversation stream', () => {
     expect(markup).toContain(`<span class="trail__count">${name}</span>`);
     expect(markup).toContain(`<span class="trail__step-name">${name}</span>`);
     expect(markup).toMatch(/<pre>curl https:\/\/example\.com\/a{200}<\/pre>/);
+  });
+});
+
+const codingRun = (patch: Partial<CodingRun> = {}): CodingRun => ({
+  id: 'run-1', workId: 'w1', session: 'default', pane: 'w1:pA', terminalId: 'term-1', agent: 'omp',
+  checkout: '/work/tree', branch: 'fix/login', base: 'deadbeef', turn: 1, deliveredTurn: 0, state: 'working',
+  startedAt: NOW - 60_000, updatedAt: NOW - 1_000, seenWorking: true, prompt: 'Add b', cursor: 'c1', report: null, stopPending: false, ...patch,
+});
+
+describe('coding runs in the Work aside', () => {
+  it('shows where each run stands and links it back to its herdr pane', () => {
+    const markup = renderToStaticMarkup(createElement(WorkCodingRuns, { runs: [codingRun()], now: NOW }));
+    expect(markup).toContain('omp · fix/login');
+    expect(markup).toContain('작업 중');
+    expect(markup).toContain('턴 1');
+    const href = /href="([^"]+)"/.exec(markup)![1]!.replaceAll('&amp;', '&');
+    const target = new URL(href.slice(1), 'https://ghost.test');
+    expect(target.pathname).toBe('/coding');
+    expect(target.searchParams.get('herdr')).toBe('w1:pA');
+    expect(target.searchParams.get('herdrSession')).toBe('default');
+    expect(markup).toContain('herdr에서 보기');
+  });
+
+  it('leaves the pane link out while the run has no pane yet', () => {
+    const markup = renderToStaticMarkup(createElement(WorkCodingRuns, { runs: [codingRun({ pane: null, state: 'settled' })], now: NOW }));
+    expect(markup).toContain('완료');
+    expect(markup).not.toContain('herdr에서 보기');
   });
 });

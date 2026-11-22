@@ -37,6 +37,9 @@ const Snapshot = Type.Object({
         /** Absent, not null, on a pane with no agent. */
         agent: Type.Optional(Type.Union([Type.String(), Type.Null()])),
         agent_status: Type.Optional(Type.String()),
+        state_change_seq: Type.Optional(Type.Integer({ minimum: 0 })),
+        completion_seq: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
+        agent_session: Type.Optional(Type.Union([Type.Null(), Type.Object({ agent: Type.String(), kind: Type.String(), value: Type.String() })])),
         focused: Type.Optional(Type.Boolean()),
         cwd: Type.Optional(Type.Union([Type.String(), Type.Null()])),
         foreground_cwd: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -224,6 +227,15 @@ export async function gitReport(checkout: string, base: string | null): Promise<
     report.diffStat = (await git(["diff", "--stat", from], checkout)).out.slice(-3_000);
   }
   report.uncommitted = (await git(["status", "--short"], checkout)).out.slice(0, 1_500);
+  const [upstream, containing] = await Promise.all([
+    git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], checkout),
+    git(["for-each-ref", "--format=%(refname:short)", "--contains=HEAD", "refs/remotes/"], checkout),
+  ]);
+  report.publication = {
+    upstream: upstream.code === 0 ? upstream.out : null,
+    remoteRefsContainingHead: containing.code === 0 ? containing.out.split("\n").filter(Boolean).slice(0, 30) : [],
+    basis: "Local remote-tracking refs only; no fetch or network probe. Presence does not prove this agent pushed, and absence does not prove it did not.",
+  };
   return report;
 }
 
@@ -351,12 +363,16 @@ export class Herdr implements HerdrPort {
         status: status(tab.agent_status),
         panes: panes.filter((pane) => pane.tab_id === tab.tab_id).map((pane): HerdrPaneView => ({
           id: pane.pane_id,
+          ...(pane.terminal_id === undefined ? {} : { terminalId: pane.terminal_id }),
           workspaceId: workspace.workspace_id,
           tabId: tab.tab_id,
           workspace: workspace.label ?? "",
           tab: tab.label ?? "",
           agent: pane.agent ?? null,
           status: status(pane.agent_status),
+          ...(pane.state_change_seq === undefined ? {} : { stateChangeSeq: pane.state_change_seq }),
+          ...(pane.completion_seq === undefined ? {} : { completionSeq: pane.completion_seq }),
+          ...(pane.agent_session ? { agentSessionId: JSON.stringify([pane.agent_session.agent, pane.agent_session.kind, pane.agent_session.value]) } : {}),
           cwd: pane.foreground_cwd ?? pane.cwd ?? null,
           // An agent is named by its tab (herdr names the tab after the task); a shell by what it shows or where it is, so two shells in one tab differ.
           title: pane.agent ? tab.label || pane.terminal_title_stripped || pane.pane_id : pane.terminal_title_stripped || basename(pane.foreground_cwd ?? pane.cwd ?? "") || pane.pane_id,
@@ -412,17 +428,17 @@ export class Herdr implements HerdrPort {
   }
 
   /** A pane that holds an agent; prompting a shell would type into it. */
-  private async agentPane(id: string): Promise<HerdrPaneView> {
-    const view = await this.pane(id);
+  private async agentPane(id: string, session = this.session): Promise<HerdrPaneView> {
+    const view = await this.pane(id, session);
     if (view.agent === null) throw invalid(`no agent runs in herdr pane ${id}`);
     return view;
   }
 
-  async overview(): Promise<HerdrView> {
-    const session = this.session;
+  async overview(session = this.session): Promise<HerdrView> {
+    if (!SESSION.test(session)) throw invalid("not a herdr session name");
     if (this.executable === null) return { available: false, session, note: null, workspaces: [] };
     try {
-      return { available: true, session, note: null, workspaces: await this.tree() };
+      return { available: true, session, note: null, workspaces: await this.tree(session) };
     } catch (error) {
       if (error instanceof CommandError && error.code === "unavailable") return { available: true, session, note: error.message, workspaces: [] };
       throw error;
@@ -430,8 +446,8 @@ export class Herdr implements HerdrPort {
   }
 
   /** The end of a pane's terminal as text; `ansi` keeps the colours (the history view), `lines` is how far back. */
-  async output(id: string, options: { ansi?: boolean; lines?: number } = {}): Promise<HerdrOutput> {
-    const session = this.session;
+  async output(id: string, options: { ansi?: boolean; lines?: number; session?: string } = {}): Promise<HerdrOutput> {
+    const session = options.session ?? this.session;
     return this.readOutput(await this.pane(id, session), session, options);
   }
 
@@ -451,8 +467,8 @@ export class Herdr implements HerdrPort {
     return pane.agent !== null && pane.status === "blocked" ? detectHerdrAsk(await this.readOutput(pane, session)) : null;
   }
 
-  async ask(pane: string): Promise<HerdrAsk | null> {
-    return (await this.currentAsk(pane, this.session))?.view ?? null;
+  async ask(pane: string, session = this.session): Promise<HerdrAsk | null> {
+    return (await this.currentAsk(pane, session))?.view ?? null;
   }
 
   async answer({ pane, title, index }: HerdrAnswer): Promise<HerdrPaneView> {
@@ -470,9 +486,8 @@ export class Herdr implements HerdrPort {
     }
   }
 
-  async chat(pane: string, after: string | null): Promise<HerdrChat> {
+  async chat(pane: string, after: string | null, session = this.session): Promise<HerdrChat> {
     if (!PANE.test(pane)) throw invalid("not a herdr pane id");
-    const session = this.session;
     const parsed = await this.call(["pane", "list", "--workspace", pane.split(":")[0]!], PROBE_MS, undefined, session);
     if (!validate(PaneSessions, parsed)) throw new CommandError("unavailable", "herdr gave a pane list in a shape this Host does not know");
     const listed = parsed.result.panes.find((item) => item.pane_id === pane);
@@ -482,8 +497,8 @@ export class Herdr implements HerdrPort {
   }
 
   /** The repository a pane works in, and the commit its work is measured from: where its worktree was cut, for the main checkout HEAD itself. */
-  private async repository(id: string): Promise<{ cwd: string; branch: string | null; base: string } | null> {
-    const cwd = (await this.pane(id)).cwd;
+  private async repository(id: string, session = this.session): Promise<{ cwd: string; branch: string | null; base: string } | null> {
+    const cwd = (await this.pane(id, session)).cwd;
     if (cwd === null || !existsSync(cwd)) return null;
     if ((await git(["rev-parse", "--show-toplevel"], cwd)).code !== 0) return null;
     const head = await git(["rev-parse", "HEAD"], cwd);
@@ -495,8 +510,8 @@ export class Herdr implements HerdrPort {
     return { cwd, branch: branch === "HEAD" ? null : branch, base: merged !== null && merged.code === 0 && /^[0-9a-f]{7,40}$/.test(merged.out) ? merged.out : head.out };
   }
 
-  async changes(id: string): Promise<HerdrChanges> {
-    const repo = await this.repository(id);
+  async changes(id: string, session = this.session): Promise<HerdrChanges> {
+    const repo = await this.repository(id, session);
     if (repo === null) return { git: false, branch: null, base: null, commits: [], files: [], truncated: false };
     const [numstat, names, untracked, log] = await Promise.all([
       git(["diff", "--numstat", "-M", repo.base], repo.cwd, 2_000_000, "head"),
@@ -533,9 +548,9 @@ export class Herdr implements HerdrPort {
   }
 
   /** One changed file's diff against the same base. Only a path `changes` lists is answered, so a path cannot name anything else on the Mac. */
-  async diff(id: string, path: string): Promise<HerdrDiff> {
-    const repo = await this.repository(id);
-    const listed = repo === null ? undefined : (await this.changes(id)).files.find((file) => file.path === path);
+  async diff(id: string, path: string, session = this.session): Promise<HerdrDiff> {
+    const repo = await this.repository(id, session);
+    const listed = repo === null ? undefined : (await this.changes(id, session)).files.find((file) => file.path === path);
     if (repo === null || listed === undefined) throw notFound(`${path} is not a changed file of herdr pane ${id}`);
     const result = listed.status === "untracked"
       ? await git(["diff", "--no-index", "--no-color", "--", "/dev/null", path], repo.cwd, DIFF_BYTES + 1, "head")
@@ -616,7 +631,7 @@ export class Herdr implements HerdrPort {
    * Opens a workspace in herdr: a git worktree on a new `ghost/` branch when asked and `cwd` is in a repository (a name
    * that is taken gets `-2`, `-3` …), else a plain workspace. herdr names it unless `label` is given.
    */
-  private async openWorkspace(input: { cwd: string; label?: string | undefined; worktree: boolean; branch?: string | undefined; seed: string }, session: string): Promise<{ pane: string; checkout: string; branch: string | null; base: string | null }> {
+  private async openWorkspace(input: { cwd: string; label?: string | undefined; worktree: boolean; branch?: string | undefined; seed: string }, session: string, authorize?: () => void): Promise<{ pane: string; checkout: string; branch: string | null; base: string | null }> {
     if (!isAbsolute(input.cwd) || !existsSync(input.cwd) || !statSync(input.cwd).isDirectory()) throw invalid(`${input.cwd} is not an absolute path of an existing directory`);
     const cwd = realpathSync(input.cwd);
     const label = input.label === undefined ? [] : ["--label", input.label];
@@ -627,6 +642,7 @@ export class Herdr implements HerdrPort {
       for (let attempt = 1; ; attempt++) {
         const branch = `ghost/${wanted}${attempt === 1 ? "" : `-${attempt}`}`;
         try {
+          authorize?.();
           const created = await this.call(["worktree", "create", "--cwd", top.out, "--branch", branch, ...label, "--no-focus"], START_MS, undefined, session);
           if (!validate(Created, created) || created.result.workspace?.worktree === undefined) throw new CommandError("unavailable", "herdr made a workspace this Host cannot read");
           if (created.result.root_pane.terminal_id) this.state.claim(session, created.result.root_pane.terminal_id);
@@ -638,6 +654,7 @@ export class Herdr implements HerdrPort {
         }
       }
     }
+    authorize?.();
     const created = await this.call(["workspace", "create", "--cwd", cwd, ...label, "--no-focus"], START_MS, undefined, session);
     if (!validate(Created, created)) throw new CommandError("unavailable", "herdr made a workspace this Host cannot read");
     if (created.result.root_pane.terminal_id) this.state.claim(session, created.result.root_pane.terminal_id);
@@ -671,13 +688,22 @@ export class Herdr implements HerdrPort {
     }
   }
 
-  async start(input: CodingStart, wait?: HerdrWait): Promise<HerdrRun> {
-    const session = this.session;
+  async start(input: CodingStart, wait?: HerdrWait, prepared?: (opened: HerdrRun) => void, guard?: { session: string; authorize: (stage?: "open" | "launch" | "prompt", pane?: HerdrPaneView) => void }): Promise<HerdrRun> {
+    const session = guard?.session ?? this.session;
     const agent = this.pickAgent(input.agent);
     const first = input.task.trim().split("\n")[0]!;
-    const opened = await this.openWorkspace({ cwd: input.repo, worktree: input.worktree !== false, branch: input.branch, seed: first }, session);
+    guard?.authorize();
+    const opened = await this.openWorkspace({ cwd: input.repo, worktree: input.worktree !== false, branch: input.branch, seed: first }, session, () => guard?.authorize("open"));
     const settled = await this.afterOpen(opened.pane, async () => {
+      const opening = prepared || guard ? await this.pane(opened.pane, session) : null;
+      if (prepared && opening) prepared({ pane: { ...opening, agent }, checkout: opened.checkout, branch: opened.branch, base: opened.base, settled: "unwaited" });
+      guard?.authorize("launch");
       await this.launch(opened.pane, agent, input.branch ?? first, session);
+      if (guard) {
+        const current = await this.agentPane(opened.pane, session);
+        if (!opening?.terminalId || current.terminalId !== opening.terminalId || current.agent !== agent || !["idle", "done"].includes(current.status)) throw conflict("the newly started coding terminal was replaced or is not ready for a prompt");
+        guard.authorize("prompt", current);
+      }
       return this.submit(opened.pane, promptFor(input.task, opened.branch), wait, session);
     });
     return { pane: await this.pane(opened.pane, session), checkout: opened.checkout, branch: opened.branch, base: opened.base, settled };
@@ -764,14 +790,31 @@ export class Herdr implements HerdrPort {
     }
   }
 
-  async prompt(id: string, text: string, wait?: HerdrWait): Promise<HerdrRun> {
-    const pane = await this.agentPane(id);
-    const settled = await this.submit(id, text, wait);
-    const after = await this.agentPane(id);
+  async prompt(id: string, text: string, wait?: HerdrWait, guard?: { session: string; terminalId: string; agent: string; authorize: (pane?: HerdrPaneView) => void }): Promise<HerdrRun> {
+    const session = guard?.session ?? this.session;
+    const pane = await this.agentPane(id, session);
+    if (guard) {
+      if (pane.terminalId !== guard.terminalId || pane.agent !== guard.agent) throw conflict("the coding terminal or agent was replaced; no prompt was sent");
+      if (!["idle", "done"].includes(pane.status)) throw conflict("the coding agent is not ready for another prompt");
+      guard.authorize(pane);
+    }
+    const settled = await this.submit(id, text, wait, session);
+    const after = await this.agentPane(id, session);
     // Only a caller that waits for the work reports on it, and it needs the branch the agent is on.
     const cwd = after.cwd ?? pane.cwd;
     const branch = wait !== undefined && cwd !== null && existsSync(cwd) && (await git(["rev-parse", "--show-toplevel"], cwd)).code === 0 ? (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).out : null;
     return { pane: after, checkout: cwd ?? "", branch, base: null, settled };
+  }
+
+  async interrupt(session: string, id: string, terminalId: string, guard?: { agent: string; authorize: (pane?: HerdrPaneView) => void }): Promise<void> {
+    if (!SESSION.test(session) || !HERDR_TERMINAL.test(terminalId)) throw invalid("not a herdr terminal identity");
+    const pane = await this.pane(id, session);
+    if (pane.terminalId !== terminalId) throw conflict("the coding terminal was replaced; no input was sent");
+    guard?.authorize(pane);
+    if (guard && pane.agent !== guard.agent) throw conflict("the coding agent was replaced; no interrupt was sent");
+    if (pane.agent === null || !["working", "blocked"].includes(pane.status)) return;
+    // One ordered interrupt, never a close or an automatic prompt retry. The reconciler observes whether it stopped.
+    await this.call(["agent", "send-keys", id, "Ctrl+c"], PROBE_MS, undefined, session);
   }
 
   /** The keyboard of a pane's web terminal: the text exactly as typed, then named keys. */

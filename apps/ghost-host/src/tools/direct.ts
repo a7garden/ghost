@@ -6,7 +6,7 @@ import type { Core } from "../core/core.ts";
 import { forbidden, invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
 import { workDetail } from "../core/state.ts";
-import { askOwnerTool, describeWorkLine, errorResult, firstLine, requireAllowed, requireOrigin, workDecideTool, type Scope } from "./shared.ts";
+import { askOwnerTool, describeCodingRuns, describeWorkLine, errorResult, firstLine, requireAllowed, requireOrigin, workDecideTool, type Scope } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
@@ -16,7 +16,7 @@ function isCurrentMain(scope: Scope): boolean {
 }
 
 /** Works created here (their whole tree) plus this Ghost's live Work, one compact line each. The current main Ghost sees the whole team's Work. */
-function visibleWorks(core: Core, scope: Scope): Work[] {
+export function visibleWorks(core: Core, scope: Scope): Work[] {
   const { ledger } = core;
   if (scope.conversation.kind === "wake") {
     const ownerId = ledger.setting<string | null>(`wake:owner:${scope.conversation.id}`, null);
@@ -29,7 +29,7 @@ function visibleWorks(core: Core, scope: Scope): Work[] {
       return root.originConversationId === owner.id;
     });
   }
-  if (isCurrentMain(scope)) return ledger.worksForState();
+  if (scope.conversation.kind === "direct" && isCurrentMain(scope)) return ledger.worksForState();
   const found = new Map<string, Work>();
   const walk = (work: Work) => {
     if (found.has(work.id)) return;
@@ -37,11 +37,8 @@ function visibleWorks(core: Core, scope: Scope): Work[] {
     for (const child of ledger.children(work.id)) walk(child);
   };
   for (const work of ledger.worksForState()) {
-    if (work.parentId === null) {
-      if (work.originConversationId === scope.conversation.id) walk(work);
-    } else if (work.ghostId === scope.ghost.id && work.state !== "done" && work.state !== "failed" && work.state !== "cancelled") {
-      walk(work);
-    }
+    if ((work.parentId === null && work.originConversationId === scope.conversation.id)
+      || (work.ghostId === scope.ghost.id && work.state !== "done" && work.state !== "failed" && work.state !== "cancelled")) walk(work);
   }
   return [...found.values()];
 }
@@ -108,17 +105,20 @@ export function createDirectTools(core: Core): Extension {
       }
     },
   });
-
   const workList = defineTool({
     name: "work_list",
-    description: "List the Work created in this conversation and this Ghost's live Work. The current main Ghost instead sees the whole team's Work, live and recently settled.",
+    description: "List the Work created in this conversation and this Ghost's live Work, with the coding each has running in herdr. The current main Ghost instead sees the whole team's Work, live and recently settled.",
     parameters: Type.Object({}),
     replay: "safe",
     async execute(_args, api) {
       try {
         const scope = requireAllowed(core, api, "work_list");
         const works = visibleWorks(core, scope);
-        return text(works.length === 0 ? "No Work here yet." : works.map((work) => describeWorkLine(core, work)).join("\n"));
+        return text(works.length === 0 ? "No Work here yet." : works.map((work) => {
+          // One word of coding state per line: the runs' words arrive in work_inspect and the delivered report, not here.
+          const coding = [...new Set(core.coding.list(work.id).filter((run) => run.state !== "closed").map((run) => run.state))];
+          return describeWorkLine(core, work) + (coding.length > 0 ? ` — coding: ${coding.join(", ")}` : "");
+        }).join("\n"));
       } catch (error) {
         return errorResult(error);
       }
@@ -317,6 +317,8 @@ function renderDetail(core: Core, work: Work, detail: WorkDetail): string {
     work.acceptance.criteria ? `Done when: ${work.acceptance.criteria}` : "",
     detail.children.length ? `Children:\n${detail.children.map((child) => `  ${describeWorkLine(core, child)}`).join("\n")}` : "",
     detail.artifacts.length ? `Artifacts:\n${detail.artifacts.map((artifact) => `  - ${artifact.name} ${artifact.digest.slice(0, 12)} (${artifact.size} bytes)`).join("\n")}` : "",
+    // Coding state facts only; the agent's own words arrive with the delivered report, never through an inspect another conversation asked for.
+    describeCodingRuns(core.coding.list(work.id)),
     detail.effects.length ? `Effects:\n${detail.effects.map((effect) => `  - ${effect.tool} ${effect.summary} — ${effect.state}`).join("\n")}` : "",
     detail.decisions.length ? `Decisions:\n${detail.decisions.map((decision) => `  - ${decision.kind}: ${decision.title} — ${decision.state}${decision.answer ? `: ${decision.answer}` : ""}`).join("\n")}` : "",
   ];

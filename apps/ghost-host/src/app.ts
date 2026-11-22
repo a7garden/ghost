@@ -178,7 +178,10 @@ export async function openApp(config: Config): Promise<App> {
     const desktop = (openedDesktop = createDesktop(config, { root: config.root }));
     const memory = (openedMemory = new MemoryStore(config.root));
     const herdr = (openedHerdr = config.coding === false ? null : new Herdr(undefined, { root: config.root, log, prefs: () => codingPrefs(core.ledger.setting<unknown>("coding", null)) }));
-    if (herdr) void herdr.recoverControls().catch((error) => log("herdr 터미널 복구 실패", error));
+    if (herdr) {
+      core.coding.attach(herdr);
+      void herdr.recoverControls().catch((error) => log("herdr 터미널 복구 실패", error));
+    }
     const omp = config.coding === false ? null : new OmpInfoProvider();
     const codingWatcher = (openedCodingWatcher = herdr === null ? null : new CodingWatcher(core, herdr));
     const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, herdr, reach: createReach(config), browser, vault, desktop, mail, toss: createToss(), mcp });

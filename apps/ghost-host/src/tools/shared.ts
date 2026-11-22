@@ -1,4 +1,4 @@
-import { ContractError, matchToolPattern, matchesToolPatterns, type BuiltinGhostTool, type Conversation, type Ghost, type Work } from "@ghost/contract";
+import { type CodingRun, ContractError, matchToolPattern, matchesToolPatterns, type BuiltinGhostTool, type Conversation, type Ghost, type Work } from "@ghost/contract";
 import { Type } from "typebox";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
@@ -126,17 +126,17 @@ export function requireAllowed(core: Core, api: Pick<ToolExecutionApi, "conversa
   } else if (!kinds.includes(kind)) throw forbidden(`${name} does not run in a ${scope.conversation.kind} conversation`);
   if (!matchesToolPatterns(scope.ghost.tools, name)) throw forbidden(`${name} is not enabled for ${scope.ghost.name}; if the goal needs it, ask once with capability_request (tools: ["${name}"]) and end your turn`);
   if (!workAllowsTool(core, scope.work, name)) throw forbidden(`${name} is outside this Work's activity rule, which only the owner changes; do the step with another tool or report it in complete`);
-  if (scope.work?.execution?.kind === "host" && ["read", "write", "edit", "bash", "publish_artifact", "code_run"].includes(name) && !scope.ghost.hostExecution) throw forbidden("direct PC execution was revoked by the owner");
+  if (scope.work?.execution?.kind === "host" && ["read", "write", "edit", "bash", "publish_artifact", "code_agents", "code_run"].includes(name) && !scope.ghost.hostExecution) throw forbidden("direct PC execution was revoked by the owner");
   if (scope.work && scope.ghost.state !== "active") throw forbidden("the executing Ghost is no longer active");
   if (scope.work && !["running", "waiting"].includes(scope.work.state)) throw forbidden(`Work is ${scope.work.state}`);
   if (scope.work && scope.work.deadlineAt !== null && scope.work.deadlineAt <= Date.now()) throw forbidden("Work deadline has passed");
   if (scope.work?.activityId) core.activities.authorize(scope.work.id, name);
-  const externalRead = ["web_search", "web_read", "reach", "browser_open", "browser_snapshot", "browser_screenshot", "browser_read", "mail_search", "mail_read"].includes(name);
-  const privateRead = name.startsWith("host_") || name.startsWith("vault_") || name.startsWith("mail_") || name.startsWith("desktop_") || ["toss_read", "browser_fill_secret", "browser_fill_card"].includes(name);
+  const externalRead = ["web_search", "web_read", "reach", "browser_open", "browser_snapshot", "browser_screenshot", "browser_read", "mail_search", "mail_read", "code_agents"].includes(name);
+  const privateRead = name.startsWith("host_") || name.startsWith("vault_") || name.startsWith("mail_") || name.startsWith("desktop_") || ["toss_read", "code_agents", "browser_fill_secret", "browser_fill_card"].includes(name);
   if (externalRead || privateRead) markPolicyRead(core, scope.conversation.id, { untrustedInput: externalRead || name.startsWith("desktop_"), privateData: privateRead });
   if (!name.startsWith("browser_") && !name.startsWith("mail_") && (externalRead || ["host_status", "host_services", "host_disk_scan", "host_disk_usage", "host_list", "host_read", "host_nodes", "host_message_codes", "vault_list", "desktop_apps", "desktop_snapshot", "desktop_screenshot", "toss_read"].includes(name))) {
     if (!api.callId || api.taskId === undefined) throw forbidden("Read authorization requires its Host task identity and call id");
-    policyRead(core, scope.conversation.id, { tool: name, target: { kind: name.startsWith("web_") || name === "reach" ? "browser_origin" : name.startsWith("host_") || name.startsWith("desktop_") ? "mac" : name === "toss_read" ? "connection" : "host", id: null }, access: "read", reversible: true, external: externalRead, amount: null }, { taskId: api.taskId, callId: api.callId });
+    policyRead(core, scope.conversation.id, { tool: name, target: { kind: name.startsWith("web_") || name === "reach" ? "browser_origin" : name.startsWith("host_") || name.startsWith("desktop_") || name === "code_agents" ? "mac" : name === "toss_read" ? "connection" : "host", id: null }, access: "read", reversible: true, external: externalRead, amount: null }, { taskId: api.taskId, callId: api.callId });
   }
   return scope;
 }
@@ -218,6 +218,15 @@ export function describeWorkLine(core: Core, work: Work): string {
   const owner = work.parentId === null ? "" : ` [child of ${work.parentId}]`;
   const deadline = work.deadlineAt === null ? "" : ` due ${new Date(work.deadlineAt).toISOString()}`;
   return `- ${work.title} (${work.id}) — ${work.state}${owner} · ${assignee}${deadline}`;
+}
+
+/**
+ * One line per coding run a Work has in herdr: state facts only (agent, state, turn, pane, branch), never the
+ * prompt, the report or the terminal text — those reach the conversation the run reports to, not an inspect.
+ */
+export function describeCodingRuns(runs: readonly CodingRun[]): string {
+  if (runs.length === 0) return "";
+  return `Coding runs:\n${runs.map((run) => `  - ${run.agent ?? "agent"} ${run.state}, turn ${run.turn} on ${run.pane ?? "no pane yet"}${run.branch ? `, branch ${run.branch}` : ""}${run.stopPending ? ", stop pending" : ""}`).join("\n")}`;
 }
 
 /**
