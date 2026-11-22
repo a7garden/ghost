@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronDown, Plus, Search, X } from 'lucide-react';
 import type { ModelRef } from '@ghost/contract';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { Button, Popover, PopoverContent, PopoverTrigger } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { usableProviders } from '../pets/ModelPicker';
@@ -60,9 +60,9 @@ export function FallbackSteps({ fallbacks, primary, pending, onAction }: {
           onChange={model => model && onAction({ kind: 'replace', index, model })}/>
       </div>
       <div className="model-route__actions" role="group" aria-label={`대체 ${index + 1} 순서와 삭제`}>
-        <button type="button" aria-label={`${index + 1}번 위로`} title="앞으로" disabled={pending || index === 0} onClick={() => onAction({ kind: 'move', index, delta: -1 })}><ArrowUp aria-hidden="true"/></button>
-        <button type="button" aria-label={`${index + 1}번 아래로`} title="뒤로" disabled={pending || index === fallbacks.length - 1} onClick={() => onAction({ kind: 'move', index, delta: 1 })}><ArrowDown aria-hidden="true"/></button>
-        <button type="button" aria-label={`${index + 1}번 대체 모델 지우기`} title="삭제" disabled={pending} onClick={() => onAction({ kind: 'remove', index })}><X aria-hidden="true"/></button>
+        <Button type="button" variant="ghost" size="icon" aria-label={`${index + 1}번 위로`} title="앞으로" disabled={pending || index === 0} onClick={() => onAction({ kind: 'move', index, delta: -1 })}><ArrowUp aria-hidden="true"/></Button>
+        <Button type="button" variant="ghost" size="icon" aria-label={`${index + 1}번 아래로`} title="뒤로" disabled={pending || index === fallbacks.length - 1} onClick={() => onAction({ kind: 'move', index, delta: 1 })}><ArrowDown aria-hidden="true"/></Button>
+        <Button type="button" variant="ghost" size="icon" aria-label={`${index + 1}번 대체 모델 지우기`} title="삭제" disabled={pending} onClick={() => onAction({ kind: 'remove', index })}><X aria-hidden="true"/></Button>
       </div>
     </li>)}
     {fallbacks.length < MAX_FALLBACKS && <li className="model-route__step" data-add>

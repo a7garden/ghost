@@ -181,10 +181,10 @@ export function GhostMemory({ ghost }: { ghost: Ghost }) {
       label={<span className="memory-file__path">{file.path}</span>}
       description={<>{file.path === '/owner.md' ? '소유자 프로필 · ' : ''}v{file.revision} · {relativeTime(file.updatedAt, now)} 수정</>}>
       <span className="memory-file__actions">
-        <button type="button" aria-label={`${file.path} 버전 기록`} title="버전 기록" onClick={() => setRevisionsFor(file.path)}><History aria-hidden="true"/></button>
-        {editable && <button type="button" aria-label={`${file.path} 편집`} title="편집"
-          onClick={() => openDraft({ path: file.path, content: file.content, original: file.content, hash: file.hash, isNew: false })}><Pencil aria-hidden="true"/></button>}
-        {editable && <button type="button" aria-label={`${file.path} 삭제`} title="삭제" data-danger onClick={() => setConfirming(file)}><Trash2 aria-hidden="true"/></button>}
+        <Button type="button" variant="ghost" size="icon" aria-label={`${file.path} 버전 기록`} title="버전 기록" onClick={() => setRevisionsFor(file.path)}><History aria-hidden="true"/></Button>
+        {editable && <Button type="button" variant="ghost" size="icon" aria-label={`${file.path} 편집`} title="편집"
+          onClick={() => openDraft({ path: file.path, content: file.content, original: file.content, hash: file.hash, isNew: false })}><Pencil aria-hidden="true"/></Button>}
+        {editable && <Button type="button" variant="ghost" size="icon" className="hover:text-red" aria-label={`${file.path} 삭제`} title="삭제" onClick={() => setConfirming(file)}><Trash2 aria-hidden="true"/></Button>}
       </span>
     </SettingsRow>)}
 
