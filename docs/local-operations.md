@@ -65,6 +65,13 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
 
+### 음성 통화(앱 안), 2.27.0 운영 반영 — 2026-11-23
+
+- 내용: Ghost에게 거는 앱 통화. 실시간(OpenAI GPT-Live)과 로컬(Whisper → Ghost → TTS) 엔진, 통화 화면, 설정 › 음성. 설계와 구조는 [전화](voice-calls.md). 전화망 발신은 보류.
+- 검사: Host 1549 통과(전체 실행에서 `update.test.ts`와 `browser.test.ts`의 시간 제한 시험이 부하 때문에 흔들렸고 각각 단독 실행에서 통과), UI 429 통과, 타입 검사 통과. 임시 루트의 격리 Host와 가짜 음성·채팅 서버로 로컬 엔진 전체를 실제 브라우저(가짜 마이크)에서 확인: 통화 시작 → 발화 인식 → `message.send`(callId) → 답 → 문장별 음성 요청 → 최소화 → 끊기(`ended`, 36초), 설정 › 음성. 이 과정에서 UI의 requestId 형식 결함(UUID 아님)을 찾아 고쳤다.
+- 설치: Release `v2.27.0`을 Host 업데이트 API로 설치했다(설치 전 busy 대화 0, 운영 프로세스 `releases/2.26.2-f8e9d94`, 포트 62062, 상태 루트 일치 확인). 설치 뒤 프로세스는 `releases/2.27.0-7ba021f`, health 2.27.0, runtime ready, Ghost 31·대화 620·일 201 보존, 운영 UI의 `메인` 대화에 전화 버튼 표시. iPhone `Ghost.ipa` 빌드 15 동봉(앱 안 「앱 업데이트」로 설치해야 마이크 권한이 생긴다).
+- 아직 확인하지 못한 것: ①실시간 엔진: 운영에 `openai` 공급자의 API 키가 없다(`codex`는 OAuth라 Live API를 못 쓴다). 키를 등록하면 통화가 열린다. 실제 OpenAI 세션과 브라우저 WebRTC 클라이언트는 호출해 보지 못했고 가짜 fetch/WebSocket 시험만 있다. ②로컬 엔진: 운영에서는 `ghost-voice-server`(62076)와 Dyno 음성(7730, 현재 `--voice-port 0`)이 꺼져 있어 `call.start`가 그 사실을 알린다. ③실제 마이크·스피커·에코, iPhone, 설치된 Mac 앱 창(운영 UI는 브라우저로 확인).
+
 ### 코딩 에이전트 연결: `code_agents`·`code_run`, 2.13.0·2.13.1·2.14.0 운영 반영 — 2026-11-21
 
 - 배경: 소유자가 본 글(https://x.com/0ooooo0/status/2123401633711423630)의 구도, 곧 비서 에이전트와 코딩 에이전트를 나누는 방식을 Ghost에 기본 기능으로 넣는다. 스킬과 `bash`로 omp를 부르던 첫 안(2.12.4 직후의 `omp-coding` 스킬)은 이 도구로 대체되어 지웠다. 설계는 [구조](architecture.md)의 「Coding agents」.
