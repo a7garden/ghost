@@ -47,6 +47,18 @@ table(
 );
 
 table(
+  "Owner decisions by week",
+  db.query(`
+    SELECT strftime('%Y-W%W', created_at / 1000, 'unixepoch') AS week,
+           kind,
+           state,
+           COUNT(*) AS n
+    FROM decisions
+    GROUP BY 1, 2, 3
+    ORDER BY 1, 2, 3`).all() as Record<string, unknown>[],
+);
+
+table(
   "Child Work settled",
   db.query(`SELECT state, COUNT(*) AS n FROM works WHERE parent_id IS NOT NULL GROUP BY 1`).all() as Record<string, unknown>[],
 );
