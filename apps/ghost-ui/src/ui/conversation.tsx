@@ -11,8 +11,6 @@ export interface ConversationProps {
   transcriptLabel: string
   children: React.ReactNode
   header?: React.ReactNode
-  /** Floats over the top of the transcript (identity, threads); the transcript scrolls beneath it. */
-  overlay?: React.ReactNode
   composer: React.ReactNode
   footer?: React.ReactNode
   className?: string
@@ -46,7 +44,6 @@ export function Conversation({
   transcriptLabel,
   children,
   header,
-  overlay,
   composer,
   footer,
   className,
@@ -145,8 +142,7 @@ export function Conversation({
         </header>
       )}
 
-      <div className="ghost-conversation__transcript-frame" data-overlay={overlay != null || undefined}>
-        {overlay != null && <div className="ghost-conversation__overlay">{overlay}</div>}
+      <div className="ghost-conversation__transcript-frame">
         <div
           ref={viewportRef}
           className="ghost-conversation__transcript"

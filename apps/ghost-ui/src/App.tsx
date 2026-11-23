@@ -30,6 +30,7 @@ import { InboxView } from './features/Inbox';
 import { HostView } from './features/HostView';
 import { CodingSettings } from './features/CodingSetup';
 import { CodingPage } from './features/Coding';
+import { startsCodingEntry } from './features/CodingModel';
 import { herdrPanePath } from './features/herdrDisplay';
 import { useHerdrAttention } from './features/herdrAttention';
 import { GhostSettings } from './features/GhostSettings';
@@ -50,7 +51,7 @@ import { initializeDesktopCompanion, isDesktopShell } from './host/desktop';
 import DesktopAvatarSettings from './features/DesktopAvatarSettings';
 import { onShellEvent, ready, shell, shellCall, type ShellEvent } from './host/shell';
 import { useVisibleViewport } from './host/viewport';
-import { notificationRoute } from './features/notificationRoute';
+import { codingNotificationAddress, notificationRoute } from './features/notificationRoute';
 import { useCompact } from './ui/adaptive';
 import { SlotSettings } from './features/SlotSettings';
 import { LimitSettings } from './features/LimitSettings';
@@ -80,9 +81,13 @@ function Shell() {
   const update = useUpdate(client);
   const { state, connection, offlineSince } = useHostState(store);
   const { preferences, resolvedTheme, updatePreferences, storageError } = usePreferences();
+  const ghosts = state?.ghosts ?? [];
+  const defaultGhost = ghosts.find(ghost => ghost.isDefault);
+  const mainChatPath = defaultGhost ? `/ghosts/${encodeURIComponent(defaultGhost.id)}` : null;
   useVisibleViewport();
   const compact = useCompact();
   const [route, setRoute] = useState(currentRoute);
+  const [codingEntry, setCodingEntry] = useState({ id: 0, restore: true });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [desktopError, setDesktopError] = useState('');
   // The shell owns whether the desktop Ghost is shown; mirror it into the shared preference once.
@@ -91,7 +96,18 @@ function Shell() {
   }, []);
   // The main region owns scrolling; a new destination starts at its top.
   const resetScroll = () => { document.getElementById('main-content')?.scrollTo(0, 0); };
-  useEffect(() => { const change = () => setRoute(currentRoute()); window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
+  useEffect(() => {
+    const change = (event: HashChangeEvent) => {
+      const next = currentRoute();
+      const previous = new URL(event.oldURL).hash.slice(1) || '/';
+      if (new URL(event.newURL).hash === location.hash && startsCodingEntry(previous, next)) {
+        setCodingEntry(entry => ({ id: entry.id + 1, restore: true }));
+      }
+      setRoute(next);
+    };
+    window.addEventListener('hashchange', change);
+    return () => window.removeEventListener('hashchange', change);
+  }, []);
   const historyNav = useHistoryNav();
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -114,13 +130,22 @@ function Shell() {
     history.replaceState(history.state, '', `#${next}`);
     setRoute(next);
   };
-  const navigate = (path: string) => { resetScroll(); if (currentRoute() !== path) historyNav.push(`#${path}`); setRoute(path); };
+  const navigate = (path: string, codingRosterOnly = false) => {
+    const next = path === '/conversations' ? mainChatPath ?? path : path;
+    const from = currentRoute();
+    if (codingRosterOnly || startsCodingEntry(from, next)) setCodingEntry(entry => ({ id: entry.id + 1, restore: !codingRosterOnly }));
+    resetScroll();
+    if (from !== next) historyNav.push(`#${next}`);
+    setRoute(next);
+  };
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
   const shellEvents = useRef<(event: ShellEvent) => void>(() => {});
   useEffect(() => {
     if (!shell) return;
     const queued = new Set<string>();
+    const active = new AbortController();
+    let lastTap = 0;
     const drain = () => {
       const current = store.get().state;
       if (!current) return;
@@ -129,8 +154,18 @@ function Shell() {
         if (!item) continue;
         queued.delete(id);
         if (!item.readAt) void client.send({ type: 'notification.read', notificationIds: [id] }).catch(() => {});
-        const destination = notificationRoute(item, current);
-        if (destination) navigateRef.current(destination);
+        const tap = ++lastTap;
+        if (codingNotificationAddress(id)) {
+          const from = currentRoute();
+          void client.herdr(active.signal).catch(() => null).then(view => {
+            if (active.signal.aborted || tap !== lastTap || currentRoute() !== from) return;
+            const destination = view ? notificationRoute(item, current, view) ?? '/coding' : '/coding';
+            navigateRef.current(destination, destination === '/coding');
+          });
+        } else {
+          const destination = notificationRoute(item, current);
+          if (destination) navigateRef.current(destination);
+        }
       }
     };
     // Coming back keeps the screen: the stream reopens from the current seq.
@@ -140,7 +175,7 @@ function Shell() {
     };
     const unsubscribe = onShellEvent(event => shellEvents.current(event));
     const unsubscribeStore = store.subscribe(drain);
-    return () => { unsubscribe(); unsubscribeStore(); };
+    return () => { active.abort(); unsubscribe(); unsubscribeStore(); };
   }, [store, client]);
   // The shell lifts its loading view on `ready`: send it after the first frame that draws real
   // content (the cached or fresh snapshot) or the failure to get any. The timer covers a
@@ -173,8 +208,13 @@ function Shell() {
     }
   }, [compact, section]);
 
-  const ghosts = state?.ghosts ?? [];
-  const defaultGhost = ghosts.find(ghost => ghost.isDefault) ?? null;
+  // A bookmarked 대화 entry resolves in place once the snapshot identifies the main Ghost.
+  useEffect(() => {
+    if (section !== 'conversations' || !mainChatPath || currentRoute() !== route) return;
+    history.replaceState(history.state, '', `#${mainChatPath}`);
+    setRoute(mainChatPath);
+  }, [mainChatPath, route, section]);
+
   const attentionCount = state ? pendingDecisions(state).length : 0;
   const status = hostStatus(connection, Boolean(state), offlineSince, Date.now());
 
@@ -281,7 +321,7 @@ function Shell() {
           hideDock={codingDetail || section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
           location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
             compactBack={section === 'settings' && params.has('tab') ? '/settings'
-              : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? '/conversations'
+              : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? (mainChatPath ? '/workspace' : '/conversations')
               : section === 'workspace' ? '/conversations'
               : section === 'goals' || section === 'mail' ? '/workspace'
               : section === 'work' && path.split('/')[2] ? '/work'
@@ -303,12 +343,14 @@ function Shell() {
           {runtimeDown && state && section !== 'home' && section !== 'coding' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={status.state !== 'offline'}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
             {section === 'home' && <Overview state={state} navigate={navigate} codingSession={codingAttention.session}/>}
-            {section === 'conversations' && <Conversations ghosts={ghosts} openGhost={switchGhost} openWorkspace={() => navigate('/workspace')}/>}
+            {section === 'conversations' && !mainChatPath && <Conversations ghosts={ghosts} openGhost={switchGhost} openWorkspace={() => navigate('/workspace')}/>}
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')} codingSession={codingAttention.session}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
-            {section === 'coding' && <CodingPage scopes={state.scopes} herdrPane={params.get('herdr')} herdrSession={params.get('herdrSession')} creating={params.get('new') === '1'} compact={compact}
+            {section === 'coding' && <CodingPage key={codingEntry.id} restoreLastPane={codingEntry.restore}
+              scopes={state.scopes} herdrPane={params.get('herdr')} herdrSession={params.get('herdrSession')} creating={params.get('new') === '1'} compact={compact}
               onRoster={codingAttention.reportRoster}
+              onRestore={id => closeCodingForm(herdrPanePath(id))}
               onCancel={() => closeCodingForm('/coding')} onOpen={id => {
                 if (currentRoute() !== route) return;
                 if (params.get('new') === '1') closeCodingForm(herdrPanePath(id));

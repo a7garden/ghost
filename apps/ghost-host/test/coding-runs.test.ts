@@ -17,7 +17,7 @@ const codingInput = { repo: REPO, task: "Implement the requested change" };
 
 class HerdrFixture implements Pick<HerdrPort, "session" | "overview" | "start" | "prompt" | "chat" | "changes" | "ask" | "output" | "interrupt" | "close"> {
   session = "owner";
-  pane: HerdrPaneView & { terminalId: string; agent: string } = {
+  pane: HerdrPaneView & { terminalId: string } = {
     id: "w1:p1", terminalId: "terminal-1", workspaceId: "w1", tabId: "w1:t1", workspace: "repo", tab: "agent", agent: "omp",
     status: "idle", cwd: null, title: "coding agent", focused: false, owned: true, completionSeq: 4, stateChangeSeq: 8, agentSessionId: "agent-session-1",
   };
@@ -85,7 +85,7 @@ class HerdrFixture implements Pick<HerdrPort, "session" | "overview" | "start" |
     expect(session).toBe("owner");
     expect(pane).toBe(this.pane.id);
     expect(terminalId).toBe(this.pane.terminalId);
-    expect(guard?.agent).toBe(this.pane.agent);
+    expect(guard?.agent).toBe(this.pane.agent ?? undefined);
     guard?.authorize({ ...this.pane });
     this.interrupts.push(terminalId);
     if (this.idleOnInterrupt) this.state("idle");
@@ -481,6 +481,12 @@ test("owner pane notifications still work, but a managed transition is not notif
   const watcher = new CodingWatcher(h.core, h.herdr.port, { clock: { now: () => 120_000, repeat: () => () => {} } });
   h.herdr.statusOnAck = "working";
   const run = await h.core.coding.start(work.id, "first", codingInput);
+  await watcher.poll();
+  const managedPane = h.herdr.pane;
+  h.herdr.pane = { ...managedPane, agent: null, status: "unknown" };
+  await watcher.poll();
+  expect(h.ledger.notificationsForState().filter(({ id }) => id.startsWith("coding:"))).toBeEmpty();
+  h.herdr.pane = managedPane;
   await watcher.poll();
   h.herdr.state("done", true);
   await h.core.coding.poll();

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Columns2, GitBranch, MoreHorizontal, Pencil, Plus, Rows2, SlidersHorizontal, SquareTerminal, X } from 'lucide-react';
+import { Columns2, MoreHorizontal, Pencil, Plus, Rows2, SlidersHorizontal, SquareTerminal, X } from 'lucide-react';
 import type { HerdrPaneView, HerdrTabView, HerdrTarget, HerdrWorkspaceView } from '@ghost/contract';
 import { Button, Popover, PopoverContent, PopoverTrigger } from '../ui';
 import { HerdrState, herdrPanePath } from './herdrDisplay';
@@ -76,10 +76,9 @@ function TabRows({ tab, selected, onAction }: { tab: HerdrTabView; selected: str
       const paneNode: HerdrNode = { id: pane.id, label: pane.title, target: 'pane', cwd: pane.cwd };
       return <li key={pane.id} className="herdr-pane-row" data-selected={pane.id === selected || undefined}>
         <a href={`#${herdrPanePath(pane.id)}`} aria-current={selected === pane.id ? 'page' : undefined}>
+          {pane.agent ? <HerdrState status={pane.status} label={false}/> : <SquareTerminal size={14} aria-hidden="true"/>}
           <strong className="coding-row-title">{pane.title}</strong>
-          {pane.agent && <HerdrState status={pane.status}/>}
-          {pane.agent ? <span className="coding-row-meta">{pane.agent}</span>
-            : <code className="coding-row-meta" title={pane.cwd ?? undefined}>{pane.cwd || '셸'}</code>}
+          {!pane.agent && <span className="coding-row-meta">셸</span>}
         </a>
         <NodeActions node={paneNode} items={herdrNodeActions(paneNode, { shell: pane.agent === null })} onAction={onAction}/>
       </li>;
@@ -92,13 +91,10 @@ export function HerdrRoster({ workspaces, selected, onAction }: { workspaces: re
     const cwd = workspace.worktree?.path ?? workspace.tabs[0]?.panes[0]?.cwd;
     const node: HerdrNode = { id: workspace.id, label: workspace.label, target: 'workspace', cwd };
     return <section key={workspace.id} className="coding-roster-group" aria-label={`스페이스 · ${workspace.label}`}>
-      <div className="herdr-node-head">
+      <div className="herdr-node-head" title={workspace.worktree?.branch ?? undefined}>
         <h2>{workspace.label}</h2>
         <HerdrState status={workspace.status}/>
         <NodeActions node={node} items={herdrNodeActions(node)} onAction={onAction}/>
-        {workspace.worktree && <span className="herdr-worktree" title={workspace.worktree.path}><GitBranch aria-hidden="true"/>
-          <code>{workspace.worktree.branch || workspace.worktree.path}</code>
-        </span>}
       </div>
       {workspace.tabs.map(tab => <TabRows key={tab.id} tab={tab} selected={selected} onAction={onAction}/>)}
     </section>;

@@ -2,9 +2,9 @@ import type { HerdrChat, HerdrChatItem, HerdrChoiceTone, HerdrPaneView, HerdrWor
 
 export type Activity = { status: HerdrPaneView['status']; changedAt: number; openedAt: number };
 export type ActivityLog = Readonly<Record<string, Activity>>;
-export type AgentGroup = 'blocked' | 'working' | 'done' | 'idle';
-export const agentGroups: readonly AgentGroup[] = ['blocked', 'working', 'done', 'idle'];
-export const agentGroupName: Record<AgentGroup, string> = { blocked: '입력 필요', working: '작업 중', done: '완료 (읽지 않음)', idle: '대기' };
+export type AgentGroup = 'blocked' | 'working' | 'done' | 'idle' | 'shell';
+export const agentGroups: readonly AgentGroup[] = ['blocked', 'working', 'done', 'idle', 'shell'];
+export const agentGroupName: Record<AgentGroup, string> = { blocked: '입력 필요', working: '작업 중', done: '완료 (읽지 않음)', idle: '대기', shell: '셸' };
 
 export function readCodingValue(key: string): string | null {
   try { return localStorage.getItem(`ghost.coding.${key}`); }
@@ -22,7 +22,7 @@ export function trackActivity(previous: ActivityLog, workspaces: readonly HerdrW
   const next: Record<string, Activity> = {};
   let changed = false;
   for (const workspace of workspaces) for (const tab of workspace.tabs) for (const pane of tab.panes) {
-    if (!pane.agent) continue;
+    if (!pane.agent && !pane.cwd) continue;
     const old = previous[pane.id];
     const newStatus = old?.status !== pane.status;
     const changedAt = newStatus ? now : old.changedAt;
@@ -38,21 +38,13 @@ export function isUnread(pane: HerdrPaneView, activity: Activity | undefined, op
   return pane.status === 'done' && pane.id !== open && (!activity || activity.status !== 'done' || activity.openedAt < activity.changedAt);
 }
 
-export function paneLocation(pane: HerdrPaneView, workspace?: HerdrWorkspaceView) {
-  const directory = pane.cwd?.split('/').filter(Boolean).at(-1);
-  const branch = workspace?.worktree?.branch;
-  const tail = branch || directory;
-  return { tail: tail === pane.workspace ? undefined : tail, branch };
-}
-
 export function groupAgents(workspaces: readonly HerdrWorkspaceView[], log: ActivityLog, open: string | null) {
-  const groups: Record<AgentGroup, { pane: HerdrPaneView; location: string; changedAt: number }[]> = { blocked: [], working: [], done: [], idle: [] };
+  const groups: Record<AgentGroup, { pane: HerdrPaneView; changedAt: number }[]> = { blocked: [], working: [], done: [], idle: [], shell: [] };
   for (const workspace of workspaces) for (const tab of workspace.tabs) for (const pane of tab.panes) {
-    if (!pane.agent) continue;
+    if (!pane.agent && !pane.cwd) continue;
     const activity = log[pane.id];
-    const group = pane.status === 'working' || pane.status === 'blocked' ? pane.status : isUnread(pane, activity, open) ? 'done' : 'idle';
-    const { tail } = paneLocation(pane, workspace);
-    groups[group].push({ pane, location: tail ? `${pane.workspace} · ${tail}` : pane.workspace, changedAt: activity?.changedAt ?? 0 });
+    const group = !pane.agent ? 'shell' : pane.status === 'working' || pane.status === 'blocked' ? pane.status : isUnread(pane, activity, open) ? 'done' : 'idle';
+    groups[group].push({ pane, changedAt: activity?.changedAt ?? 0 });
   }
   for (const group of agentGroups) groups[group].sort((a, b) => b.changedAt - a.changedAt);
   return groups;

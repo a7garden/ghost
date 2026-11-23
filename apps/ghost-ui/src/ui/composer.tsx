@@ -17,6 +17,9 @@ export interface ComposerProps {
   inputId?: string
   disabled?: boolean
   pending?: boolean
+  /** The caller has sendable content outside the text field, such as a ready attachment. */
+  canSubmitEmpty?: boolean
+  keepInputEnabledWhilePending?: boolean
   /** The addressed Ghost is generating: the surface carries a travelling signal edge. */
   running?: boolean
   /** Above the text: addressing and mode. */
@@ -55,6 +58,8 @@ export function Composer({
   inputId,
   disabled = false,
   pending = false,
+  canSubmitEmpty = false,
+  keepInputEnabledWhilePending = false,
   running = false,
   header,
   tray,
@@ -74,7 +79,8 @@ export function Composer({
   const generatedId = React.useId()
   const resolvedInputId = inputId ?? generatedId
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
-  const canSubmit = value.trim().length > 0 && !disabled && !pending
+  const trimmedValue = value.trim()
+  const canSubmit = (trimmedValue.length > 0 || canSubmitEmpty) && !disabled && !pending
 
   const setInputRef = React.useCallback(
     (node: HTMLTextAreaElement | null) => {
@@ -111,8 +117,7 @@ export function Composer({
   }, [resize])
 
   const submit = () => {
-    const trimmedValue = value.trim()
-    if (!trimmedValue || disabled || pending) return
+    if (!canSubmit) return
     haptic()
     onSubmit(trimmedValue)
   }
@@ -159,7 +164,7 @@ export function Composer({
           } : undefined}
           placeholder={placeholder}
           rows={1}
-          disabled={disabled || pending}
+          disabled={disabled || (pending && !keepInputEnabledWhilePending)}
           aria-describedby={describedBy}
           {...inputAria}
           className="ghost-composer__textarea"
@@ -171,7 +176,7 @@ export function Composer({
           <div className="ghost-composer__footer-actions">
             {trailing}
             <Button type="button" size="icon" aria-label={submitLabel} title={submitLabel} disabled={!canSubmit} onClick={submit}
-              className="size-[34px] rounded-pill disabled:opacity-100 disabled:bg-hover-2 disabled:text-ink-3">
+              className="ghost-composer__send size-[var(--composer-action-size,34px)] rounded-[var(--composer-action-radius,var(--radius-pill))] disabled:opacity-100 disabled:bg-hover-2 disabled:text-ink-3">
               <ArrowUp aria-hidden="true" />
             </Button>
           </div>

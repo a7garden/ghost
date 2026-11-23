@@ -106,9 +106,11 @@ const HISTORY_BYTES = 512 * 1024;
 const DIFF_BYTES = 200 * 1024;
 const MAX_FILES = 300;
 const ENV_KEPT = ["HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR"];
-const NO_PREFS: CodingPrefs = { session: null, agent: null, notify: "blocked" };
+const NO_PREFS: CodingPrefs = { session: null, agent: null, notify: "all" };
 
 const AGENT_IDS: readonly unknown[] = CODING_AGENTS.map((agent) => agent.id);
+const IMAGE_PATH = /\.(?:png|jpe?g|gif|webp)$/i;
+const paste = (text: string) => `\x1b[200~${text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "")}\x1b[201~`;
 
 /**
  * The owner's saved choice. A setting written before coding became herdr carries `default` (the agent `code_run`
@@ -120,7 +122,7 @@ export function codingPrefs(saved: unknown): CodingPrefs {
   return {
     session: typeof value.session === "string" && SESSION.test(value.session) ? value.session : null,
     agent: AGENT_IDS.includes(agent) ? (agent as CodingAgentId) : null,
-    notify: value.notify === "off" || value.notify === "all" ? value.notify : "blocked",
+    notify: value.notify === "off" || value.notify === "blocked" ? value.notify : NO_PREFS.notify,
   };
 }
 
@@ -262,6 +264,7 @@ export class Herdr implements HerdrPort {
   private readonly transcripts: HerdrChatReader;
   private readonly commandCatalog: HerdrCommandsProvider;
   private readonly answering = new Set<string>();
+  private readonly prompting = new Set<string>();
   private readonly state: HerdrState;
   private readonly controls: ControlLeases;
 
@@ -799,34 +802,150 @@ export class Herdr implements HerdrPort {
     }
   }
 
-  async prompt(id: string, text: string, wait?: HerdrWait, guard?: { session: string; terminalId: string; agent: string; authorize: (pane?: HerdrPaneView) => void }, delivery?: HerdrDelivery): Promise<HerdrRun> {
+  private async claudeScreen(id: string, session: string, source: "visible" | "recent-unwrapped"): Promise<string> {
+    const read = await this.run(["--session", session, "pane", "read", id, "--source", source, "--lines", "100"]);
+    if (read.code !== 0) {
+      const why = Herdr.reason(read);
+      throw failure(why.code, why.message);
+    }
+    return terminalText(read.out, 100);
+  }
+
+  /** Claude loads pasted images asynchronously. Count markers in its current input, not old turns. */
+  private async claudeImages(id: string, session: string): Promise<number> {
+    const lines = (await this.claudeScreen(id, session, "visible")).split("\n");
+    const start = lines.findLastIndex((line) => /^\s*❯/.test(line));
+    if (start < 0) return 0;
+    let count = 0;
+    for (let i = start; i < lines.length && !/^─{10}/.test(lines[i]!); i++) {
+      for (const _ of lines[i]!.matchAll(/\[Image #\d+\]/g)) count++;
+    }
+    return count;
+  }
+
+  private async switchClaudeModel(pane: HerdrPaneView, text: string, session: string): Promise<void> {
+    const id = pane.id;
+    const before = await this.claudeScreen(id, session, "recent-unwrapped");
+    const [, kind, value] = pane.agentSessionId === undefined ? [] : JSON.parse(pane.agentSessionId) as string[];
+    const ref = kind && value ? { agent: "claude", kind, value } : null;
+    const since = Date.now();
+    await this.submit(id, text, undefined, session);
+    // The command is local, so herdr sees no working/done cycle. Claude can also ask whether
+    // to re-read a cached conversation using the newly selected model.
+    const deadline = performance.now() + PROBE_MS;
+    const command = text.trim();
+    const selector = command.slice("/model".length).trim();
+    let confirmed = false;
+    do {
+      const screen = await this.claudeScreen(id, session, "recent-unwrapped");
+      const lines = screen.split("\n");
+      const prompt = lines.findLastIndex((line) => /^\s*❯/.test(line));
+      if (prompt >= 0) {
+        const input = lines[prompt]!.trim().slice(1).trim();
+        if (screen !== before && !confirmed && /^1\. Yes, switch to \S/.test(input) && lines[prompt + 1]?.trim() === "2. No, go back"
+            && lines.slice(Math.max(0, prompt - 7), prompt).some(line => line.trim() === "Switch model?")) {
+          const current = await this.agentPane(id, session);
+          if (current.agent !== pane.agent || current.terminalId !== pane.terminalId) throw conflict("에이전트가 바뀌었습니다. 모델을 변경하지 않았습니다.");
+          // The owner explicitly selected a model. Do not send Enter to any other dialog.
+          await this.call(["agent", "send-keys", id, "Enter"], PROBE_MS, undefined, session);
+          confirmed = true;
+        } else if (!input && screen !== before) {
+          let receipt = false;
+          for (let index = prompt - 1; index >= 0; index--) {
+            const line = lines[index]!.trimStart();
+            if (line.startsWith("❯")) {
+              if (receipt && line.slice(1).trim() === command) return;
+              break;
+            }
+            if (/^⎿\s*\S/.test(line)) receipt = true;
+          }
+        }
+        if (!input && ref && await this.transcripts.claudeModelChanged(ref, selector, since, `${session}/${id}`)) return;
+      }
+      await Bun.sleep(50);
+    } while (performance.now() < deadline);
+    throw conflict("Claude Code의 모델 변경을 확인하지 못했습니다.");
+  }
+
+  private async stageImages(pane: HerdrPaneView, images: readonly string[], session: string): Promise<HerdrPaneView> {
+    const ready = (current: HerdrPaneView) => {
+      if (current.terminalId !== pane.terminalId || current.agent !== pane.agent) throw conflict("에이전트가 바뀌었습니다. 메시지를 보내지 않았습니다.");
+      if (current.status === "blocked") throw conflict(`agent ${pane.id} is waiting at a dialog`);
+      return current;
+    };
+    ready(pane);
+    const claude = pane.agent === "claude";
+    let count = claude ? await this.claudeImages(pane.id, session) : 0;
+    let current = pane;
+    for (const path of images) {
+      // A standalone path in its own paste invokes the TUI's file-drop handler; @path in chat is just text.
+      await this.sendInput({ pane: pane.id, text: paste(path) }, session);
+      if (claude) {
+        const deadline = performance.now() + PROBE_MS;
+        let next = await this.claudeImages(pane.id, session);
+        while (next <= count && performance.now() < deadline) {
+          await Bun.sleep(75);
+          next = await this.claudeImages(pane.id, session);
+        }
+        if (next <= count) throw conflict("Claude Code에서 이미지를 첨부하지 못했습니다. 메시지를 보내지 않았습니다.");
+        count = next;
+      }
+      current = ready(await this.agentPane(pane.id, session));
+    }
+    return current;
+  }
+
+  async prompt(id: string, text: string, wait?: HerdrWait, guard?: { session: string; terminalId: string; agent: string; authorize: (pane?: HerdrPaneView) => void }, delivery?: HerdrDelivery, uploads?: readonly string[]): Promise<HerdrRun> {
     const session = guard?.session ?? this.session;
-    const pane = await this.agentPane(id, session);
-    if (guard) {
-      if (pane.terminalId !== guard.terminalId || pane.agent !== guard.agent) throw conflict("the coding terminal or agent was replaced; no prompt was sent");
-      if (!["idle", "done"].includes(pane.status)) throw conflict("the coding agent is not ready for another prompt");
-      guard.authorize(pane);
+    const key = `${session}/${id}`;
+    if (this.prompting.has(key)) throw conflict("이 에이전트에 메시지를 보내고 있습니다.");
+    this.prompting.add(key);
+    try {
+      const pane = await this.agentPane(id, session);
+      if (guard) {
+        if (pane.terminalId !== guard.terminalId || pane.agent !== guard.agent) throw conflict("the coding terminal or agent was replaced; no prompt was sent");
+        if (!["idle", "done"].includes(pane.status)) throw conflict("the coding agent is not ready for another prompt");
+        guard.authorize(pane);
+      }
+      let target = pane;
+      const hasUploads = !!uploads?.length;
+      if (hasUploads) {
+        const images = [], paths = [];
+        for (const path of uploads) {
+          if ((pane.agent === "omp" || pane.agent === "claude") && IMAGE_PATH.test(path)) images.push(path);
+          else paths.push(`@${path}`);
+        }
+        if (paths.length > 0) text = text.trim() ? `${text}\n\n${paths.join("\n")}` : paths.join("\n");
+        if (images.length > 0) target = await this.stageImages(pane, images, session);
+      }
+      // omp uses bare /model for its picker and /switch for a session-only selector.
+      const model = !hasUploads && pane.agent === "omp" ? /^\/models?(?:[ \t]+|:[ \t]*)(\S[^\r\n]*)$/.exec(text) : null;
+      // Take a fresh status before sending raw bytes. `agent prompt` itself refuses blocked agents.
+      const queueTarget = model === null && delivery === "queue" && target.agent === "omp" && target.status === "working"
+        ? await this.agentPane(id, session) : null;
+      if (hasUploads && queueTarget && (queueTarget.terminalId !== pane.terminalId || queueTarget.agent !== pane.agent)) {
+        throw conflict("에이전트가 바뀌었습니다. 메시지를 보내지 않았습니다.");
+      }
+      let settled: HerdrRun["settled"] = "unwaited";
+      if (queueTarget?.agent === "omp" && queueTarget.status === "working" && queueTarget.terminalId === pane.terminalId) {
+        // Ctrl+Q also approves in a blocked composer; the paste and chord travel in one write.
+        await this.sendInput({ pane: id, text: `${text.trim() ? paste(text) : ""}\x11` }, session);
+      } else if (hasUploads && !text.trim()) {
+        if (queueTarget?.status === "blocked") throw conflict(`agent ${id} is waiting at a dialog`);
+        await this.call(["agent", "send-keys", id, "Enter"], PROBE_MS, undefined, session);
+      } else if (!hasUploads && pane.agent === "claude" && /^\/model[ \t]+\S[^\r\n]*$/.test(text)) {
+        await this.switchClaudeModel(pane, text, session);
+      } else {
+        settled = await this.submit(id, model === null ? text : `/switch ${model[1]}`, wait, session);
+      }
+      const after = await this.agentPane(id, session);
+      // Only a caller that waits for the work reports on it, and it needs the branch the agent is on.
+      const cwd = after.cwd ?? pane.cwd;
+      const branch = wait !== undefined && cwd !== null && existsSync(cwd) && (await git(["rev-parse", "--show-toplevel"], cwd)).code === 0 ? (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).out : null;
+      return { pane: after, checkout: cwd ?? "", branch, base: null, settled };
+    } finally {
+      this.prompting.delete(key);
     }
-    // omp's TUI uses bare /model for its picker and /switch for a session-only selector.
-    // Passing /model with arguments through verbatim would submit it to the model as chat.
-    const model = pane.agent === "omp" ? /^\/models?(?:[ \t]+|:[ \t]*)(\S[^\r\n]*)$/.exec(text) : null;
-    // Take a fresh status before sending raw bytes. `agent prompt` itself refuses blocked agents.
-    const queueTarget = model === null && delivery === "queue" && pane.agent === "omp" && pane.status === "working"
-      ? await this.agentPane(id, session) : null;
-    let settled: HerdrRun["settled"] = "unwaited";
-    if (queueTarget?.agent === "omp" && queueTarget.status === "working" && queueTarget.terminalId === pane.terminalId) {
-      // Ctrl+Q is omp's default follow-up chord (packages/tui/src/app-keybindings.ts). Send
-      // the entire paste and chord in one write; Ctrl+Q also approves in a blocked composer.
-      const paste = `\x1b[200~${text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "")}\x1b[201~\x11`;
-      await this.sendInput({ pane: id, text: paste }, session);
-    } else {
-      settled = await this.submit(id, model === null ? text : `/switch ${model[1]}`, wait, session);
-    }
-    const after = await this.agentPane(id, session);
-    // Only a caller that waits for the work reports on it, and it needs the branch the agent is on.
-    const cwd = after.cwd ?? pane.cwd;
-    const branch = wait !== undefined && cwd !== null && existsSync(cwd) && (await git(["rev-parse", "--show-toplevel"], cwd)).code === 0 ? (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).out : null;
-    return { pane: after, checkout: cwd ?? "", branch, base: null, settled };
   }
 
   async interrupt(session: string, id: string, terminalId: string, guard?: { agent: string; authorize: (pane?: HerdrPaneView) => void }): Promise<void> {

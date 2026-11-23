@@ -49,6 +49,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
   }, [openGhostId]);
   // Deleted and retired Ghosts leave the roster.
   const roster = visibleGhosts(state?.ghosts ?? []);
+  const onlyMain = roster.length === 1 && roster[0]?.isDefault;
   const { pinned, expanded, togglePinned, setExpanded } = useSidebarPreferences(roster.map(ghost => ghost.id));
   const [query, setQuery] = useState('');
   const presence = new Map<Ghost['id'], Presence>(roster.map(ghost => [ghost.id, state ? ghostPresence(ghost, state) : { state: 'idle', line: null, rank: 5 }]));
@@ -79,7 +80,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
           data-rail-label={now.line ? `${ghost.name} · ${now.line}` : ghost.name}>
           <PresenceAvatar ghostId={ghost.id} state={now.state} size={26}/>
           <span className="presence-row__copy">
-            <span className="presence-row__name"><span className="truncate">{ghost.name}</span>{ghost.isDefault && <span className="presence-row__main-mark">메인</span>}</span>
+            <span className="presence-row__name"><span className="truncate">{ghost.name}</span>{ghost.isDefault && !onlyMain && <span className="presence-row__main-mark">메인</span>}</span>
             {now.line && <span className="presence-row__line" data-tone={now.state}>{now.line}</span>}
           </span>
           {working > 0 && <span className="sidebar-count"><span className="sr-only">맡긴 일 진행 중 </span>{working}</span>}
@@ -87,7 +88,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
       </ContextMenuTrigger>
       <ContextMenuContent aria-label={`${ghost.name} 메뉴`}>
         <ContextMenuItem icon={<MessageCircle/>} onSelect={() => openGhost(ghost.id)}>대화 열기</ContextMenuItem>
-        <ContextMenuItem icon={<Pin/>} onSelect={() => togglePinned(ghost.id)}>{pinnedIds.has(ghost.id) ? '고정 해제' : '고정'}</ContextMenuItem>
+        {!ghost.isDefault && <ContextMenuItem icon={<Pin/>} onSelect={() => togglePinned(ghost.id)}>{pinnedIds.has(ghost.id) ? '고정 해제' : '고정'}</ContextMenuItem>}
         <ContextMenuItem icon={<LayoutList/>} onSelect={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}>{uiTerms.work}</ContextMenuItem>
         <ContextMenuItem icon={<Settings2/>} onSelect={() => navigate(`/settings?tab=team&ghost=${encodeURIComponent(ghost.id)}`)}>{uiTerms.ghostSettings}</ContextMenuItem>
       </ContextMenuContent>
@@ -134,13 +135,14 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
       <div className="sidebar-scroll-frame">
         <div ref={scrollRef} className="sidebar-scroll">
           {section === 'workspace' && projects}
-          {roster.length > 0 && <NavigationGroup label="고정">{fixed.map(ghost => row(ghost))}</NavigationGroup>}
-          {roster.length > 0 && <NavigationGroup label="Ghost"
+          {onlyMain ? fixed.map(ghost => row(ghost))
+            : fixed.length > 0 && <NavigationGroup label="고정">{fixed.map(ghost => row(ghost))}</NavigationGroup>}
+          {pool.length > 0 && <NavigationGroup label="Ghost"
             action={<button type="button" className="sidebar-pool-toggle" aria-expanded={expanded}
-              aria-label={expanded ? 'Ghost 목록 접기' : `Ghost 목록 펼치기${pool.length ? ` (${pool.length})` : ''}`}
+              aria-label={expanded ? 'Ghost 목록 접기' : `Ghost 목록 펼치기 (${pool.length})`}
               onClick={() => { setQuery(''); setExpanded(!expanded); }}>
               <span aria-hidden="true" className="fold-mark"/>
-              {!expanded && pool.length > 0 && <span className="tabular">{pool.length}</span>}
+              {!expanded && <span className="tabular">{pool.length}</span>}
             </button>}>
             {expanded && pool.length > SEARCH_LIMIT && <input type="text" enterKeyHint="search" className="sidebar-search" aria-label="Ghost 찾기"
               placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}

@@ -63,6 +63,10 @@ case "$*" in
   "integration install claude") echo installed ;;
   "integration install codex") echo '{"error":{"code":"install_failed","message":"cannot write ~/.codex"}}'; exit 1 ;;
   "--session default api snapshot"|"--session work api snapshot") cat "$D/snapshot.json"; if [ -e "$D/next-snapshot.json" ]; then mv "$D/next-snapshot.json" "$D/snapshot.json"; fi ;;
+  "--session default pane read w9:p1 --source visible "*) printf '❯'; if [ -e "$D/claude-image" ]; then printf ' [Image #1]'; fi; printf '\\n────────────\\n' ;;
+  "--session default pane read w9:p1 --source recent-unwrapped "*)
+    if [ -e "$D/claude-switch" ]; then printf 'Switch model?\\nYour next response will be slower and use more tokens\\n   ❯ 1. Yes, switch to Haiku\\n     2. No, go back\\n';
+    else if [ -e "$D/claude-model" ]; then printf '❯ /model haiku\\n  ⎿  Set model to Haiku\\n'; fi; printf '❯\\n────────────\\n'; fi ;;
   "--session default pane read w1:pA "*) printf '\\n\\n  working on it   \\n\\033[31mred\\n\\n' ;;
   "--session default pane read "*) echo '{"error":{"code":"pane_not_found","message":"gone"}}'; exit 1 ;;
   "--session default worktree create "*"--branch ghost/dup "*) if [ -e "$D/dup" ]; then echo '${created("w9:p1", "/wt/repo-dup-2")}'; else touch "$D/dup"; echo '{"error":{"code":"worktree_create_failed","message":"fatal: already exists"}}'; exit 1; fi ;;
@@ -70,12 +74,15 @@ case "$*" in
   "--session default workspace create "*) echo '${created("w9:p1")}' ;;
   "--session default agent start "*) ${extra.agentStart ?? "echo '{\"result\":{}}'"} ;;
   "--session default agent prompt w1:pA "*) echo '{"error":{"code":"agent_blocked","message":"agent w1:pA is waiting at a dialog"}}'; exit 1 ;;
+  "--session default agent prompt w9:p1 /model haiku") touch "$D/claude-switch"; echo '{"result":{}}' ;;
   "--session default agent prompt "*) echo '{"result":{}}' ;;
   "--session default tab create "*) echo '${created("w9:p5")}' ;;
   "--session default pane split "*) echo '{"id":"x","result":{"pane":{"pane_id":"w9:p6"}}}' ;;
   "--session default workspace close w1") echo '{"error":{"code":"workspace_group_close_required","message":"close the linked worktree workspaces first"}}'; exit 1 ;;
   "--session default workspace rename "*|"--session default tab rename "*|"--session default pane rename "*|"--session default workspace close "*|"--session default tab close "*|"--session default pane close "*) echo '{"result":{}}' ;;
   "--session default pane send-keys w1:p2 nonsense") echo '{"error":{"code":"invalid_params","message":"unknown key nonsense"}}'; exit 1 ;;
+  "--session default pane send-text w9:p1 "*) touch "$D/claude-image"; echo '{"result":{}}' ;;
+  "--session default agent send-keys w9:p1 Enter") if [ -e "$D/claude-switch" ]; then rm "$D/claude-switch"; touch "$D/claude-model"; fi; echo '{"result":{}}' ;;
   "--session default pane send-text "*|"--session default pane send-keys "*|"--session default agent send-keys "*) echo '{"result":{}}' ;;
   "--session default terminal session observe w1:pA "*) printf '{"bytes":"aGk=","encoding":"ansi","full":true,"height":24,"seq":1,"type":"terminal.frame","width":80}\n{"bytes":"IQ==","encoding":"ansi","full":false,"height":24,"seq":2,"type":"terminal.frame","width":80}\n{"reason":"terminal attach ended: gone","type":"terminal.closed"}\n' ;;
   "--session default terminal session observe w1:p2 "*) printf '{"bytes":"aGk=","encoding":"ansi","full":true,"height":24,"seq":1,"type":"terminal.frame","width":80}\n' ;;
@@ -314,9 +321,16 @@ test("omp /model with a selector uses the session-only /switch command; bare /mo
       writeFileSync(join(dir, "snapshot.json"), JSON.stringify(view));
       const previous = (await fake.runs()).length;
       await herdr.prompt(pane, text, undefined, undefined, delivery);
-      expect((await fake.runs()).slice(previous).filter(run => run[2] !== "api")).toEqual([
+      const invoked = (await fake.runs()).slice(previous).filter(run => run[2] !== "api");
+      expect(invoked.filter(run => run[3] !== "read")).toEqual([
         ["--session", "default", "agent", "prompt", pane, sent],
+        ...(agent === "claude" ? [["--session", "default", "agent", "send-keys", pane, "Enter"]] : []),
       ]);
+      if (agent === "claude") {
+        expect(invoked.map(run => run[3])).toEqual(["read", "prompt", "read", "send-keys", "read"]);
+        await herdr.prompt(pane, "Next message");
+        expect((await fake.runs()).filter(run => run[3] === "prompt").at(-1)).toEqual(["--session", "default", "agent", "prompt", pane, "Next message"]);
+      }
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -366,6 +380,65 @@ test("only a working omp receives a queued prompt as one multiline paste with th
     expect((await fake.runs()).slice(previous).filter(run => run[2] !== "api")).toEqual([
       ["--session", "default", "agent", "prompt", pane, text],
     ]);
+  } finally {
+    await server.stop();
+    h.ledger.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the prompt endpoint sends uploads as standalone native image pastes or text references", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  const h = harness();
+  const root = join(dir, "Host State");
+  const config: Config = { root, host: "127.0.0.1", port: 0, publicOrigin: null, uiDir: null, sandbox: { kind: "local" }, voice: null, apns: null, skills: null, reach: null, browser: null };
+  const server = startServer({ core: h.core, config, ownerToken: OWNER, documents: null, skills: null, herdr: new Herdr(fake.path) });
+  const pane = "w9:p1";
+  const post = (body: object) => fetch(`http://127.0.0.1:${server.port}/api/herdr/prompt`, {
+    method: "POST", headers: { authorization: `Bearer ${OWNER}`, "content-type": "application/json" }, body: JSON.stringify({ pane, ...body }),
+  });
+  const writes = async (previous: number) => (await fake.runs()).slice(previous).filter(run => run[3] === "prompt" || run[3] === "send-text" || run[3] === "send-keys");
+  try {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGN4x6NKEmIY1TCqYfhqAABd2B8QINipiAAAAABJRU5ErkJggg==", "base64");
+    const upload = await fetch(`http://127.0.0.1:${server.port}/api/herdr/upload?name=${encodeURIComponent("화면 캡처.PNG")}`, {
+      method: "POST", headers: { authorization: `Bearer ${OWNER}`, "content-type": "image/png" }, body: new Uint8Array(png),
+    });
+    const image = parse(HerdrUpload, await upload.json()).path;
+    const document = saveUpload(root, "notes.md", new Uint8Array([97])).path;
+    const imagePaste = ["--session", "default", "pane", "send-text", pane, `\x1b[200~${image}\x1b[201~`];
+
+    expect((await post({ text: "", attachments: ["/tmp/elsewhere.png"] })).status).toBe(400);
+    expect((await post({ text: "", attachments: [join(root, "uploads", "00000000-expired.png")] })).status).toBe(400);
+    expect((await post({ text: "", attachments: [] })).status).toBe(400);
+    expect(await writes(0)).toEqual([]);
+
+    let before = (await fake.runs()).length;
+    expect((await post({ text: "이것 설명해 줘", attachments: [image, document] })).status).toBe(200);
+    expect(await writes(before)).toEqual([imagePaste, ["--session", "default", "agent", "prompt", pane, `이것 설명해 줘\n\n@${document}`]]);
+
+    const view = structuredClone(snapshot);
+    const target = view.result.snapshot.panes.find(p => p.pane_id === pane)!;
+    target.agent_status = "working";
+    writeFileSync(join(dir, "snapshot.json"), JSON.stringify(view));
+    before = (await fake.runs()).length;
+    expect((await post({ text: "", attachments: [image], delivery: "queue" })).status).toBe(200);
+    expect(await writes(before)).toEqual([imagePaste, ["--session", "default", "pane", "send-text", pane, "\x11"]]);
+
+    rmSync(join(dir, "claude-image"));
+    target.agent = "claude";
+    target.agent_status = "idle";
+    writeFileSync(join(dir, "snapshot.json"), JSON.stringify(view));
+    before = (await fake.runs()).length;
+    expect((await post({ text: "", attachments: [image] })).status).toBe(200);
+    expect(await writes(before)).toEqual([imagePaste, ["--session", "default", "agent", "send-keys", pane, "Enter"]]);
+    expect((await fake.runs()).slice(before).filter(run => run[3] === "read")).toHaveLength(2);
+
+    target.agent_status = "blocked";
+    writeFileSync(join(dir, "snapshot.json"), JSON.stringify(view));
+    before = (await fake.runs()).length;
+    expect((await post({ text: "go", attachments: [image] })).status).toBe(409);
+    expect(await writes(before)).toEqual([]);
   } finally {
     await server.stop();
     h.ledger.close();
@@ -495,10 +568,12 @@ test("terminal text keeps the end, drops control bytes and trailing blanks", () 
 });
 
 test("a choice saved before coding became herdr keeps its default agent and drops the rest", () => {
-  expect(codingPrefs({ default: "claude", disabled: ["omp"] })).toEqual({ session: null, agent: "claude", notify: "blocked" });
+  expect(codingPrefs({ default: "claude", disabled: ["omp"] })).toEqual({ session: null, agent: "claude", notify: "all" });
   expect(codingPrefs({ session: "work", agent: "codex", notify: "all" })).toEqual({ session: "work", agent: "codex", notify: "all" });
-  expect(codingPrefs({ session: "../x", agent: "vim", notify: "sometimes" })).toEqual({ session: null, agent: null, notify: "blocked" });
-  expect(codingPrefs(null)).toEqual({ session: null, agent: null, notify: "blocked" });
+  expect(codingPrefs({ session: "../x", agent: "vim", notify: "sometimes" })).toEqual({ session: null, agent: null, notify: "all" });
+  expect(codingPrefs({ notify: "blocked" }).notify).toBe("blocked");
+  expect(codingPrefs({ notify: "off" }).notify).toBe("off");
+  expect(codingPrefs(null)).toEqual({ session: null, agent: null, notify: "all" });
 });
 
 test("the herdr routes need the owner token and answer with the contract's shapes", async () => {
@@ -780,15 +855,17 @@ test("a file sent from the app is saved where an agent can read it, under a name
   }
 });
 
-test("the watcher tells the owner once when an agent that was working starts waiting for an answer, and only as the owner chose", async () => {
+test("owner coding alerts cover blocked, finished and exited agents, subject to preferences and per-pane quiet time", async () => {
   const h = harness(":memory:");
   const ghost = h.core.createGhost({ name: "Main", persona: "" });
   type Status = "idle" | "working" | "blocked" | "done" | "unknown";
-  const state: { panes: [string, Status, string | null][]; session: string } = { panes: [["w1:pA", "working", "claude"], ["w1:p2", "unknown", null]], session: "default" };
+  const state: { panes: [string, Status, string | null, string][]; session: string; note: string | null } = {
+    panes: [["w1:pA", "working", "claude", "term_a"], ["w1:p2", "unknown", null, "term_b"]], session: "default", note: null,
+  };
   const herdr = {
     overview: async () => ({
-      available: true, session: state.session, note: null,
-      workspaces: [{ id: "w1", label: "ghost", status: "idle" as const, worktree: null, tabs: [{ id: "w1:t1", label: "로그인 고치기", status: "idle" as const, panes: state.panes.map(([id, status, agent]) => ({ id, workspaceId: "w1", tabId: "w1:t1", workspace: "ghost", tab: "로그인 고치기", agent, status, cwd: "/work", title: "로그인 고치기", focused: false, owned: false })) }] }],
+      available: true, session: state.session, note: state.note,
+      workspaces: state.note === null ? [{ id: "w1", label: "ghost", status: "idle" as const, worktree: null, tabs: [{ id: "w1:t1", label: "로그인 고치기", status: "idle" as const, panes: state.panes.map(([id, status, agent, terminalId]) => ({ id, workspaceId: "w1", tabId: "w1:t1", workspace: "ghost", tab: "로그인 고치기", agent, terminalId, status, cwd: "/work", title: "로그인 고치기", focused: false, owned: false })) }] }] : [],
     }),
   } as unknown as HerdrPort;
   let time = 1_000_000;
@@ -807,20 +884,49 @@ test("the watcher tells the owner once when an agent that was working starts wai
     set("working"); await watcher.poll();
     time += 10_000; set("blocked"); await watcher.poll();
     expect(told()).toHaveLength(1);
-    // Finishing is only news when the owner asked for it.
-    time += 120_000; set("working"); await watcher.poll();
-    set("done"); await watcher.poll();
-    expect(told()).toHaveLength(1);
-    h.ledger.tx(() => h.ledger.putSetting("coding", { session: null, agent: null, notify: "all" }));
-    time += 120_000; set("working"); await watcher.poll();
-    set("done"); await watcher.poll();
-    expect(told().map((entry) => entry.title).sort()).toEqual(["에이전트가 끝났어요", "에이전트가 답을 기다려요"]);
-    // Off is off, and a plain shell is never news.
-    h.ledger.tx(() => h.ledger.putSetting("coding", { session: null, agent: null, notify: "off" }));
-    time += 120_000; set("working"); await watcher.poll();
-    set("blocked"); await watcher.poll();
-    state.panes[1]![1] = "working"; await watcher.poll(); state.panes[1]![1] = "blocked"; await watcher.poll();
+    // The default includes completion, whether herdr reports idle or done.
+    time += 60_000; set("working"); await watcher.poll();
+    set("idle"); await watcher.poll();
     expect(told()).toHaveLength(2);
+    time += 60_000; set("working"); await watcher.poll();
+    set("done"); await watcher.poll();
+    expect(told().filter(({ id, title }) => id.includes(":w1:pA:done:") && title === "에이전트가 끝났어요")).toHaveLength(2);
+
+    // A transient unavailable snapshot does not make a live terminal disappear.
+    time += 60_000; set("working"); await watcher.poll();
+    state.note = "no server"; await watcher.poll();
+    expect(told()).toHaveLength(3);
+    state.note = null;
+    state.panes[0] = ["w1:pA", "unknown", null, "term_a"]; await watcher.poll();
+    await watcher.poll();
+    expect(told().find(({ id }) => id === `coding:default:w1:pA:exit:${time / 1000}`)).toMatchObject({
+      title: "에이전트가 종료됐어요", body: "로그인 고치기\nclaude · ghost",
+    });
+
+    // Closing an idle pane and replacing a working terminal both end the old agent.
+    time += 60_000;
+    state.panes[0] = ["w1:pA", "idle", "claude", "term_a"]; await watcher.poll();
+    state.panes.shift(); await watcher.poll();
+    expect(told()).toHaveLength(5);
+    state.panes.unshift(["w1:pA", "working", "claude", "term_c"]); await watcher.poll();
+    time += 60_000;
+    state.panes[0] = ["w1:pA", "idle", "omp", "term_d"]; await watcher.poll();
+    expect(told()).toHaveLength(6);
+
+    // Changing sessions does not generate old-pane exits or alerts on the new session's first look.
+    state.session = "other"; set("blocked"); await watcher.poll();
+    expect(told()).toHaveLength(6);
+    h.ledger.tx(() => h.ledger.putSetting("coding", { notify: "blocked" }));
+    set("working"); await watcher.poll(); set("idle"); await watcher.poll();
+    state.panes[0] = ["w1:pA", "unknown", null, "term_d"]; await watcher.poll();
+    expect(told()).toHaveLength(6);
+    state.panes[0] = ["w1:pA", "working", "omp", "term_d"]; await watcher.poll();
+    set("blocked"); await watcher.poll();
+    expect(told().find(({ id }) => id.startsWith("coding:other:w1:pA:blocked:"))).toBeDefined();
+    h.ledger.tx(() => h.ledger.putSetting("coding", { notify: "off" }));
+    time += 60_000; set("working"); await watcher.poll(); set("blocked"); await watcher.poll();
+    state.panes[1]![1] = "working"; await watcher.poll(); state.panes[1]![1] = "blocked"; await watcher.poll();
+    expect(told()).toHaveLength(7);
   } finally {
     h.core.stop();
     h.ledger.close();

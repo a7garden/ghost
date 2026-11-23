@@ -10,7 +10,7 @@ const INSTALL_DOCS = 'https://herdr.dev/tui/docs/install/';
 const INSTALL = 'curl -fsSL https://herdr.dev/install.sh | sh';
 type SetupStatus = 'ready' | 'missing' | 'invalid' | 'stopped' | 'restart' | 'outdated' | 'unlinked';
 const agentNotificationChoices = [
-  { value: 'off', label: '끔' }, { value: 'blocked', label: '입력 필요할 때' }, { value: 'all', label: '입력 필요·끝났을 때' },
+  { value: 'off', label: '끔' }, { value: 'blocked', label: '답이 필요할 때만' }, { value: 'all', label: '끝났을 때·답이 필요할 때·종료됐을 때' },
 ] as const;
 
 /** The order follows herdr's dependencies. A missing agent or hook never blocks the connection. */

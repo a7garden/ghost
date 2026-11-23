@@ -1,10 +1,10 @@
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import type { HerdrPaneView, HerdrView, Scope } from '@ghost/contract';
-import { Button, InlineError, SegmentedControl } from '../ui';
+import { Button, InlineError, Popover, PopoverContent, PopoverTrigger, SegmentedControl } from '../ui';
 import { useHost } from '../host/context';
 import { useCodingPageSetup } from './CodingSetup';
-import { NewHerdrWorkspace } from './HerdrStart';
+import { NewHerdrWorkspace, preferredHerdrAgent } from './HerdrStart';
 import { OpenHerdrPane, useHerdr } from './Herdr';
 import { HerdrActionDialog } from './HerdrActions';
 import { findHerdrPane, HerdrRoster, type HerdrNode, type RosterAction } from './HerdrRoster';
@@ -12,22 +12,15 @@ import { parseHerdrPane, parseHerdrSession } from './herdrDisplay';
 import { HerdrInbox, useHerdrActivity } from './HerdrInbox';
 import { CodingSkeleton } from './HerdrParts';
 import { useHerdrAsks } from './HerdrAsk';
+import { directoryName, recentCodingDirectories } from './CodingModel';
+import { readCodingValue, writeCodingValue } from './herdrInboxModel';
 import './coding.css';
 
 const rosterModes = [{ value: 'agents', label: '에이전트' }, { value: 'spaces', label: '스페이스' }] as const;
 
-function lastPane(session: string, pane?: string) {
-  const key = `ghost.coding.last-pane:${session}`;
-  try {
-    if (pane) localStorage.setItem(key, pane);
-    else return parseHerdrPane(localStorage.getItem(key));
-  } catch { /* Storage can be unavailable. */ }
-  return null;
-}
-
-export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, onCancel, compact, onRoster }: {
-  scopes: Scope[]; herdrPane: string | null; herdrSession: string | null; creating: boolean; compact: boolean;
-  onOpen(id: string): void; onCancel(): void; onRoster(view: HerdrView): void;
+export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, onRestore, onCancel, compact, onRoster, restoreLastPane }: {
+  scopes: Scope[]; herdrPane: string | null; herdrSession: string | null; creating: boolean; compact: boolean; restoreLastPane: boolean;
+  onOpen(id: string): void; onRestore(id: string): void; onCancel(): void; onRoster(view: HerdrView): void;
 }) {
   const showDetail = creating || herdrPane !== null;
   const [revision, refresh] = useReducer((count: number) => count + 1, 0);
@@ -36,6 +29,10 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
   const [notice, setNotice] = useState('');
   const [rosterMode, setRosterMode] = useState<'agents' | 'spaces'>('agents');
   const [created, setCreated] = useState<{ snapshot: HerdrView | null; pane: HerdrPaneView } | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState('');
+  const [pendingDirectory, setPendingDirectory] = useState<string | null>(null);
+  const creatingDirectory = useRef(false);
   const { setup, required, panel, errors, refreshSetup } = useCodingPageSetup(!compact || !showDetail, () => {
     if (!creating && herdrPane !== null) onCancel();
     refresh();
@@ -51,10 +48,12 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
   // A pane id is unique only inside its herdr session: a link naming another session never opens this session's same-id pane.
   const foreignSession = linkSession !== null && liveSession !== null && linkSession !== liveSession;
   const pane = foreignSession ? undefined : created?.snapshot === view && created.pane.id === paneId ? created.pane : findHerdrPane(workspaces, paneId);
-  const restore = useRef(!creating && herdrPane === null);
-  const open = useEffectEvent(onOpen);
+  const restore = useRef(restoreLastPane && !creating && herdrPane === null);
+  const openRemembered = useEffectEvent(onRestore);
   const session = liveSession;
   const log = useHerdrActivity(session, workspaces, pane?.id ?? null);
+  const directories = adding ? recentCodingDirectories(workspaces, scopes, log) : [];
+  const agent = preferredHerdrAgent(setup);
   const workspace = pane ? workspaces.find(item => item.id === pane.workspaceId) : undefined;
   const siblings = workspace?.tabs.find(tab => tab.id === pane?.tabId)?.panes ?? [];
   const showAgentList = rosterMode === 'agents' && (!compact || !showDetail);
@@ -63,15 +62,15 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
   if (pane?.agent && pane.status === 'blocked' && !blockedPanes.includes(pane.id)) blockedPanes.push(pane.id);
   const asks = useHerdrAsks(session, blockedPanes, refresh);
   const resolvedId = pane?.id;
-  useEffect(() => { if (session && resolvedId) lastPane(session, resolvedId); }, [session, resolvedId]);
+  useEffect(() => { if (session && resolvedId) writeCodingValue(`last-pane:${session}`, resolvedId); }, [session, resolvedId]);
   useEffect(() => {
     if (herdrPane !== null || creating) restore.current = false;
     if (!restore.current || !session || !roster) return;
     restore.current = false;
     // On the phone an approval takes priority over restoring the previous pane.
     if (compact && blockedPanes.length) return;
-    const remembered = findHerdrPane(roster.workspaces, lastPane(session));
-    if (remembered) open(remembered.id);
+    const remembered = findHerdrPane(roster.workspaces, parseHerdrPane(readCodingValue(`last-pane:${session}`)));
+    if (remembered) openRemembered(remembered.id);
   }, [creating, herdrPane, roster, session, compact, blockedPanes.length]);
   const sessionChanged = Boolean(setup && view && setup.session !== view.session);
   const needsSetup = sessionChanged || Boolean(setup && !required && (view?.available === false || view?.note));
@@ -82,12 +81,12 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
   const goBack = useEffectEvent(onCancel);
   const missing = Boolean(!creating && paneId && !pane && roster?.available && !roster.note);
   useEffect(() => {
-    if (!creating && paneId && (sessionChanged || missing || foreignSession)) {
+    if (!creating && paneId && (missing || foreignSession)) {
       if (foreignSession) setNotice(`이 링크는 다른 herdr 세션(${linkSession})의 패널을 가리킵니다. herdr의 세션을 바꾼 뒤 다시 열어 주세요.`);
       else if (missing) setNotice('이 패널은 더 이상 없습니다.');
       goBack();
     }
-  }, [sessionChanged, creating, paneId, missing, foreignSession, linkSession]);
+  }, [creating, paneId, missing, foreignSession, linkSession]);
   const showSetupInRoster = (compact && !showDetail) || (!compact && !required);
   const setupNotice = <>{errors}{panel}</>;
   const paneSession = setup?.session ?? roster?.session;
@@ -100,9 +99,24 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
     }
     refresh();
   }
+  async function createDirectory(cwd: string) {
+    if (!agent || creatingDirectory.current) return;
+    creatingDirectory.current = true;
+    setPendingDirectory(cwd);
+    setAddError('');
+    try {
+      const newPane = await client.createHerdrWorkspace({ cwd, worktree: false, agent });
+      setAdding(false);
+      changed(newPane);
+    } catch (reason) {
+      setAddError(reason instanceof Error ? reason.message : '스페이스를 만들지 못했습니다.');
+    } finally {
+      creatingDirectory.current = false;
+      setPendingDirectory(null);
+    }
+  }
   /** One tap: the preferred (else first installed) agent, no dialog. Options stay one menu item away. */
   async function quick(request: RosterAction & { kind: 'tab' | 'split' | 'agent' }) {
-    const agent = setup?.kinds.find(kind => kind === setup.prefs.agent) ?? setup?.kinds[0];
     setNotice('');
     try {
       let created: HerdrPaneView;
@@ -133,9 +147,25 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
       <header className="coding-roster-head">
         <h1 className="sr-only">코딩</h1>
         <SegmentedControl aria-label="코딩 목록" value={rosterMode} options={rosterModes} onValueChange={setRosterMode}/>
-        <Button asChild variant={creating ? 'secondary' : 'outline'} size="icon">
-          <a href="#/coding?new=1" aria-label="새 스페이스" title="새 스페이스" aria-current={creating ? 'page' : undefined}><Plus aria-hidden="true"/></a>
-        </Button>
+        <Popover open={adding} onOpenChange={open => { if (open || !creatingDirectory.current) setAdding(open); }}>
+          <PopoverTrigger asChild>
+            <Button type="button" variant="ghost" size="icon" aria-label="새 스페이스" title="새 스페이스"><Plus aria-hidden="true"/></Button>
+          </PopoverTrigger>
+          <PopoverContent className="coding-quick-add" align="end" aria-label="새 스페이스" aria-busy={pendingDirectory !== null || undefined}>
+            {directories.map(path => <button type="button" key={path} title={path}
+              disabled={!agent || Boolean(pendingDirectory) || Boolean(paneUnavailable) || !liveSession}
+              onClick={() => void createDirectory(path)}>
+              <strong>{directoryName(path)}</strong>
+              <small>{pendingDirectory === path ? '만드는 중…' : path}</small>
+            </button>)}
+            {addError && <InlineError>{addError}</InlineError>}
+            {setup && !agent && <p className="coding-hint">설치된 에이전트가 없습니다.</p>}
+            <a href="#/coding?new=1" aria-current={creating ? 'page' : undefined} onClick={event => {
+              if (creatingDirectory.current) { event.preventDefault(); return; }
+              setAdding(false);
+            }}>새 스페이스…</a>
+          </PopoverContent>
+        </Popover>
       </header>
       <div className="coding-roster-scroll">
         {notice && <p className="coding-hint" role="status">{notice}</p>}
@@ -156,7 +186,7 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
         : paneUnavailable || sessionChanged || missing ? null
         : pane && paneSession ? <OpenHerdrPane key={`${paneSession}/${paneId}`} pane={pane} compact={compact} onChanged={refresh} onGone={paneGone}
           preferencesKey={`${paneSession}:${paneId}`} since={log[pane.id]?.changedAt ?? 0} branch={workspace?.worktree?.branch}
-          navigation={{ panes: siblings, onNavigate: onOpen }} asks={asks}/>
+          navigation={{ panes: siblings, onNavigate: onOpen }} asks={asks} setup={setup}/>
         : !errors && <div className="coding-pane-status">{error
           ? <InlineError onRetry={refresh} retryLabel="다시 불러오기">{error}</InlineError>
           : <CodingSkeleton detail/>}</div>}

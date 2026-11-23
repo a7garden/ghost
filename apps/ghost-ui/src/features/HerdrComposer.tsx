@@ -1,49 +1,82 @@
-import { useEffect, useId, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
-import { ListEnd, Navigation, Paperclip, Slash, Square } from 'lucide-react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
+import { Paperclip, Slash, Square } from 'lucide-react';
 import type { HerdrDelivery, HerdrSlashCommand, HerdrUpload } from '@ghost/contract';
 import { Composer, InlineError } from '../ui';
 import { NextSuggestions } from '../components/composer/NextSuggestions';
+import { AttachmentTray, type PendingAttachment } from '../components/composer/attachments';
 import { ComposerSuggest, type Suggestion } from '../components/composer/ComposerSuggest';
 import { HerdrModelChip, type ModelChoice } from './HerdrModel';
 import { readCodingValue, writeCodingValue } from './herdrInboxModel';
+import type { HerdrPromptDraft, HerdrReadyAttachment } from './HerdrPromptModel';
 
-export interface HerdrDraft {
+type CodingAttachment = PendingAttachment & { file: File; saved?: HerdrUpload };
+const MAX_FILES = 8;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+export type HerdrDraft = {
   draft: string;
-  setDraft: Dispatch<SetStateAction<string>>;
-  attach(files: ArrayLike<File>): Promise<void>;
-  uploading: boolean;
-  uploadError: string;
-}
+  setDraft: (text: string) => void;
+  attach(files: File[]): void;
+  items: PendingAttachment[];
+  ready: readonly HerdrReadyAttachment[];
+  remove(id: string): void;
+  clear(): void;
+  restore(message: HerdrPromptDraft): void;
+  incomplete: boolean;
+};
 
 export function useHerdrDraft(key: string | undefined, upload?: (file: File) => Promise<HerdrUpload>): HerdrDraft {
   const [draft, setDraft] = useState(() => key ? readCodingValue(key) ?? '' : '');
   useEffect(() => { if (key) writeCodingValue(key, draft); }, [key, draft]);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState('');
-  const active = useRef(false);
+  const [items, setItems] = useState<CodingAttachment[]>([]);
+  const current = useRef<CodingAttachment[]>([]);
+  useEffect(() => () => {
+    for (const item of current.current) if (item.preview) URL.revokeObjectURL(item.preview);
+    current.current = [];
+  }, []);
+  function update(next: CodingAttachment[]) {
+    current.current = next;
+    setItems(next);
+  }
+  function remove(id: string) {
+    const gone = current.current.find(item => item.id === id);
+    if (gone?.preview) URL.revokeObjectURL(gone.preview);
+    update(current.current.filter(item => item.id !== id));
+  }
+  function patch(id: string, change: Partial<CodingAttachment>) {
+    if (current.current.some(item => item.id === id)) update(current.current.map(item => item.id === id ? { ...item, ...change } : item));
+  }
+  function tile(id: string, file: File) {
+    return { id, file, name: file.name, size: file.size, type: file.type,
+      preview: file.type.startsWith('image/') || /\.(?:png|jpe?g|gif|webp|avif|heic)$/i.test(file.name) ? URL.createObjectURL(file) : undefined };
+  }
 
-  async function attach(files: ArrayLike<File>) {
-    if (!upload || !files.length || active.current) return;
-    active.current = true;
-    setUploading(true);
-    setUploadError('');
-    const errors: string[] = [];
-    try {
-      for (const file of Array.from(files)) {
-        try {
-          const saved = await upload(file);
-          setDraft(current => `${current}${current && !/\s$/.test(current) ? ' ' : ''}@${saved.path} `);
-        } catch (reason) {
-          errors.push(`${file.name}: ${reason instanceof Error ? reason.message : '첨부하지 못했습니다.'}`);
-        }
-      }
-      setUploadError(errors.join('\n'));
-    } finally {
-      active.current = false;
-      setUploading(false);
+  function attach(files: File[]) {
+    if (!upload) return;
+    for (const file of files.slice(0, Math.max(0, MAX_FILES - current.current.length))) {
+      const id = crypto.randomUUID();
+      const tooLarge = file.size > MAX_FILE_BYTES;
+      update([...current.current, { ...tile(id, file), status: tooLarge ? 'failed' : 'uploading',
+        ...(tooLarge && { error: '10MB보다 큽니다.' }) }]);
+      if (!tooLarge) void upload(file).then(
+        saved => patch(id, { status: 'ready', saved }),
+        reason => patch(id, { status: 'failed', error: reason instanceof Error ? reason.message : '첨부하지 못했습니다.' }),
+      );
     }
   }
-  return { draft, setDraft, attach, uploading, uploadError };
+  function clear() {
+    for (const item of current.current) if (item.preview) URL.revokeObjectURL(item.preview);
+    update([]);
+    setDraft('');
+  }
+  function restore({ text, attachments }: HerdrPromptDraft) {
+    if (text) setDraft(existing => existing ? `${existing}\n\n${text}` : text);
+    if (!attachments.length) return;
+    const returned = attachments.filter(item => !current.current.some(existing => existing.id === item.id));
+    update([...current.current, ...returned.map(item => ({ ...tile(item.id, item.file), status: 'ready' as const, saved: item.saved }))]);
+  }
+  const ready: HerdrReadyAttachment[] = items.flatMap(({ id, file, saved }) => saved ? [{ id, file, saved }] : []);
+  return { draft, setDraft, attach, items, ready, remove, clear, restore, incomplete: ready.length !== items.length };
 }
 
 const deliveryLabel = { steer: '스티어링', queue: '대기열' } as const satisfies Record<HerdrDelivery, string>;
@@ -56,24 +89,26 @@ const QUEUE_KEY_AGENT = 'omp';
  * in 설정 (스티어링 or 대기열), ⌥Enter the other way. A next message the owner is likely to send waits above the text
  * while the field is empty; Tab (or a tap) puts it in the field, nothing is sent.
  */
-export function HerdrComposer({ agent, working, pending, delivery, draft, field, suggestions, commands, model, onSubmit, onStop, canUpload }: {
+export function HerdrComposer({ agent, working, pending, delivery, draft, field, suggestions, commands, model, onSubmit, onCommand, onStop, canUpload }: {
   agent: string | null; working: boolean; pending: boolean; delivery: HerdrDelivery;
   draft: HerdrDraft; field: RefObject<HTMLTextAreaElement | null>; suggestions: readonly string[];
   /** The slash commands the agent accepts; typing `/` offers them. */
   commands: readonly HerdrSlashCommand[];
   /** The conversation's model and the directory its choices are read for; absent when the agent has no model switch. */
   model?: { cwd: string | null; current: string | null; load(cwd: string, signal: AbortSignal): Promise<readonly ModelChoice[]> };
-  onSubmit(text: string, delivery?: HerdrDelivery): Promise<boolean>; onStop?(): void; canUpload: boolean;
+  onSubmit(message: HerdrPromptDraft, delivery?: HerdrDelivery): void; onCommand(text: string): void;
+  onStop?(): void; canUpload: boolean;
 }) {
   const picker = useRef<HTMLInputElement>(null);
   const queueable = working && agent === QUEUE_KEY_AGENT;
   const other: HerdrDelivery = delivery === 'steer' ? 'queue' : 'steer';
-  const offered = !draft.draft && !working ? suggestions : [];
-  async function send(sent: string, mode: HerdrDelivery) {
-    if (pending || draft.uploading || !sent.trim()) return;
-    const accepted = await onSubmit(sent.trim(), working ? mode : undefined);
-    if (accepted) draft.setDraft(current => current === sent ? '' : current);
-    requestAnimationFrame(() => { if (!matchMedia('(pointer: coarse)').matches) field.current?.focus({ preventScroll: true }); });
+  const overLimit = draft.items.length > MAX_FILES;
+  const offered = !draft.draft && !draft.items.length && !working ? suggestions : [];
+  function send(mode: HerdrDelivery) {
+    const text = draft.draft.trim();
+    if (pending || draft.incomplete || overLimit || (!text && !draft.ready.length)) return;
+    onSubmit({ text, attachments: draft.ready }, working ? mode : undefined);
+    if (!matchMedia('(pointer: coarse)').matches) field.current?.focus({ preventScroll: true });
   }
   const pick = (text: string) => {
     draft.setDraft(text);
@@ -95,11 +130,10 @@ export function HerdrComposer({ agent, working, pending, delivery, draft, field,
   const items: Suggestion[] = matches.map(command => ({
     id: command.name, icon: <Slash aria-hidden="true"/>, label: command.name, hint: command.hint ?? command.description, onSelect: () => choose(command),
   }));
-  const placeholder = !working ? '후속 지시' : !queueable ? '작업 중 — 이어서 지시' : delivery === 'steer' ? '작업 중 — 지금 바로 전달' : '작업 중 — 끝난 뒤 전달';
-  return <Composer className="coding-composer" label="후속 지시" placeholder={placeholder} submitLabel={queueable ? `${deliveryLabel[delivery]}로 보내기` : '보내기'}
-    inputRef={field} value={draft.draft} onValueChange={value => { draft.setDraft(value); setActive(0); }} onSubmit={() => void send(draft.draft, delivery)}
-    pending={pending || draft.uploading} running={working}
-    onFiles={canUpload ? files => void draft.attach(files) : undefined}
+  return <Composer className="coding-composer" label="후속 지시" placeholder={working ? '작업 중 — 이어서 지시' : '메시지'} submitLabel={queueable ? `${deliveryLabel[delivery]}로 보내기` : '보내기'}
+    inputRef={field} value={draft.draft} onValueChange={value => { draft.setDraft(value); setActive(0); }} onSubmit={() => send(delivery)}
+    canSubmitEmpty={draft.ready.length > 0} keepInputEnabledWhilePending pending={pending || draft.incomplete || overLimit}
+    onFiles={canUpload && !pending ? draft.attach : undefined}
     above={open ? <ComposerSuggest id={menuId} label="슬래시 명령" items={items} active={current} onActive={setActive}/> : undefined}
     inputAria={{ role: 'combobox', 'aria-expanded': open, 'aria-controls': open ? menuId : undefined, 'aria-activedescendant': open ? `${menuId}-${current}` : undefined, 'aria-autocomplete': 'list' }}
     onKeyDown={event => {
@@ -122,29 +156,24 @@ export function HerdrComposer({ agent, working, pending, delivery, draft, field,
         pick(offered[0]!);
       } else if (event.key === 'Enter' && event.altKey && queueable) {
         event.preventDefault();
-        void send(draft.draft, other);
+        send(other);
       }
     }}
     header={offered.length > 0 ? <NextSuggestions items={offered} onPick={pick}/> : undefined}
-    tray={draft.uploading || draft.uploadError ? <>
-      {draft.uploading && <p className="coding-hint" role="status">첨부 중…</p>}
-      {draft.uploadError && <InlineError className="whitespace-pre-line">{draft.uploadError}</InlineError>}
-    </> : undefined}
+    tray={<>
+      <AttachmentTray items={draft.items} onRemove={draft.remove}/>
+      {overLimit && <InlineError>파일은 {MAX_FILES}개까지 보낼 수 있습니다.</InlineError>}
+    </>}
     leading={canUpload ? <>
       <input ref={picker} hidden type="file" multiple onChange={event => {
-        if (event.currentTarget.files) void draft.attach(Array.from(event.currentTarget.files));
+        if (event.currentTarget.files) draft.attach(Array.from(event.currentTarget.files));
         event.currentTarget.value = '';
       }}/>
-      <button type="button" className="composer-plus__trigger" aria-label="파일 첨부" title="파일 첨부" disabled={pending || draft.uploading}
+      <button type="button" className="composer-plus__trigger" aria-label="파일 첨부" title="파일 첨부" disabled={pending || draft.items.length >= MAX_FILES}
         onClick={() => picker.current?.click()}><Paperclip aria-hidden="true"/></button>
     </> : undefined}
-    footer={model || queueable ? <>
-      {model && agent && <HerdrModelChip agent={agent} cwd={model.cwd} current={model.current} load={model.load} disabled={working || pending}
-        onPick={selector => void onSubmit(`/model ${selector}`)}/>}
-      {queueable && <span className="coding-delivery" title={`Enter ${deliveryLabel[delivery]} · ⌥Enter ${deliveryLabel[other]}`}>
-        {delivery === 'steer' ? <Navigation aria-hidden="true"/> : <ListEnd aria-hidden="true"/>}{deliveryLabel[delivery]}
-      </span>}
-    </> : undefined}
+    footer={model && agent ? <HerdrModelChip agent={agent} cwd={model.cwd} current={model.current} load={model.load} disabled={working || pending}
+      onPick={selector => onCommand(`/model ${selector}`)}/> : undefined}
     trailing={onStop && working ? <button type="button" className="chat-stop" aria-label="작업 중단" title="작업 중단 (Esc)" onClick={onStop}>
       <Square aria-hidden="true"/></button> : undefined}/>;
 }

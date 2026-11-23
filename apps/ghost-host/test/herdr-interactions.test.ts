@@ -208,6 +208,50 @@ test("looks up a Claude session ID, filters metadata and redacts credentials eve
   } finally { rmSync(dir, { force: true, recursive: true }); }
 });
 
+test("projects native images on the user turn without sending the bytes or TUI placeholders to the app", async () => {
+  const dir = tempDir();
+  try {
+    const project = join(dir, ".claude", "projects", "sample");
+    mkdirSync(project, { recursive: true });
+    mkdirSync(ompFolder(dir), { recursive: true });
+    const claudeImage = { type: "image", source: { type: "base64", media_type: "image/png", data: "cl-private-bytes" } };
+    const ompImage = { type: "image", mimeType: "image/webp", data: "omp-private-bytes" };
+    writeFileSync(join(project, "session-id.jsonl"),
+      claude("user", [text("[Image #4][Image #5]사진을 비교해 줘"), claudeImage, claudeImage]) +
+      row({ type: "user", isMeta: true, message: { role: "user", content: [text("[Image: source: /private/path.png]")] } }) +
+      claude("user", [text("[Image #6]"), claudeImage]));
+    const file = join(ompFolder(dir), "thread.jsonl");
+    writeFileSync(file, omp("user", [text("[Image #1, 200x200] 이 사진"), ompImage]) + omp("user", [ompImage]));
+    const reader = new HerdrChatReader(dir);
+    const codes = await reader.read(PANE, { agent: "claude", kind: "id", value: "session-id" }, null);
+    const oh = await reader.read(PANE, { agent: "omp", kind: "path", value: file }, null);
+    expect(codes.items).toMatchObject([{ kind: "user", text: "사진을 비교해 줘", imageCount: 2 }, { kind: "user", text: "", imageCount: 1 }]);
+    expect(oh.items).toMatchObject([{ kind: "user", text: "이 사진", imageCount: 1 }, { kind: "user", text: "", imageCount: 1 }]);
+    expect(JSON.stringify([codes, oh])).not.toMatch(/private-bytes|private\/path|Image #/);
+  } finally { rmSync(dir, { force: true, recursive: true }); }
+});
+
+test("a Claude model receipt is matched to the new slash command in its confined transcript", async () => {
+  const dir = tempDir();
+  try {
+    const project = join(dir, ".claude", "projects", "sample");
+    mkdirSync(project, { recursive: true });
+    const file = join(project, "session-id.jsonl");
+    const command = "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>haiku</command-args>";
+    const receipt = "<local-command-stdout>Set model to `Haiku 5.5`</local-command-stdout>";
+    const at = Date.now();
+    const user = (content: string, refs: object) => row({ type: "user", timestamp: new Date(at).toISOString(), message: { role: "user", content }, ...refs });
+    writeFileSync(file, user(command, { uuid: "command" }) + user(receipt, { parentUuid: "unrelated" }));
+    const reader = new HerdrChatReader(dir);
+    const ref = { agent: "claude", kind: "id", value: "session-id" };
+    expect(await reader.claudeModelChanged(ref, "haiku", at, PANE)).toBe(false);
+    appendFileSync(file, user(receipt, { parentUuid: "command" }));
+    expect(await reader.claudeModelChanged(ref, "haiku", at, PANE)).toBe(true);
+    expect(await reader.claudeModelChanged(ref, "haiku", at + 1, PANE)).toBe(false);
+    expect(await reader.claudeModelChanged(ref, "sonnet", at, PANE)).toBe(false);
+  } finally { rmSync(dir, { force: true, recursive: true }); }
+});
+
 test("starts at a complete tail line, caps UTF-8 text, and resets after truncate or replace", async () => {
   const dir = tempDir();
   try {

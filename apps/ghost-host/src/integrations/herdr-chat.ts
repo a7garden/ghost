@@ -64,6 +64,25 @@ async function bytes(file: FileHandle, start: number, length: number): Promise<B
   return count === length ? buffer : buffer.subarray(0, count);
 }
 
+async function openTranscript(homeDir: string, ref: SessionRef, previous?: Checkpoint) {
+  const home = await realpath(homeDir);
+  const root = join(home, ...(ref.agent === "omp" ? [".omp", "agent", "sessions"] : [".claude", "projects"]));
+  if (await realpath(root) !== root) return null;
+  const path = await locate(root, ref, previous);
+  if (!path || !(await stat(path)).isFile()) return null;
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const st = await file.stat();
+    const now = await stat(path);
+    if (st.isFile() && now.dev === st.dev && now.ino === st.ino && await confined(root, path) === path) return { file, path, st };
+  } catch (error) {
+    await file.close();
+    throw error;
+  }
+  await file.close();
+  return null;
+}
+
 /** Project text only; never return raw records, injected context or tool inputs other than a summary. */
 function cleanText(value: string): string {
   return value
@@ -157,6 +176,16 @@ function collect(data: Buffer, start: number, emitFrom: number, source: Source, 
       if (projection.text) items.push({ id: `${offset}:0`, kind, at, ...projection });
     }
     if (!Array.isArray(content)) return;
+    if (kind === "user" && visible) {
+      const images = content.filter((block) => object(block) && block.type === "image").length;
+      if (images > 0) {
+        const text = content.flatMap((block) => object(block) && block.type === "text" ? [string(block.text)] : []).join("\n");
+        // Both TUIs prefix display-only image labels to the text they persist.
+        const projection = userText(text.replace(/^(?:\s*\[Image #\d+(?:, \d+x\d+)?\])+[ \t]*/i, ""));
+        items.push({ id: `${offset}:0`, kind, at, ...projection, imageCount: images });
+        return;
+      }
+    }
     for (const [index, block] of content.entries()) {
       if (!object(block)) continue;
       const id = `${offset}:${index}`;
@@ -243,6 +272,35 @@ export class HerdrChatReader {
   private readonly checkpoints = new Map<string, Checkpoint>();
   constructor(private readonly home = homedir()) {}
 
+  /** Claude can update the transcript while its fullscreen view stays scrolled up. */
+  async claudeModelChanged(ref: SessionRef, selector: string, since: number, key: string): Promise<boolean> {
+    let file: FileHandle | undefined;
+    try {
+      const opened = await openTranscript(this.home, ref, this.checkpoints.get(key));
+      if (!opened) return false;
+      file = opened.file;
+      const start = Math.max(0, opened.st.size - HEAD);
+      const data = await bytes(file, start, opened.st.size - start);
+      let command: string | null = null;
+      let changed = false;
+      eachLine(data, start, (record) => {
+        if (record.type !== "user" || (date(record.timestamp) ?? 0) < since || !object(record.message)) return;
+        const content = string(record.message.content);
+        if (content.startsWith("<command-name>/model</command-name>")) {
+          command = content.endsWith(`<command-args>${selector}</command-args>`) ? string(record.uuid) || null : null;
+        } else if (command && record.parentUuid === command && content.startsWith("<local-command-stdout>Set model to ")) {
+          changed = true;
+        }
+      });
+      return changed;
+    } catch (error) {
+      if (!object(error) || typeof error.code !== "string") throw error;
+      return false;
+    } finally {
+      await file?.close();
+    }
+  }
+
   async read(pane: string, ref: SessionRef | null, after: string | null, key = pane): Promise<HerdrChat> {
     const unavailable = emptyHerdrChat(pane);
     if (ref?.agent !== "omp" && ref?.agent !== "claude") return unavailable;
@@ -250,15 +308,10 @@ export class HerdrChatReader {
     const previous = this.checkpoints.get(key);
     let file: FileHandle | undefined;
     try {
-      const home = await realpath(this.home);
-      const root = join(home, ...(source === "omp" ? [".omp", "agent", "sessions"] : [".claude", "projects"]));
-      if (await realpath(root) !== root) return unavailable;
-      const path = await locate(root, ref, previous);
-      if (!path || !(await stat(path)).isFile()) return unavailable;
-      file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-      const st = await file.stat();
-      const now = await stat(path);
-      if (!st.isFile() || now.dev !== st.dev || now.ino !== st.ino || await confined(root, path) !== path) return unavailable;
+      const opened = await openTranscript(this.home, ref, previous);
+      if (!opened) return unavailable;
+      const { path, st } = opened;
+      file = opened.file;
       const { size } = st;
       const identity = `${st.dev}:${st.ino}:${st.birthtimeMs}`;
       const requested = after !== null && /^\d{1,16}$/.test(after) ? Number(after) : null;

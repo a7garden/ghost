@@ -10,7 +10,7 @@ const tree = (...panes: HerdrPaneView[]): HerdrWorkspaceView[] => [
 ];
 
 describe('Coding inbox', () => {
-  it('shows attention, working, unread, then idle, with recent changes first within each group', () => {
+  it('shows attention, working, unread, idle, then shells, with recent changes first within each group', () => {
     const blocked = { ...pane, id: 'w1:p2', status: 'blocked' } as const;
     const another = { ...blocked, id: 'w1:p3' };
     const idle = { ...pane, id: 'w1:p4', status: 'idle' } as const;
@@ -18,8 +18,8 @@ describe('Coding inbox', () => {
     const prior = trackActivity({}, tree(pane, blocked), null, 100);
     const current = tree(pane, blocked, another, idle, finished, { ...pane, id: 'w1:p6', agent: null });
     const groups = groupAgents(current, trackActivity(prior, current, null, 200), null);
-    expect(agentGroups.flatMap(group => groups[group].map(row => row.pane.id))).toEqual(['w1:p3', 'w1:p2', 'w1:p1', 'w1:p5', 'w1:p4']);
-    expect(groups.working[0]?.location).toBe('ghost · coding-ui');
+    expect(agentGroups.flatMap(group => groups[group].map(row => row.pane.id))).toEqual(['w1:p3', 'w1:p2', 'w1:p1', 'w1:p5', 'w1:p4', 'w1:p6']);
+    expect(groups.shell[0]?.pane.agent).toBeNull();
   });
 
   it('marks each completion once, persists reading and does not mark the open pane unread', () => {

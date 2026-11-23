@@ -58,7 +58,7 @@ import { HerdrControlRefusal } from "../integrations/herdr-control.ts";
 import { mergeFrames } from "../integrations/herdr.ts";
 import { HERDR_PANE } from "../integrations/herdr-state.ts";
 import type { OmpInfoProvider } from "../integrations/omp.ts";
-import { saveUpload, UPLOAD_MAX_BYTES } from "../integrations/uploads.ts";
+import { checkUploads, saveUpload, UPLOAD_MAX_BYTES } from "../integrations/uploads.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
 import { ProviderQuotas } from "../integrations/provider-quota.ts";
@@ -798,7 +798,9 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
             return json(await herdr.startAgent(parse(HerdrAgentStart, body)) satisfies HerdrPaneView);
           case "/api/herdr/prompt": {
             const prompt = parse(HerdrPrompt, body);
-            return json((await herdr.prompt(prompt.pane, prompt.text, undefined, undefined, prompt.delivery)).pane satisfies HerdrPaneView);
+            if (!prompt.text.trim() && !prompt.attachments?.length) throw invalid("메시지나 첨부 파일을 입력해 주세요.");
+            if (prompt.attachments) checkUploads(config.root, prompt.attachments);
+            return json((await herdr.prompt(prompt.pane, prompt.text, undefined, undefined, prompt.delivery, prompt.attachments)).pane satisfies HerdrPaneView);
           }
           case "/api/herdr/answer":
             return json(await herdr.answer(parse(HerdrAnswerPayload, body)) satisfies HerdrPaneView);
