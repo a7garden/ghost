@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import type { CodingSession } from "@ghost/contract";
 import type { Dialogs } from "../src/coding/dialogs.ts";
 import { codingBash } from "../src/coding/tools.ts";
-import { prepareWorkspace, worktreeGit } from "../src/coding/workspace.ts";
+import { changesFor, prepareWorkspace, worktreeGit } from "../src/coding/workspace.ts";
 
 /** Real macOS Seatbelt tests: everything here proves the kernel boundary, not just our checks. */
 const darwin = process.platform === "darwin";
@@ -74,6 +75,8 @@ function fixture() {
   const session = prepareWorkspace(state, repo, sessions, "s1", true, "ghost/coding-git");
   const metadata = worktreeGit(session);
   if (!metadata) throw new Error("fixture: the session has no worktree metadata");
+  // A per-worktree config file, so the session has something to try to rewrite.
+  writeFileSync(join(metadata.admin, "config.worktree"), "[core]\n\tautocrlf = false\n");
   const { dialogs, asks } = stubDialogs();
   const tool = codingBash(state, session.cwd, dialogs, metadata, new Set<number>()) as unknown as BashTool;
   return { root, state, repo, session, common: metadata.common, admin: metadata.admin, branch: metadata.branch, tool, dialogs, asks };
@@ -141,6 +144,53 @@ describe.skipIf(!darwin)("coding session git sandbox", () => {
     const again = await run(tool, `${GIT_ENV} git ${IDENTITY} add -A`);
     expect(again.failed).toBe(true);
     expect(existsSync(index) ? readFileSync(index) : null).toEqual(before);
+  }, TEST_TIMEOUT);
+
+  test("the admin directory grants its own git files, never its identity files", async () => {
+    const f = fixture();
+    await run(f.tool, "printf change > CHANGE");
+    // The files git itself rewrites are writable.
+    for (const name of ["ORIG_HEAD", "COMMIT_EDITMSG", join("logs", "HEAD")]) {
+      const path = join(f.admin, name);
+      const result = await run(f.tool, `printf written > '${path}'`);
+      expect({ name, failed: result.failed }).toEqual({ name, failed: false });
+      expect(readFileSync(path, "utf8")).toBe("written");
+    }
+    // The identity files are not. A rewritten commondir would point the Host's own git calls
+    // (which run outside the session's sandbox) at a repository the session chooses, and that
+    // repository's config can run a command.
+    for (const name of ["commondir", "gitdir", "config.worktree"]) {
+      const path = join(f.admin, name);
+      const before = existsSync(path) ? readFileSync(path) : null;
+      const overwrite = await run(f.tool, `printf forged > '${path}'`);
+      const remove = await run(f.tool, `rm '${path}'`);
+      await run(f.tool, "printf forged > forged");
+      const rename = await run(f.tool, `mv forged '${path}'`);
+      expect({
+        name,
+        overwrite: overwrite.failed && overwrite.text.includes("Operation not permitted"),
+        remove: remove.failed && remove.text.includes("Operation not permitted"),
+        rename: rename.failed && rename.text.includes("Operation not permitted"),
+      }).toEqual({ name, overwrite: true, remove: true, rename: true });
+      expect(existsSync(path) ? readFileSync(path) : null).toEqual(before);
+    }
+    // The Host still observes the real repository, not one the session pointed it at.
+    expect(worktreeGit(f.session)?.common).toBe(f.common);
+    const changes = await changesFor(f.session as unknown as CodingSession);
+    expect(changes.files.map(file => file.path)).toContain("CHANGE");
+    // HEAD itself is writable, and a worktree moved to another branch loses every git grant.
+    const head = await run(f.tool, `printf 'ref: refs/heads/other\\n' > '${join(f.admin, "HEAD")}'`);
+    expect(head.failed).toBe(false);
+    expect(worktreeGit(f.session)?.branch).toBeNull();
+  }, TEST_TIMEOUT);
+
+  test("a repointed admin directory stops the Host's own git calls", async () => {
+    const f = fixture();
+    // The sandbox refuses this write; simulate a session that managed it anyway.
+    writeFileSync(join(f.admin, "commondir"), "/private/tmp/ghost-elsewhere\n");
+    expect(() => worktreeGit(f.session)).toThrow();
+    // The Host's own change observation fails closed instead of following the session.
+    await expect(changesFor(f.session as unknown as CodingSession)).rejects.toThrow();
   }, TEST_TIMEOUT);
 
   test("the common directory stays read-only outside the session's own branch and admin directory", async () => {

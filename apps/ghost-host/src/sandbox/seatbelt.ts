@@ -1,6 +1,6 @@
 import { realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 /**
  * macOS Seatbelt (sandbox-exec) boundary for the workspace execution kind. The kernel, not this
@@ -162,6 +162,29 @@ export function gitRefPlumbing(refs: string[]): string[] {
   return plumbing;
 }
 
+/**
+ * The files a linked worktree rewrites while it works, and nothing else in its admin
+ * directory: its index, its HEAD and the state files of a merge, cherry-pick, revert or reset.
+ * The directory's identity files (`commondir`, `gitdir`, `config.worktree`) stay read-only on
+ * purpose. A rewritten `commondir` points the Host's own git calls at another repository, and
+ * that repository's config can run a command (a filesystem monitor, an external diff) outside
+ * the sandbox.
+ */
+export const GIT_ADMIN_FILES = [
+  "index", "index.lock",
+  "HEAD", "HEAD.lock",
+  "ORIG_HEAD", "ORIG_HEAD.lock",
+  "MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "AUTO_MERGE",
+  "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD",
+  "COMMIT_EDITMSG",
+  join("logs", "HEAD"), join("logs", "HEAD.lock"),
+];
+
+/** The whitelisted admin files of one worktree, as the exact paths a grant may name. */
+export function gitAdminPlumbing(admin: string): string[] {
+  return GIT_ADMIN_FILES.map((name) => join(admin, name));
+}
+
 export type SeatbeltDecision = { ok: true } | { ok: false; why: "unwritable" | "secret" | "privacy" | "unreadable" };
 
 /** The one decision function for Host-side path checks; the generated profile agrees with it. */
@@ -259,27 +282,25 @@ export function seatbeltProfile(policy: SeatbeltPolicy): { profile: string; defi
     const fanout = `${objectsPattern}/[0-9a-f][0-9a-f]`;
     const objectFile = `${fanout}/(tmp_obj_[0-9A-Za-z]+|[0-9a-f]+)`;
     // A branch ref, its lock file and its reflog entry: lock, write, rename into place.
-    const refRules = refs.map((ref) => {
-      const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // A branch ref, its lock file and its reflog entry: lock, write, rename into place.
+    const writeRules = (paths: string[]): string => paths.map((path) => {
+      const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const filter = `(regex #"^${escaped}$")`;
       return [`(allow file-write* file-write-create ${filter})`, `(allow file-unlink ${filter})`].join("\n");
-    });
-    // The worktree's own private git directory: index, HEAD, ORIG_HEAD and its reflog. Nothing
-    // outside this subtree is writable, so the common config, hooks, packed refs and the other
-    // worktrees' admin directories stay read-only.
-    const adminRules = admin
-      ? (() => {
-        const escaped = admin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        return `(allow file-read* file-write* (regex #"^${escaped}(/|$)"))`;
-      })()
-      : "";
+    }).join("\n");
+    const refRules = writeRules(refs);
+    // The worktree's own private git files: index, HEAD, ORIG_HEAD and the state files of a
+    // merge or a cherry-pick. Each file is named exactly, never its directory: the directory
+    // also holds commondir and gitdir, and a rewritten commondir would send the Host's own git
+    // calls to a repository the session chooses.
+    const adminRules = admin ? writeRules(gitAdminPlumbing(admin)) : "";
     rules.push([
       `(allow file-read* (subpath (param "O0")))`,
       `(allow file-write-xattr (subpath (param "O0")))`,
       `(allow file-write-data file-write-create (regex #"^${fanout}$"))`,
       `(allow file-write-data file-write-create (regex #"^${objectFile}$"))`,
       `(allow file-unlink (regex #"^${fanout}/tmp_obj_[0-9A-Za-z]+$"))`,
-      refRules.join("\n"),
+      refRules,
       adminRules,
     ].join("\n"));
   }
