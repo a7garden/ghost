@@ -1,11 +1,9 @@
-"""Ghost remote speech adapter. No local model loads or audio persistence.
+"""Ghost local speech adapter: on-device STT (Apple SpeechAnalyzer) and TTS (Supertonic 3).
 
-The local batch endpoint protocol is unchanged for its callers (the Rust host
-posts OpenAI-style /v1/audio/* requests here), but the only speech backend is
-the Dyno-owned MLX process (:7730) through RemoteSpeech — the same backend the
-streaming media path uses. This process never loads model weights and never
-falls back to local inference: an unavailable or ambiguous speech outcome is a
-bounded error and the affected request fails without replay.
+The OpenAI-style /v1/audio/* protocol is what the Ghost Host's local call engine
+posts here. All inference runs in this machine's processes (see local_speech.py);
+an unavailable or ambiguous outcome is a bounded error and the affected request
+fails without replay. No audio or text is persisted or logged.
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ from email import policy
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
-from remote_speech import RemoteSpeech
+from local_speech import LocalSpeech
 from speech_contract import LANGUAGES, MAX_BODY, MAX_SPEECH_SECONDS, SpeechError, STT, TTS, VOICES
 
 
@@ -72,8 +70,8 @@ def synthesize_wav(speech, text, voice, language, cancelled):
     return output.getvalue()
 
 
-def create_app(speech=None, port=62076, speech_url="http://127.0.0.1:7730"):
-    speech = speech or RemoteSpeech(speech_url)
+def create_app(speech=None, port=62076):
+    speech = speech or LocalSpeech()
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ghost-speech")
     state = {"pending": 0, "completed": 0, "cancelled": 0, "failed": 0}
 
@@ -126,7 +124,7 @@ def create_app(speech=None, port=62076, speech_url="http://127.0.0.1:7730"):
 
     @app.get("/v1/models")
     async def models():
-        return {"object": "list", "data": [{"id": STT, "object": "model", "owned_by": "local", "roles": ["stt"]}, {"id": TTS, "object": "model", "owned_by": "local", "roles": ["tts"], "default_voice": "Sohee", "voices": sorted(VOICES), "languages": list(LANGUAGES.values())}]}
+        return {"object": "list", "data": [{"id": STT, "object": "model", "owned_by": "local", "roles": ["stt"]}, {"id": TTS, "object": "model", "owned_by": "local", "roles": ["tts"], "default_voice": "F1", "voices": sorted(VOICES), "languages": list(LANGUAGES.values())}]}
 
     async def infer(request, operation):
         if state["pending"] >= 3:
@@ -237,7 +235,7 @@ def create_app(speech=None, port=62076, speech_url="http://127.0.0.1:7730"):
             raise SpeechError("speech_format_requires_wav")
         voice = value.get("voice", "default")
         if voice == "default":
-            voice = "Sohee" if any("\uac00" <= c <= "\ud7a3" for c in text) else "Ryan"
+            voice = "F1"
         if not isinstance(voice, str) or voice.lower() not in VOICES:
             raise SpeechError("voice_not_supported")
         language = value.get("language") or ("Korean" if any("\uac00" <= c <= "\ud7a3" for c in text) else "English")
@@ -255,9 +253,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=62076)
-    parser.add_argument("--speech-url", default="http://127.0.0.1:7730")
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
     import uvicorn
-    uvicorn.run(create_app(port=args.port, speech_url=args.speech_url), host="127.0.0.1", port=args.port, access_log=False, log_level="warning", timeout_graceful_shutdown=10)
+    uvicorn.run(create_app(port=args.port), host="127.0.0.1", port=args.port, access_log=False, log_level="warning", timeout_graceful_shutdown=10)

@@ -4,8 +4,8 @@ import type { CallEnginePort } from "../core/calls.ts";
 import { CommandError, invalid, notFound } from "../core/errors.ts";
 
 /** `ghost-voice-server` wire identifiers (speech_contract.py); the Host never loads models itself. */
-const STT_MODEL = "whisper-large-v3-turbo";
-const TTS_MODEL = "qwen3-tts-0.6b-customvoice";
+const STT_MODEL = "apple-speechanalyzer";
+const TTS_MODEL = "supertonic-3";
 /** The speech server refuses larger bodies before parsing (MAX_BODY), so the Host never forwards one. */
 const MAX_WAV_BYTES = 5 * 1024 * 1024;
 /** `CallSpeechRequest` text is ≤500 characters; the JSON wrapper only needs a small bound. */
