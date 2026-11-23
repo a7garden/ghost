@@ -1,21 +1,37 @@
-# Ghost loopback speech adapter. The only speech backend is the Dyno-owned
-# :7730 process through RemoteSpeech; this process never loads model weights,
-# so the local weights stack (mlx*, transformers, torch, tokenizers, the HF hub
-# cache chain) and any media stack are intentionally absent.
-annotated-doc==0.0.5
+# Ghost local speech adapter, resolved 2026-11-24 (uv pip freeze of a clean Python 3.12 venv).
+# STT is Apple SpeechAnalyzer through bin/apple-stt (no Python dependency); TTS is Supertonic 3 on ONNX Runtime.
+annotated-doc==0.0.7
 annotated-types==0.8.0
-anyio==4.15.1
-certifi==2026.7.22
-click==8.5.0
+anyio==4.16.0
+certifi==2026.11.20
+cffi==2.1.1
+click==8.5.1
 fastapi==0.141.1
+filelock==4.3.1
+flatbuffers==25.12.19
+fsspec==2026.9.0
 h11==0.16.0
+hf-xet==1.8.0
 httpcore==1.0.9
+httpcore2==2.16.2
 httpx==0.28.1
+httpx2==2.16.2
+huggingface-hub==2.4.0
 idna==3.20
-pydantic==2.13.5
-pydantic-core==2.46.5
+numpy==2.5.5
+onnxruntime==1.32.0
+packaging==26.3
+protobuf==7.36.2
+pycparser==3.12
+pydantic==2.14.4
+pydantic-core==2.50.5
 python-multipart==0.0.32
-starlette==1.7.0
+pyyaml==6.0.4
+soundfile==0.14.0
+starlette==1.10.0
+supertonic==1.3.1
+tqdm==4.70.1
+truststore==0.10.5
 typing-extensions==4.16.0
-typing-inspection==0.4.4
+typing-inspection==0.4.5
 uvicorn==0.53.0

@@ -4,11 +4,12 @@ import time
 import unittest
 from unittest.mock import patch
 import wave
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import os
+import tempfile
 from fastapi.testclient import TestClient
-import remote_speech
-from remote_speech import RemoteSpeech
+from korean_text import normalize
+from local_speech import LocalSpeech
 from server import create_app, decode_wav
 from speech_contract import SpeechError, STT, TTS
 
@@ -70,12 +71,12 @@ class SpeechBoundaryTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertNotIn("private", response.text)
 
-    def test_default_voice_korean_and_english(self):
-        for text, expected in [("안녕하세요", "Sohee"), ("Hello", "Ryan")]:
+    def test_default_voice_is_f1(self):
+        for text in ["안녕하세요", "Hello"]:
             response = self.client.post("/v1/audio/speech", json={"model": TTS, "input": text, "voice": "default", "response_format": "wav"})
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.headers["content-type"], "audio/wav")
-            self.assertEqual(self.speech.voice, expected)
+            self.assertEqual(self.speech.voice, "F1")
             decode_wav(response.content)
 
     def test_output_request_limits(self):
@@ -134,93 +135,52 @@ class SpeechBoundaryTests(unittest.TestCase):
         self.assertEqual(responses, [200, 200, 200])
 
 
-class StreamingWavTests(unittest.TestCase):
-    def encoded(self, rate=24000, frames=4, channels=1):
-        output = io.BytesIO()
-        with wave.open(output, "wb") as writer:
-            writer.setnchannels(channels)
-            writer.setsampwidth(2)
-            writer.setframerate(rate)
-            writer.writeframes(b"\x01\x02" * frames * channels)
-        return output.getvalue()
-
-    def test_incremental_decode_across_chunk_boundaries(self):
-        decoder = remote_speech._StreamingWav()
-        payload = self.encoded()
-        split = payload.index(b"data") + 5  # a split inside the chunk headers
-        decoder.feed(payload[:split])
-        decoder.feed(payload[split:])
-        pcm, rate = decoder.finish()
-        self.assertEqual(rate, 24000)
-        self.assertEqual(pcm, b"\x01\x02" * 4)
-
-    def test_truncated_or_headerless_responses_are_rejected(self):
-        decoder = remote_speech._StreamingWav()
-        decoder.feed(self.encoded(frames=100)[:30])
-        with self.assertRaises(SpeechError):
-            decoder.finish()
-        short = remote_speech._StreamingWav()
-        short.feed(b"RIFF")
-        with self.assertRaises(SpeechError):
-            short.finish()
-
-    def test_wrong_format_is_rejected_before_pcm_is_trusted(self):
-        decoder = remote_speech._StreamingWav()
-        with self.assertRaises(SpeechError):
-            decoder.feed(self.encoded(channels=2))
-        float_header = bytearray(self.encoded())
-        float_header[20:22] = (3).to_bytes(2, "little")  # WAVE_FORMAT_IEEE_FLOAT
-        decoder = remote_speech._StreamingWav()
-        with self.assertRaises(SpeechError):
-            decoder.feed(bytes(float_header))
-
-    def test_pcm_beyond_the_declared_data_chunk_is_rejected(self):
-        decoder = remote_speech._StreamingWav()
-        payload = self.encoded(frames=8)
-        decoder.feed(payload)
-        with self.assertRaises(SpeechError):
-            decoder.feed(b"\x00\x00")  # beyond the declared data size
-        with self.assertRaises(SpeechError):
-            remote_speech._StreamingWav().feed(payload + b"\x00\x00")
+class KoreanTextTests(unittest.TestCase):
+    def test_numbers_links_and_markdown_become_speakable(self):
+        cases = {
+            "총 12,500원이고 15%예요.": "총 만이천오백원이고 십오퍼센트예요.",
+            "내일 오후 3시 30분에 만나요": "내일 오후 세시 삼십분에 만나요",
+            "2026년 9월 20명 3개": "이천이십육년 구월 스무명 세개",
+            "https://example.com 열게요 **네**": "링크 열게요 네",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(normalize(text), expected)
 
 
-class RemoteSpeechWireTests(unittest.TestCase):
-    def test_provider_wav_becomes_exact_pcm_through_the_streaming_consumer(self):
-        pcm = bytes(range(256)) * 16
-        output = io.BytesIO()
-        with wave.open(output, "wb") as writer:
-            writer.setnchannels(1)
-            writer.setsampwidth(2)
-            writer.setframerate(24000)
-            writer.writeframes(pcm)
-        payload = output.getvalue()
+class AppleHelperProtocolTests(unittest.TestCase):
+    def helper(self, body):
+        path = os.path.join(self.tmp.name, "helper")
+        with open(path, "w") as file:
+            file.write("#!/usr/bin/env python3\nimport sys, json\n" + body)
+        os.chmod(path, 0o755)
+        return path
 
-        class Provider(BaseHTTPRequestHandler):
-            def do_POST(self):
-                self.rfile.read(int(self.headers["Content-Length"]))
-                self.send_response(200)
-                self.send_header("Content-Type", "audio/wav")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                for index in range(0, len(payload), 31):
-                    self.wfile.write(payload[index:index + 31])
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
 
-            def log_message(self, *_):
-                pass
+    def test_transcribe_sends_path_and_locale_and_returns_text(self):
+        helper = self.helper("for line in sys.stdin:\n    r = json.loads(line)\n    print(json.dumps({'ok': True} if 'ping' in r else {'text': ' ' + r['locale'] + ' ' + str(open(r['path'],'rb').read(4)) + ' '}), flush=True)\n")
+        speech = LocalSpeech(helper)
+        self.addCleanup(speech.close)
+        self.assertTrue(speech._ping())
+        out = speech.transcribe(wav(), "ko", threading.Event())
+        self.assertEqual(out["text"], "ko_KR b'RIFF'")
 
-        provider = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
-        thread = threading.Thread(target=provider.serve_forever, daemon=True)
-        thread.start()
-        speech = RemoteSpeech(f"http://127.0.0.1:{provider.server_port}")
-        try:
-            chunks = list(speech.iter_synthesize("wire regression", "Sohee", "ko", threading.Event()))
-            self.assertEqual(b"".join(chunk for chunk, _ in chunks), pcm)
-            self.assertEqual({rate for _, rate in chunks}, {24000})
-        finally:
-            speech.close()
-            provider.shutdown()
-            provider.server_close()
-            thread.join()
+    def test_a_helper_that_dies_is_replaced_once_then_fails_bounded(self):
+        speech = LocalSpeech(self.helper("sys.exit(1)\n"))
+        self.addCleanup(speech.close)
+        with self.assertRaises(SpeechError) as raised:
+            speech.transcribe(wav(), "ko", threading.Event())
+        self.assertEqual(raised.exception.status, 503)
+
+    def test_a_missing_helper_is_a_bounded_error(self):
+        speech = LocalSpeech(os.path.join(self.tmp.name, "nope"))
+        self.addCleanup(speech.close)
+        with self.assertRaises(SpeechError) as raised:
+            speech.transcribe(wav(), "ko", threading.Event())
+        self.assertEqual(raised.exception.code, "stt_helper_missing")
+
 
 
 if __name__ == "__main__":

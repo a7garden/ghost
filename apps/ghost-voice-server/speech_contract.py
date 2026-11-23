@@ -1,9 +1,9 @@
 """Shared speech wire contract; no server, transport, or inference imports."""
 
-STT = "whisper-large-v3-turbo"
-TTS = "qwen3-tts-0.6b-customvoice"
+STT = "apple-speechanalyzer"
+TTS = "supertonic-3"
 LANGUAGES = {"ko": "Korean", "en": "English", "ja": "Japanese", "zh": "Chinese", "de": "German", "fr": "French", "es": "Spanish", "it": "Italian", "pt": "Portuguese", "ru": "Russian"}
-VOICES = {"sohee", "ryan", "aiden", "vivian", "serena", "ono_anna", "uncle_fu", "eric", "dylan"}
+VOICES = {"f1", "f2", "f3", "f4", "f5", "m1", "m2", "m3", "m4", "m5"}
 MAX_BODY = 5 * 1024 * 1024
 MAX_SPEECH_SECONDS = 60
 MAX_TTS_CHUNK_BYTES = 256 * 1024

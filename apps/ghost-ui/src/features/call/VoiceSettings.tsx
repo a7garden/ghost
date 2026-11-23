@@ -14,9 +14,8 @@ const engines = [
 
 const speakers: Record<CallEngine, { value: string; label: string }[]> = {
   local: [
-    { value: 'sohee', label: '소희' }, { value: 'ryan', label: '라이언' }, { value: 'aiden', label: '에이든' },
-    { value: 'vivian', label: '비비안' }, { value: 'serena', label: '세레나' }, { value: 'ono_anna', label: '오노 안나' },
-    { value: 'uncle_fu', label: '푸 아저씨' }, { value: 'eric', label: '에릭' }, { value: 'dylan', label: '딜런' },
+    ...['F1', 'F2', 'F3', 'F4', 'F5'].map(value => ({ value: value.toLowerCase(), label: `여성 ${value.slice(1)}` })),
+    ...['M1', 'M2', 'M3', 'M4', 'M5'].map(value => ({ value: value.toLowerCase(), label: `남성 ${value.slice(1)}` })),
   ],
   realtime: [
     { value: 'noeul', label: '노을' }, { value: 'marin', label: '마린' }, { value: 'cedar', label: '시더' },

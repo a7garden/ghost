@@ -149,7 +149,7 @@ describe("local call engine routes", () => {
     const upstream = speech.requests[0]!;
     expect(upstream.method).toBe("POST");
     expect(upstream.path).toBe("/v1/audio/transcriptions");
-    expect(upstream.form!.get("model")).toBe("whisper-large-v3-turbo");
+    expect(upstream.form!.get("model")).toBe("apple-speechanalyzer");
     expect(upstream.form!.get("language")).toBe("ko");
     const file = upstream.form!.get("file") as File;
     expect(file.type).toMatch(/^audio\//);
@@ -179,14 +179,14 @@ describe("local call engine routes", () => {
     servers.push(speech.server);
     const t = setup(speech.url);
     t.engine.start();
-    t.core.calls.setVoice({ voice: "sohee" });
+    t.core.calls.setVoice({ voice: "f2" });
     const call = await liveCall(t);
     const response = await t.serve(t.engine, `/api/calls/${call.id}/speech`, { method: "POST", body: JSON.stringify({ text: "안녕하세요." }), headers: { "content-type": "application/json" } });
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("audio/wav");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual(Array.from(WAV));
-    expect(speech.requests[0]!.json).toEqual({ model: "qwen3-tts-0.6b-customvoice", input: "안녕하세요.", voice: "sohee", response_format: "wav" });
+    expect(speech.requests[0]!.json).toEqual({ model: "supertonic-3", input: "안녕하세요.", voice: "f2", response_format: "wav" });
 
     const oversized = await t.serve(t.engine, `/api/calls/${call.id}/speech`, { method: "POST", body: JSON.stringify({ text: "가".repeat(501) }) });
     expect(oversized.status).toBe(400);

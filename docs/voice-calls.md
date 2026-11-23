@@ -23,7 +23,7 @@ flowchart LR
     core[Core.sendMessage → Pi]
   end
   oai[(OpenAI Live API)]
-  vs[ghost-voice-server → Dyno MLX]
+  vs[ghost-voice-server · Apple STT + Supertonic]
   mic <-->|WebRTC 오디오| oai
   ui -->|call.* 명령 · SDP offer| calls
   calls --> live --> oai
@@ -54,7 +54,7 @@ flowchart LR
 
 ### local (`integrations/calls-local.ts`)
 
-- Host 설정 `voice.speechUrl`(기본 `http://127.0.0.1:62076`, loopback http만)의 `ghost-voice-server`를 쓴다. 10초마다 `/health`를 확인하고 두 모델이 모두 올라 있을 때만 통화를 받는다. 이 서버와 Dyno MLX(`:7730`)를 띄우는 일은 Host가 하지 않는다(별도 운영).
+- Host 설정 `voice.speechUrl`(기본 `http://127.0.0.1:62076`, loopback http만)의 `ghost-voice-server`를 쓴다. 이 서버는 이 Mac 안에서 STT는 Apple SpeechAnalyzer(`bin/apple-stt`, macOS 26+), TTS는 Supertonic 3(ONNX, 목소리 F1–F5·M1–M5)로 처리한다. 숫자·단위·링크는 TTS 전에 읽을 수 있는 말로 바꾼다(영어 단어는 그대로라 발음이 약하다). Host는 10초마다 `/health`를 확인하고 두 엔진이 모두 준비됐을 때만 통화를 받는다. 서버는 LaunchAgent `com.a7.ghost-voice`로 띄우며 Host가 띄우지는 않는다.
 - 클라이언트가 VAD로 발화를 자르고 `POST /api/calls/:id/transcribe`(audio/wav) → 텍스트 → `message.send`(callId) → 답은 기존 SSE로 오고, 클라이언트가 문장마다 `POST /api/calls/:id/speech` → WAV를 재생 큐에 넣는다. 끼어들면 큐를 비우고 `message.cancel`을 보낸다.
 - 서버 쪽 동시 업스트림 2건, 초과는 `unavailable`. 업스트림 오류 본문은 클라이언트로 전달하지 않는다.
 
