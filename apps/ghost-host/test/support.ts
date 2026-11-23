@@ -25,6 +25,12 @@ export class FakeEngine implements Engine {
   readonly submissions = new Map<string, { conversationId: string; submission: Submission }>();
   readonly aborted: string[] = [];
   readonly outcomes = new Map<string, SubmissionRecovery>();
+  readonly answers = new Map<string, string>();
+
+  async answer(_conversationId: string, requestId: string, signal: AbortSignal): Promise<string | null> {
+    signal.throwIfAborted();
+    return this.answers.get(requestId) ?? null;
+  }
 
   async submissionRecovery(_conversationId: string, requestId: string): Promise<SubmissionRecovery | null> {
     return this.outcomes.get(requestId) ?? (this.submissions.has(requestId)
@@ -36,7 +42,7 @@ export class FakeEngine implements Engine {
   async open(setup: ConversationSetup) {
     this.opened.push(setup);
   }
-  async submit(conversationId: string, submission: Submission) {
+  async submit(conversationId: string, submission: Submission, _authorize?: () => void) {
     if (!this.submissions.has(submission.requestId)) this.submissions.set(submission.requestId, { conversationId, submission });
   }
   async abort(conversationId: string) {

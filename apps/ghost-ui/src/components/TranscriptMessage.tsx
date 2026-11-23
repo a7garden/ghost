@@ -63,7 +63,7 @@ export function ToolTrail({ results, running = [] }: { results: Message[]; runni
     <summary className="trail__summary">
       <span className="trail__count">{summary}{failed > 0 && <span className="trail__failed"> · 실패 {failed}</span>}</span>
       <span className="trail__chips" aria-hidden="true">
-        {names.slice(-6).map(item => <span key={item.id} className="trail__chip" data-error={item.error || undefined} data-live={item.live || undefined}>{item.name}</span>)}
+        {names.slice(-6).map(item => <span key={item.id} className="trail__chip" title={item.name} data-error={item.error || undefined} data-live={item.live || undefined}>{item.name}</span>)}
         {names.length > 6 && <span className="trail__chip" data-more>+{names.length - 6}</span>}
       </span>
     </summary>

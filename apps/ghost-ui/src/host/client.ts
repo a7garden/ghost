@@ -2,6 +2,11 @@ import { shell, shellCall } from './shell';
 import type {
   ApiError,
   ArtifactRef,
+  CallAnswer,
+  CallEngine,
+  CallOffer,
+  CallSpeechRequest,
+  CallTranscript,
   Command,
   CodingSetup,
   CommandOf,
@@ -63,6 +68,7 @@ import type {
   VaultItem,
   VaultItemKind,
   WorkDetail,
+  VoiceSettings,
 } from '@ghost/contract';
 
 declare global {
@@ -585,8 +591,9 @@ export class HostClient {
   }
 
   /** Send a command. Retrying the same call reuses its request id, so it never runs twice. */
-  async send<T extends Record<string, unknown> = Record<string, unknown>>(command: Command, requestId: string = crypto.randomUUID()): Promise<T> {
+  async send<T extends Record<string, unknown> = Record<string, unknown>>(command: Command, requestId: string = crypto.randomUUID(), options?: Pick<RequestInit, 'keepalive'>): Promise<T> {
     const response = await this.json<CommandResponse>('/api/commands', {
+      ...options,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requestId, command }),
@@ -596,6 +603,54 @@ export class HostClient {
     });
     if (!response.ok) throw new HostError(response.error.code, response.error.message);
     return response.result as T;
+  }
+
+  startCall(ghostId: string, engine?: CallEngine, requestId?: string): Promise<{ callId: string }> {
+    return this.send({ type: 'call.start', ghostId, engine }, requestId);
+  }
+
+  activateCall(callId: string) {
+    return this.send({ type: 'call.activate', callId });
+  }
+
+  endCall(callId: string, requestId: string, keepalive = false) {
+    // A keepalive request can carry Authorization during pagehide; sendBeacon cannot.
+    return this.send({ type: 'call.end', callId }, requestId, { keepalive });
+  }
+
+  setVoice(settings: Partial<VoiceSettings>) {
+    return this.send({ type: 'voice.set', ...settings });
+  }
+
+  offer(callId: string, offer: CallOffer, signal: AbortSignal): Promise<CallAnswer> {
+    return this.json(`/api/calls/${encodeURIComponent(callId)}/offer`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(offer), signal,
+    });
+  }
+
+  transcribe(callId: string, wav: ArrayBuffer, signal: AbortSignal): Promise<CallTranscript> {
+    return this.json(`/api/calls/${encodeURIComponent(callId)}/transcribe`, {
+      method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: wav, signal,
+    });
+  }
+
+  async speak(callId: string, speech: CallSpeechRequest, signal: AbortSignal): Promise<ArrayBuffer> {
+    let response: Response;
+    try {
+      response = await this.request(`/api/calls/${encodeURIComponent(callId)}/speech`, {
+        method: 'POST', cache: 'no-store', signal,
+        headers: this.headers({ 'Content-Type': 'application/json', Accept: 'audio/wav' }),
+        body: JSON.stringify(speech),
+      });
+    } catch (caught) {
+      throw caught instanceof HostError ? caught : new HostError('network', 'Ghost 호스트에 연결할 수 없습니다.');
+    }
+    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: ApiError } | null;
+      throw new HostError(body?.error?.code ?? 'internal', body?.error?.message ?? `음성을 받을 수 없습니다 (${response.status}).`);
+    }
+    return response.arrayBuffer();
   }
 
   /** Bundled provider/model defaults; no account credentials or network discovery. */

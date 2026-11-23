@@ -72,7 +72,7 @@ apps/ghost-host/           the ghost process
 apps/ghost-ui/             React web UI, served by the host and embedded by the Mac app
 apps/ghost-desktop/        Tauri shell: a client of the running Host, never its owner
 apps/ghost-ios/            SwiftUI app
-apps/ghost-voice-server/   local STT/TTS adapter for the call feature (design: voice-calls.md)
+apps/ghost-voice-server/   local STT/TTS adapter for the local call engine (voice-calls.md)
 scripts/release.ts         build, sign and publish a GitHub Release
 docs/
 ```
@@ -447,5 +447,5 @@ It writes a loss report of everything it did not carry over. PDC vaults are refe
 | Planner, CalDAV, Google planner, Slack channel, incidents feed, integrations proposal surface | outside current product scope |
 | Model-driven bot candidate/evaluation pipeline | Ghosts are created and edited by the owner |
 | `workspace_objects` key-value store, command response ledger | plain tables; reads are not journaled |
-| Voice routes (transcribe, synthesize, WebRTC media relay) | accepted 2026-11-23 as the call feature; see [voice-calls](voice-calls.md). `apps/ghost-voice-server` stays and gets Host routes |
+| Voice routes (transcribe, synthesize, WebRTC media relay) | rebuilt 2026-11-23 as the call feature: `core/calls.ts` plus `integrations/calls-live.ts` / `calls-local.ts`; see [voice-calls](voice-calls.md) |
 | Oxibrain integration, selectable `memory_recall`/`memory_retain`, memory-management Ghost | memory storage, retrieval and consolidation belong to the Host; other applications' Oxibrain executable/store are not removed |

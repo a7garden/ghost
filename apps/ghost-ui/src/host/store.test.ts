@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Ghost, LedgerEventData, State } from '@ghost/contract';
+import type { Call, Ghost, LedgerEventData, State } from '@ghost/contract';
 import { applyEvent, HostStore } from './store';
 import { HostClient, type StreamHandlers } from './client';
 import { SnapshotCache } from './snapshotCache';
@@ -31,6 +31,24 @@ const ghost = (id: string, patch: Partial<Ghost> = {}): Ghost => ({
 const event = (data: LedgerEventData) => data;
 
 describe('applyEvent', () => {
+  it('inserts new calls first and replaces transitions without duplicating the call', () => {
+    const older: Call = {
+      id: 'older', ghostId: 'sage', conversationId: 'conv-sage', engine: 'local', status: 'ended',
+      startedAt: 1, answeredAt: 2, endedAt: 3, seconds: 0, endReason: 'hangup', error: null,
+    };
+    const connecting: Call = {
+      ...older, id: 'newer', status: 'connecting', startedAt: 4, answeredAt: null,
+      endedAt: null, seconds: null, endReason: null,
+    };
+    const original = baseState();
+    const one = applyEvent(original, { type: 'call', call: older });
+    const two = applyEvent(one, { type: 'call', call: connecting });
+    const active = { ...connecting, status: 'active' as const, answeredAt: 5 };
+    expect(applyEvent(two, { type: 'call', call: active }).calls).toEqual([active, older]);
+    expect(two.calls).toEqual([connecting, older]);
+    expect(original.calls).toBeUndefined();
+  });
+
   it('inserts a new ghost and updates an existing one by id', () => {
     let state = applyEvent(baseState(), event({ type: 'ghost', ghost: ghost('sage') }));
     expect(state.ghosts.map(row => row.id)).toEqual(['sage']);

@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { awaitWithContext, BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import type { AssistantMessage, Models, MutableModels } from "@earendil-works/pi-ai";
 import {
   AssistantEntry,
@@ -730,6 +730,35 @@ class HostEngine implements Engine, MemoryEngine {
       serving: null,
       hit: hit && message ? { provider: message.provider, ...hit } : null,
     };
+  }
+
+  async answer(conversationId: string, requestId: string, signal: AbortSignal): Promise<string | null> {
+    const context = withAbortSignal(signal, ctx);
+    signal.throwIfAborted();
+    const state = await awaitWithContext(this.stateFor(conversationId), context);
+    if (!state) return null;
+    for (;;) {
+      const record = await state.pi.commit((tx) => tx.submissionByRequest(state.piId, requestId), context);
+      if (!record || record.type !== "input") return null;
+      const submission = await this.harness.submission(record.id, context);
+      const settled = await submission?.wait(context);
+      signal.throwIfAborted();
+      if (!settled || settled.type !== "input") return null;
+      if (settled.status === "done") {
+        const { items } = await state.pi.entries({ minEntryId: settled.answer, maxEntryId: settled.answer }, 1, undefined, context);
+        const final = items[0]?.model?.find((message): message is AssistantMessage => message.role === "assistant");
+        return final && (final.stopReason === "stop" || final.stopReason === "length")
+          ? final.content.filter((part) => part.type === "text").map((part) => part.text).join("\n")
+          : null;
+      }
+      if (settled.reason !== "model_error" || settled.entry === undefined) return null;
+      // The idle dispatch can continue a failed input with a new receipt on the same user entry.
+      await state.pi.waitForIdle(context);
+      await awaitWithContext(state.dispatch, context);
+      const receipt = (await this.harness.snapshot(FallbackReceiptsDoc, state.piId, context))?.byInput[String(settled.entry)];
+      if (!receipt || receipt.requestId === requestId) return null;
+      requestId = receipt.requestId;
+    }
   }
 
   async abort(conversationId: string): Promise<void> {

@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
+import type { Notification, State } from '@ghost/contract';
 import { openScreen, screenshot, type Screen } from './visual';
 import { mockBrowserLiveStream, mockIPhone, mockRichConversation, releaseBrowserFrame, showTranscriptElement } from './iphone-fixtures';
 import { readRunState } from './run-state';
+import { mockCodingApi, visualCodingIds } from './mocks';
 
 const screens: Screen[] = [
   { name: 'home', route: () => '/', waits: () => ['진행 중', '최근 끝난 일'] },
@@ -12,18 +14,15 @@ const screens: Screen[] = [
   { name: 'devices', route: () => '/settings?tab=devices', waits: () => ['나의 iPhone', '확인 요청', '알림 허용'], prepare: mockIPhone },
 ];
 
-test('open and switch Ghost conversations from the mobile dock', async ({ page }) => {
-  await openScreen(page, { name: 'mobile conversations', route: () => '/', waits: () => [], prepare: mockIPhone }, 'light');
+test('opens the main Ghost from the mobile dock and another Ghost from the workspace', async ({ page }) => {
+  const state = await openScreen(page, { name: 'mobile conversations', route: () => '/', waits: () => [], prepare: mockIPhone }, 'light');
   const dock = page.getByRole('navigation', { name: '주요 화면' });
   const tab = dock.getByRole('button', { name: '대화', exact: true });
   const back = page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true });
   await expect(page.getByLabel('도우미에게 메시지', { exact: true })).toBeVisible();
   await tab.tap();
-  await expect(tab).toHaveAttribute('aria-current', 'page');
-  const list = page.getByRole('region', { name: '대화', exact: true });
-  const ghosts = list.getByRole('list').getByRole('button');
-  await expect(ghosts.first()).toHaveAccessibleName('도우미 메인');
-  await list.getByRole('button', { name: '도우미 메인' }).tap();
+  await expect(page).toHaveURL(`${state.baseUrl}/#/ghosts/${state.defaultGhostId}`);
+  await expect(tab).toBeHidden();
   await expect(page.getByText('이번 주에 들어온 요청을 정리해서 우선순위를 알려 줘.')).toBeVisible();
   await page.setViewportSize({ width: 320, height: 690 });
   const header = page.locator('.ghost-titlebar');
@@ -37,23 +36,69 @@ test('open and switch Ghost conversations from the mobile dock', async ({ page }
   const bounds = (await header.boundingBox())!;
   expect((await transcript.boundingBox())!.y).toBeLessThanOrEqual(bounds.y + bounds.height + 1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
-  await back.tap();
+  const tools = header.getByRole('button', { name: '작업실 메뉴', exact: true });
+  await tools.tap();
+  await page.getByRole('dialog', { name: '작업실 메뉴' }).getByRole('button', { name: '작업실', exact: true }).tap();
+  await expect(page).toHaveURL(`${state.baseUrl}/#/workspace`);
 
-  const search = list.getByRole('searchbox', { name: 'Ghost 찾기' });
-  await search.fill('연구');
-  await expect(ghosts).toHaveCount(1);
-  await list.getByRole('button', { name: '연구원', exact: true }).tap();
+  const workspace = page.locator('.workspace-page');
+  await expect(workspace.getByRole('button', { name: /도우미 메인/ })).toBeVisible();
+  await expect(workspace.getByRole('button', { name: '기록가', exact: true })).toBeVisible();
+  await workspace.getByRole('button', { name: /연구원/ }).tap();
   await expect(page.getByRole('navigation', { name: '위치' }).getByText('연구원', { exact: true })).toBeVisible();
   await expect(page.locator('#message-input')).toBeVisible();
   await expect(page.getByText('이번 주에 들어온 요청을 정리해서 우선순위를 알려 줘.')).toHaveCount(0);
   await back.tap();
   await expect(tab).toHaveAttribute('aria-current', 'page');
-  await expect(list.getByRole('button', { name: '기록가', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(`${state.baseUrl}/#/workspace`);
+  await expect(workspace.getByRole('button', { name: '기록가', exact: true })).toBeVisible();
 
   const hitWidths = await dock.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().width));
   expect(hitWidths).toHaveLength(4);
   expect(hitWidths.every(width => width >= 44)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+});
+
+test('opens an exited pane from a coding notification and falls back to the roster for a missing pane', async ({ page }) => {
+  const session = 'default';
+  const pane = visualCodingIds.finished;
+  const present = `coding:${session}:${pane}:exit:1`;
+  const missing = `coding:${session}:w99:p99:exit:2`;
+  await openScreen(page, { name: 'coding exit notification', route: () => '/', waits: () => ['최근 끝난 일'], prepare: async page => {
+    await mockIPhone(page);
+    await mockCodingApi(page, { rich: true, finishedAgent: null });
+    await page.route('**/api/state', async route => {
+      const response = await route.fetch();
+      const state: State = await response.json();
+      const seed = readRunState();
+      const notifications = [present, missing].map((id, index): Notification => ({
+        id, kind: 'message', ghostId: seed.defaultGhostId, conversationId: seed.conversationA, workId: null, decisionId: null,
+        title: '에이전트가 종료됐어요', body: index === 0 ? '로그인 실패 시 안내 문구 고치기' : '닫힌 패널',
+        createdAt: seed.fixedNow - 30_000, readAt: null,
+      }));
+      await route.fulfill({ response, json: { ...state, notifications } });
+    });
+    await page.route('**/api/commands', route => {
+      const command = route.request().postDataJSON()?.command;
+      if (command?.type !== 'notification.read') return route.fallback();
+      return route.fulfill({ json: { ok: true, result: {} } });
+    });
+  } }, 'light');
+  async function tapNotification(notificationId: string) {
+    const read = page.waitForRequest(request => new URL(request.url()).pathname === '/api/commands' &&
+      request.postDataJSON()?.command?.type === 'notification.read');
+    await page.evaluate(notificationId => {
+      window.dispatchEvent(new CustomEvent('ghost-shell', { detail: { type: 'notification.open', notificationId } }));
+    }, notificationId);
+    expect((await read).postDataJSON().command.notificationIds).toEqual([notificationId]);
+  }
+  await tapNotification(present);
+  await expect(page).toHaveURL(url => url.hash === `#/coding?herdr=${encodeURIComponent(pane)}&herdrSession=${session}`);
+  await expect(page.getByRole('button', { name: '이어서 시작', exact: true })).toBeEnabled();
+  await tapNotification(missing);
+  await expect(page).toHaveURL(/#\/coding$/);
+  await expect(page.getByRole('region', { name: '코딩 세션', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '이어서 시작', exact: true })).toHaveCount(0);
 });
 
 test('keeps the long chat draft and its actions within the keyboard viewport', async ({ page }) => {
@@ -84,8 +129,10 @@ test('keeps the long chat draft and its actions within the keyboard viewport', a
 for (const theme of ['light', 'dark'] as const) {
   test.describe(theme, () => {
     test.use({ colorScheme: theme });
-    test('conversation list', async ({ page }) => {
-      await openScreen(page, { name: 'conversations', route: () => '/conversations', waits: () => ['기록가'], prepare: mockIPhone }, theme);
+    test('bookmarked conversation entry opens the main Ghost', async ({ page }) => {
+      const state = await openScreen(page, { name: 'main conversation', route: () => '/conversations', waits: () => ['맡긴 일에서 볼 수 있어요'], prepare: mockIPhone }, theme);
+      await expect(page).toHaveURL(`${state.baseUrl}/#/ghosts/${state.defaultGhostId}`);
+      await expect(page.getByLabel('도우미에게 메시지', { exact: true })).toBeVisible();
       await screenshot(page, `conversations-${theme}-iphone.png`);
     });
     for (const screen of screens) test(screen.name, async ({ page }) => {

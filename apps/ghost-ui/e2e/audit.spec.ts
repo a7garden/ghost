@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { openScreen, screenshot, type Theme } from './visual';
 import { mockConversationActivity, mockIPhone, mockMessageNotification, mockRichConversation, showTranscriptElement } from './iphone-fixtures';
 import { mockCodingApi, mockStateDecisions, mockVaultApi, visualHandoffDecisionId, visualSecureDecisionId } from './mocks';
-import type { Decision, MemoryView } from '@ghost/contract';
+import type { Decision, MemoryView, ProviderQuota, State } from '@ghost/contract';
 import { readRunState } from './run-state';
 
 async function capture(page: Page, name: string, theme: Theme, device: string) {
@@ -62,6 +62,29 @@ test('model settings expose the next-message switch and model', async ({ page })
   }
 });
 
+test('the sidebar shows the lone main Ghost without empty groups or pin actions', async ({ page }, info) => {
+  await openScreen(page, { name: 'single Ghost roster', route: () => info.project.name === 'iphone' ? '/workspace' : '/', waits: () => ['비행 기록'], prepare: async page => {
+    await page.route('**/api/state', async route => {
+      const response = await route.fetch();
+      const state: State = await response.json();
+      await route.fulfill({ response, json: { ...state, ghosts: state.ghosts.filter(ghost => ghost.isDefault) } });
+    });
+  } }, 'light');
+  const roster = page.getByRole('navigation', { name: '작업실', exact: true }).filter({ visible: true });
+  const main = roster.locator('.presence-row__main').filter({ hasText: '도우미' });
+  await expect(main).toBeVisible();
+  await expect(main).not.toContainText('메인');
+  await expect(roster.getByText('고정', { exact: true })).toHaveCount(0);
+  await expect(roster.getByRole('button', { name: /^Ghost 목록/ })).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath('single-main-sidebar.png'), animations: 'disabled', caret: 'hide' });
+  if (info.project.name === 'desktop') {
+    await main.click({ button: 'right' });
+    const menu = page.getByRole('menu', { name: '도우미 메뉴', exact: true });
+    await expect(menu.getByRole('menuitem', { name: '대화 열기', exact: true })).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: /^고정/ })).toHaveCount(0);
+  }
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test.describe(theme, () => {
     test.use({ colorScheme: theme });
@@ -81,6 +104,16 @@ for (const theme of ['light', 'dark'] as const) {
         await openScreen(page, { name: tab, route: () => `/settings?tab=${tab}`, waits: () => [], prepare: async page => {
           await mockIPhone(page);
           if (tab === 'vault') await mockVaultApi(page);
+          if (tab === 'models') {
+            // Never turn the Mac account's live quota into a visual baseline.
+            const { fixedNow } = readRunState();
+            const hour = 60 * 60 * 1000;
+            const quota = { id: 'claude-code', name: 'Claude', plan: 'Max 5x', error: null, fetchedAt: fixedNow, windows: [
+              { label: '5시간', usedPercent: 14, resetsAt: fixedNow + 3 * hour },
+              { label: '주간', usedPercent: 60, resetsAt: fixedNow + 72 * hour },
+            ] } satisfies ProviderQuota;
+            await page.route('**/api/providers/quota*', route => route.fulfill({ json: info.project.name === 'desktop' ? [quota] : [] }));
+          }
           if (tab === 'coding') await mockCodingApi(page);
           if (tab === 'team') {
             const { defaultGhostId, fixedNow } = readRunState();
@@ -92,6 +125,10 @@ for (const theme of ['light', 'dark'] as const) {
           }
         } }, theme);
         await expect(page.locator('.ghost-settings__content-inner')).not.toBeEmpty();
+        if (tab === 'models' && info.project.name === 'desktop') {
+          await expect(page.getByRole('meter', { name: '5시간 사용량' })).toHaveAttribute('aria-valuenow', '14');
+          await expect(page.getByRole('meter', { name: '주간 사용량' })).toHaveAttribute('aria-valuenow', '60');
+        }
         if (tab === 'coding') {
           await expect(page.getByRole('combobox', { name: 'herdr 세션' })).toHaveText('기본 세션');
           const delivery = page.getByRole('radiogroup', { name: '지시를 보내는 방식' });

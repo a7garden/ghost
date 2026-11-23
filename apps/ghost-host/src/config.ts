@@ -27,7 +27,8 @@ export interface Config {
       };
   /** Optional owner-enabled Mac capability; distinct from the API bind `host`. */
   mac?: null | { roots: string[]; watch: { ghostId: string; intervalMinutes?: number } | null };
-  voice: null | { mediaOrigin: string; controlToken: string };
+  /** Local speech server for local-engine calls (loopback http); null uses the default address. */
+  voice: null | { speechUrl: string };
   apns: null | { teamId: string; keyId: string; keyPath: string; topic: string };
   /** Owner skill folders a Ghost's `skills` names point into; null serves no skills. */
   skills: null | { roots: string[] };

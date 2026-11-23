@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BriefcaseBusiness, CircleAlert, Clock3, KeyRound, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Server, Smartphone, SquareTerminal, Users } from 'lucide-react';
+import { BriefcaseBusiness, CircleAlert, Clock3, KeyRound, Mic, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Server, Smartphone, SquareTerminal, Users } from 'lucide-react';
 import { DutySwitch } from './components/DutySwitch';
 import { DutySettings } from './features/DutySettings';
 import { Banner, Button, EmptyState, ScrollRails, Skeleton, type CommandItem } from './ui';
@@ -22,6 +22,8 @@ import { isMac } from './ui/keys';
 import { hostStatus } from './features/hostStatus';
 import { Overview } from './features/Overview';
 import { GhostChat } from './features/GhostChat';
+import { CallProvider } from './features/call/CallProvider';
+import { VoiceSettings } from './features/call/VoiceSettings';
 import { Conversations } from './features/Conversations';
 import { WorkView } from './features/WorkViews';
 import { Goals } from './features/goals/Goals';
@@ -273,6 +275,7 @@ function Shell() {
     { id: 'schedules', label: uiTerms.schedules, group: '설정', onSelect: go('/settings?tab=schedules') },
     { id: 'activities', label: uiTerms.activities, group: '설정', onSelect: go('/settings?tab=activities') },
     { id: 'connections', label: uiTerms.connections, group: '설정', onSelect: go('/settings?tab=connections') },
+    { id: 'voice', label: '음성', group: '설정', onSelect: go('/settings?tab=voice') },
     ...[{ id: 'slots', label: '모델 자리' }, { id: 'limits', label: '한도' }, { id: 'mcp', label: 'MCP 서버' }, { id: 'rules', label: '정책 규칙' }, { id: 'history', label: '구성 기록' }, { id: 'metrics', label: '계측' }].map(item => ({ ...item, group: '설정', onSelect: go(`/settings?tab=${item.id}`) })),
     { id: 'host', label: routeLabels.host, group: '설정', onSelect: go('/settings?tab=host') },
     { id: 'update', label: '업데이트', group: '설정', onSelect: go('/settings?tab=update') },
@@ -300,6 +303,7 @@ function Shell() {
     { id: 'metrics', label: '계측', icon: Server, content: <ScopeMetrics/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
     { id: 'coding', label: '코딩', icon: SquareTerminal, content: <CodingSettings/> },
+    { id: 'voice', label: '음성', icon: Mic, content: <VoiceSettings/> },
     { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
       {desktopError && <Banner variant="warning" className="mb-4">{desktopError}</Banner>}
@@ -318,6 +322,7 @@ function Shell() {
   return <div className="ghost-root">
     <PortraitAppearances.Provider value={portraits}>
       <AvatarProvider animate={preferences.animate}>
+        <CallProvider ghosts={ghosts} engine={state?.settings.voice?.engine} connection={connection}>{callTray =>
         <AppFrame desktop={desktopShell} macOSInset={desktopMac ? 80 : 0}
           section={section} attentionCount={attentionCount} blockedAgents={codingAttention.count} navigate={navigate}
           hideDock={codingDetail || section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
@@ -332,7 +337,7 @@ function Shell() {
             onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
           duty={state && <DutySwitch state={state}/>}
-          sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
+          callTray={callTray} sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
           {/* Connection banners stay in view while the sheet scrolls (`.connection-banner`). */}
           {(status.state === 'offline' || (compact && status.state === 'reconnecting' && !status.quiet)) && <div className="connection-banner">
             {status.state === 'offline' ? <Banner variant="danger" action={<Button variant="outline" onClick={() => store.refresh()}>다시 연결</Button>}>
@@ -381,6 +386,7 @@ function Shell() {
               action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>}
           </>}
         </AppFrame>
+        }</CallProvider>
       </AvatarProvider>
     </PortraitAppearances.Provider>
   </div>;

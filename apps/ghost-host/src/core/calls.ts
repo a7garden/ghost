@@ -164,6 +164,20 @@ export class Calls {
     return next;
   }
 
+  /**
+   * The engine's final usage arrives after the call closed (the provider reports it on its own close).
+   * Corrects a closed call's seconds; a live call is closed with `end`, never by this. No engine hook runs.
+   */
+  recordUsage(callId: string, seconds: number): Call {
+    const call = this.get(callId);
+    if (live(call)) throw conflict("the call is still live; end it first");
+    if (!Number.isInteger(seconds) || seconds < 0) throw invalid("seconds must be a non-negative integer");
+    if (call.seconds === seconds) return call;
+    const next: Call = { ...call, seconds };
+    this.put(next);
+    return next;
+  }
+
   /** A connect or time deadline fired. */
   expire(callId: string) {
     const call = this.find(callId);

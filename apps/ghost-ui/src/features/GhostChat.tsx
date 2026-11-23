@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CompactTitleSlot } from '../components/AppFrame';
-import { ArrowRight, CircleAlert, GitBranch, Monitor, X } from 'lucide-react';
+import { ArrowRight, CircleAlert, GitBranch, Monitor, Phone, X } from 'lucide-react';
 import { Button, Conversation, Popover, PopoverContent, PopoverTrigger, Row } from '../ui'
 import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
 import { GhostProfile } from '../components/GhostProfile';
@@ -30,6 +30,8 @@ import { useHost } from '../host/context';
 import type { BrowserSession } from '../host/client';
 import { useCompact, useTouch } from '../ui/adaptive';
 import { recoverMessage, type RecoveredMessage } from './composerRecovery';
+import { useCallActions } from './call/CallProvider';
+import { callStartBlock } from './call/call-state';
 
 /** How often the conversation re-checks whether the Ghost's browser session is still there. */
 const SESSION_POLL_MS = 4000;
@@ -84,6 +86,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   initialScopeIds?: string[];
 }) {
   const { client } = useHost();
+  const calls = useCallActions();
   const touch = useTouch();
   const compact = useCompact();
   const titleSlot = useContext(CompactTitleSlot);
@@ -159,6 +162,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         onOpen={() => openThread(work.id)} onOpenPage={() => openWork(work.id)}/> };
     }) : [];
 
+  const callBlocked = calls ? callStartBlock(ghost, calls.occupied) : null;
+  const callLabel = callBlocked ? `전화 — ${callBlocked}` : '전화';
   const tools = <div className="chat-tools" role="group" aria-label="대화 도구">
     <GhostProfile ghostID={ghost.id} name={ghost.name} summary={profileSummary(ghost.persona)} presence={ghostPresence(ghost, state).state}
       activity={{ model: projectGhostActivity(ghost, state), onInspectWork: openWork, onCancelTurn: stop }}
@@ -166,6 +171,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
       onManage={() => navigate(`/settings?tab=team&ghost=${encodeURIComponent(ghost.id)}`)}
       design={<GhostDesignEditor ghostId={ghost.id}/>}
       isMain={ghost.isDefault}/>
+    {calls && <button type="button" className="chat-tool chat-call" aria-disabled={Boolean(callBlocked)} aria-label={callLabel} title={callLabel}
+      onClick={event => { if (!callBlocked) calls.start(ghost, event.currentTarget); }}><Phone aria-hidden="true"/></button>}
     <Threads ghost={ghost} state={state} conversations={conversations} currentId={conversationId} waiting={waiting} now={now}
       onOpenWork={openThread} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
       onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
@@ -180,7 +187,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
     {compact && titleSlot && !threadId && createPortal(tools, titleSlot)}
     <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
       scrollKey={`${page.messages.length}:${outbox.rows.length}:${live?.running ? 1 : 0}:${live?.partial ? 1 : 0}`} followKey={followKey}
-      header={compact ? null : tools}
+      header={compact && titleSlot ? null : <div className="chat-corner">{tools}</div>}
       composer={<>
         <BrowserPaneContext.Provider value={conversationId ? { conversationId, open: () => setBrowserOpen(true) } : null}>
           <ChatDecisions state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread}/>

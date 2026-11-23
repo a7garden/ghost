@@ -13,7 +13,7 @@ const themes: { value: Preferences['theme']; label: string }[] = [
 ];
 
 const settingsGroups = [
-  { label: 'Ghost와 실행', ids: ['team', 'models', 'approvals', 'duty', 'schedules', 'activities'] },
+  { label: 'Ghost와 실행', ids: ['team', 'models', 'voice', 'approvals', 'duty', 'schedules', 'activities'] },
   { label: '연결과 기기', ids: ['devices', 'connections', 'vault', 'coding', 'mcp'] },
   { label: '화면과 앱', ids: ['appearance', 'desktop', 'update'] },
   { label: '호스트 운영', ids: ['slots', 'limits', 'rules', 'history', 'metrics', 'host'] },

@@ -1,9 +1,10 @@
 /* Keep the compact summary fixed while the expanded deck shares the dock with the draft. */
-.chat-decisions { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 6px; margin-bottom: var(--chat-dock-gap); }
+.chat-decisions { --chat-decision-height: min(40dvh, 380px); display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 6px; margin-bottom: var(--chat-dock-gap); }
 .chat-decisions:has(.chat-decisions__row) { min-height: 44px; }
 .chat-decisions:not(:has(.chat-decisions__row, .deck)) { display: none; }
 .chat-decisions .deck[data-docked] { margin-bottom: 0; }
-.chat-decisions__body { min-height: 0; max-height: min(40dvh, 380px); overflow-y: auto; overscroll-behavior: contain; }
+.chat-decisions__body { min-height: 0; max-height: var(--chat-decision-height); overflow-y: auto; overscroll-behavior: contain; }
+.chat-decisions__body:not([hidden]) { display: flex; flex-direction: column; }
 .chat-decisions__body:empty { display: none; }
 .chat-decisions__row {
   display: flex; flex: none; min-width: 0; min-height: 44px; align-items: center; gap: 8px;
@@ -18,9 +19,13 @@
 .chat-decisions__due { flex: none; color: var(--ghost-amber-ink); font-size: var(--text-caption); font-weight: 550; }
 .chat-decisions__row > .fold-mark { flex: none; }
 
-.chat-decisions .deck[data-docked] .decision { max-height: none; overflow: visible; }
+/* Reserve the deck's navigation before sizing the card, not on top of a full-height card. */
+.chat-decisions :is(.deck[data-docked], .deck__body, .deck__top) { display: flex; flex-direction: column; min-height: 0; }
+.chat-decisions :is(.deck__head, .deck__index) { flex: none; }
+/* With the keyboard open, the wrapper can scroll when there isn't room for a usable card. */
+.chat-decisions .deck__top { min-height: min(8rem, var(--chat-decision-height)); }
 .chat-decisions .decision:focus-visible { outline-offset: -3px; }
-:root[data-keyboard="open"] .chat-decisions__body { max-height: max(110px, calc(var(--ghost-visible-height, 100dvh) * .29)); }
+:root[data-keyboard="open"] .chat-decisions { --chat-decision-height: max(110px, calc(var(--ghost-visible-height, 100dvh) * .29)); }
 .chat-decisions[data-open]:has(.decision) ~ .ghost-composer .ghost-composer__textarea {
   max-height: clamp(44px, calc(var(--ghost-visible-height, 100dvh) * min(.18, var(--composer-draft-share, .18))), 240px);
 }

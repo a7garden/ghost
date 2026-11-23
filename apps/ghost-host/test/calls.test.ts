@@ -114,6 +114,21 @@ describe("voice calls", () => {
     expect(t.engine.to(t.ghost.directConversationId).at(-1)?.callId).toBeUndefined();
   });
 
+  test("the engine re-checks the call at admission, so a held spoken turn cannot land after hangup", async () => {
+    const t = setup();
+    const id = (await t.send({ type: "call.start", ghostId: t.ghost.id, engine: "local" })).callId as string;
+    const authorizers: (undefined | (() => void))[] = [];
+    const submit = t.engine.submit.bind(t.engine);
+    t.engine.submit = (conversationId, submission, authorize) => (authorizers.push(authorize), submit(conversationId, submission, authorize));
+    await t.send({ type: "message.send", conversationId: t.ghost.directConversationId, text: "안녕", callId: id });
+    await t.send({ type: "message.send", conversationId: t.ghost.directConversationId, text: "typed" });
+    expect(authorizers[0]).toBeDefined();
+    expect(authorizers[1]).toBeUndefined();
+    expect(() => authorizers[0]!()).not.toThrow();
+    await t.send({ type: "call.end", callId: id });
+    expect(() => authorizers[0]!()).toThrow("ended");
+  });
+
   test("ended calls are trimmed but a live one is never dropped", async () => {
     const t = setup();
     for (let i = 0; i < 55; i++) {
