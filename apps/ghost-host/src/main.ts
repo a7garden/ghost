@@ -14,7 +14,7 @@ const USAGE = `ghost — one process for every Ghost
   ghost serve                      run the host (state root: $GHOST_ROOT or ~/Library/Application Support/Ghost)
   ghost import --from <old-root> [--artifacts <worker-root>]...
                                    copy a pre-Bun state root into an empty state root
-  ghost backup <dir>               consistent ledger.db + pi.db copies and backup.json, safe while serving
+  ghost backup <dir>               consistent ledger.db + pi.db copies, coding session records and backup.json, safe while serving
   ghost doctor                     check the state root and configuration
   ghost version                    print release identity JSON
   ghost service install [--no-load] install the Host launchd service

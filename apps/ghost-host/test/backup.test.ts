@@ -67,6 +67,27 @@ describe("ghost backup", () => {
     }
   });
 
+  test("copies coding session records but not their checkouts", () => {
+    const root = tempDir();
+    const ledger = new Ledger(join(root, "ledger.db"));
+    const pi = new Database(join(root, "pi.db"));
+    const session = join(root, "coding-sessions", "coding-1");
+    mkdirSync(join(session, "artifacts"), { recursive: true });
+    mkdirSync(join(session, "worktree-coding-1"), { recursive: true });
+    mkdirSync(join(root, "coding-sessions", "resources"), { recursive: true });
+    writeFileSync(join(session, "session.jsonl"), 'session-record'); 
+    writeFileSync(join(session, "artifacts", "image.png"), new Uint8Array([1, 2, 3]));
+    writeFileSync(join(session, "worktree-coding-1", "code.ts"), "checkout");
+    writeFileSync(join(root, "coding-sessions", "resources", "x"), "x");
+    try {
+      const dir = join(tempDir(), "snapshot");
+      const manifest = backup(root, dir);
+      expect(manifest.files.map((file) => file.path)).toEqual(["ledger.db", "pi.db", "coding-sessions/coding-1/artifacts/image.png", "coding-sessions/coding-1/session.jsonl"]);
+      for (const file of manifest.files) expect(sha256(readFileSync(join(dir, file.path)))).toBe(file.sha256);
+      expect(existsSync(join(dir, "coding-sessions", "coding-1", "worktree-coding-1"))).toBe(false);
+    } finally { pi.close(); ledger.close(); }
+  });
+
   test("copies the vault store together with its key", () => {
     const root = tempDir();
     const ledger = new Ledger(join(root, "ledger.db"));

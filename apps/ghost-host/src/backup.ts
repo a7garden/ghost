@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sha256 } from "./core/ids.ts";
 
@@ -8,6 +8,31 @@ const DATABASES = ["ledger.db", "pi.db"] as const;
 /** The vault store and its key, copied when present. The vault never shares a transaction with the ledger. */
 const VAULT_DB = join("vault", "vault.db");
 const VAULT_KEY = join("vault", "key");
+/**
+ * Coding sessions keep Pi's transcript (`session.jsonl`) and attached images under `coding-sessions/<id>/`. They are copied
+ * file by file; the checkout `worktree-*` is not (its commits live in the owner's repository, and it can be large).
+ * A transcript being appended to during the copy can end in a torn line, which Pi repairs on open.
+ */
+const CODING_SESSIONS = "coding-sessions";
+const CODING_CHECKOUT = /^worktree-/;
+
+function codingSessionFiles(root: string): string[] {
+  const base = join(root, CODING_SESSIONS);
+  if (!existsSync(base)) return [];
+  const found: string[] = [];
+  const walk = (directory: string, relative: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (relative === "" && !entry.isDirectory()) continue;
+      if (relative.split("/").length === 1 && CODING_CHECKOUT.test(entry.name)) continue;
+      const path = join(directory, entry.name);
+      const next = relative === "" ? entry.name : `${relative}/${entry.name}`;
+      if (entry.isDirectory()) { if (!(relative === "" && entry.name === "resources")) walk(path, next); }
+      else if (entry.isFile() && !lstatSync(path).isSymbolicLink()) found.push(next);
+    }
+  };
+  walk(base, "");
+  return found.sort();
+}
 /** Maximum wait for the first store's in-flight writer; later guards fail fast. */
 const WRITER_LOCK_TIMEOUT_MS = 5_000;
 /** One SQLite busy wait inside the writer-lock deadline (bun:sqlite overshoots a single long pragma). */
@@ -75,6 +100,11 @@ export function backup(root: string, dir: string, now = Date.now()): BackupManif
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") errors.push(error);
       }
+    }
+    try {
+      rmSync(join(dir, CODING_SESSIONS), { recursive: true, force: true });
+    } catch (error) {
+      errors.push(error);
     }
     try {
       rmdirSync(join(dir, "vault"));
@@ -161,6 +191,13 @@ export function backup(root: string, dir: string, now = Date.now()): BackupManif
       copied.push(join(dir, VAULT_KEY));
       writeFileSync(join(dir, VAULT_KEY), key, { mode: 0o600 });
       files.push({ path: VAULT_KEY, sha256: sha256(key), bytes: key.length });
+    }
+    for (const relative of codingSessionFiles(root)) {
+      const target = join(dir, CODING_SESSIONS, relative);
+      mkdirSync(join(target, ".."), { recursive: true, mode: 0o700 });
+      const bytes = readFileSync(join(root, CODING_SESSIONS, relative));
+      writeFileSync(target, bytes, { mode: 0o600 });
+      files.push({ path: `${CODING_SESSIONS}/${relative}`, sha256: sha256(bytes), bytes: bytes.length });
     }
     const ledger = new Database(join(dir, "ledger.db"), { readonly: true });
     let scopes: BackupManifest["external_spaces"];
