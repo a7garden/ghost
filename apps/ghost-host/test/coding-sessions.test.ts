@@ -206,7 +206,7 @@ test("parallel scouts own separate transcript items and both abort with the pare
       return promise;
     };
     f.faux.setResponses([
-      fauxAssistantMessage(fauxToolCall("subagent", { tasks: [{ role: "scout", task: "First" }, { role: "scout", task: "Second" }] }), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxToolCall("subagent", { tasks: [{ agent: "scout", task: "First" }, { agent: "scout", task: "Second" }] }), { stopReason: "toolUse" }),
       child, child, child, child,
     ]);
     const outcomes: CodingSettled[] = [];

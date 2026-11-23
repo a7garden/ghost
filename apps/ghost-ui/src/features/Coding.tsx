@@ -16,16 +16,23 @@ import { directoryName, recentCodingDirectories } from './CodingModel';
 import { readCodingValue, writeCodingValue } from './herdrInboxModel';
 import { CodingSession } from './CodingSession';
 import { CodingSessionRoster } from './CodingSessionRoster';
+import { Workbench } from './Workbench';
 import './coding.css';
 import './CodingSession.css';
 
 const rosterModes = [{ value: 'agents', label: '에이전트' }, { value: 'spaces', label: '스페이스' }] as const;
 
-export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, onRestore, onCancel, compact, onRoster, restoreLastPane, embeddedSessionId, onOpenEmbedded }: {
+export function CodingPage({ legacy, terminalId, navigate, ...props }: HerdrCodingProps & { legacy: boolean; terminalId: string | null; navigate(path: string): void }) {
+  return legacy ? <HerdrCodingPage {...props}/> : <Workbench scopes={props.scopes} compact={props.compact} terminalId={terminalId} navigate={navigate}/>;
+}
+
+type HerdrCodingProps = {
   scopes: Scope[]; herdrPane: string | null; herdrSession: string | null; creating: boolean; compact: boolean; restoreLastPane: boolean;
   onOpen(id: string): void; onRestore(id: string): void; onCancel(): void; onRoster(view: HerdrView): void;
   embeddedSessionId: string | null; onOpenEmbedded(id: string): void;
-}) {
+};
+
+function HerdrCodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, onRestore, onCancel, compact, onRoster, restoreLastPane, embeddedSessionId, onOpenEmbedded }: HerdrCodingProps) {
   const showDetail = creating || herdrPane !== null || embeddedSessionId !== null;
   const [embeddedView, setEmbeddedView] = useState<EmbeddedSession | null>(null);
   const [revision, refresh] = useReducer((count: number) => count + 1, 0);
@@ -173,8 +180,8 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
         </Popover>
       </header>
       <div className="coding-roster-scroll">
-        <CodingSessionRoster directories={recentCodingDirectories(workspaces, scopes, log)} selected={embeddedSessionId}
-          observed={embeddedView?.id === embeddedSessionId ? embeddedView : null} onOpen={onOpenEmbedded}/>
+        {embeddedSessionId !== null && <CodingSessionRoster directories={recentCodingDirectories(workspaces, scopes, log)} selected={embeddedSessionId}
+          observed={embeddedView?.id === embeddedSessionId ? embeddedView : null} onOpen={onOpenEmbedded}/>}
         {notice && <p className="coding-hint" role="status">{notice}</p>}
         {!required && !errors && (error || roster?.note) && <InlineError onRetry={refresh} retryLabel="다시 불러오기">{error || roster?.note}</InlineError>}
         {!required && !errors && !error && !roster && <CodingSkeleton/>}

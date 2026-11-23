@@ -28,6 +28,8 @@ import { MacHost } from "./integrations/host.ts";
 import { codingPrefs, Herdr } from "./integrations/herdr.ts";
 import { OmpInfoProvider } from "./integrations/omp.ts";
 import { CodingWatcher } from "./integrations/coding-watch.ts";
+import { Terminals } from "./terminal/index.ts";
+import { terminalNotifier } from "./terminal/notify.ts";
 import { HostWatch } from "./core/hostwatch.ts";
 import { ProviderCatalog } from "./integrations/provider-catalog.ts";
 import { settingsView } from "./core/commands.ts";
@@ -40,6 +42,7 @@ import { MailWatcher } from "./integrations/mail-watch.ts";
 import { createHostMcpClients, type McpClients } from "./integrations/mcp.ts";
 import { createLiveCallEngine } from "./integrations/calls-live.ts";
 import { createLocalCallEngine, type LocalCallEngine } from "./integrations/calls-local.ts";
+import { Workbench } from "./workbench/service.ts";
 
 export interface App {
   core: Core;
@@ -48,7 +51,9 @@ export interface App {
   documents: DocumentsPort;
   skills: SkillsPort | null;
   herdr: HerdrPort | null;
+  terminals: Terminals | null;
   codingSessions: CodingSessionsPort | null;
+  workbench: Workbench | null;
   omp: OmpInfoProvider | null;
   codingWatcher: CodingWatcher | null;
   host: HostPort | null;
@@ -96,6 +101,7 @@ export async function openApp(config: Config): Promise<App> {
   let openedMailWatcher: MailWatcher | null = null;
   let openedCodingWatcher: CodingWatcher | null = null;
   let openedHerdr: Herdr | null = null;
+  let openedTerminals: Terminals | null = null;
   let openedCodingSessions: CodingSessions | null = null;
   let openedMcp: McpClients | null = null;
   let openedSourceStore: SourceStore | null = null;
@@ -117,6 +123,7 @@ export async function openApp(config: Config): Promise<App> {
     ]);
     await attempt(async () => { await openedDreams?.close(); openedDreams = null; });
     await attempt(async () => { await openedCodingSessions?.shutdown(); openedCodingSessions = null; });
+    await attempt(async () => { await openedTerminals?.shutdown(); openedTerminals = null; });
     if (openedCore && !coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
     await Promise.all([
       attempt(async () => { await openedMailWatcher?.stop(); openedMailWatcher = null; }),
@@ -147,7 +154,7 @@ export async function openApp(config: Config): Promise<App> {
       await attempt(() => { openedSourceStore?.close(); openedSourceStore = null; });
       await attempt(() => { openedMemory?.close(); openedMemory = null; });
       // Live browser or desktop processes keep ownership: close() can retry their shutdown.
-      if (!openedBrowser && !openedDesktop) {
+      if (!openedBrowser && !openedDesktop && !openedTerminals) {
         await attempt(() => { openedLedger?.close(); openedLedger = null; });
         if (!openedLedger) await attempt(() => lock.close());
       }
@@ -172,6 +179,7 @@ export async function openApp(config: Config): Promise<App> {
       activitySources: openedSources,
       sources: (openedSourceStore = new SourceStore(config.root)),
     }));
+    const terminals = (openedTerminals = config.coding === false ? null : new Terminals(config.root, { log, onEvent: terminalNotifier(core) }));
     const documents = createDocuments(core);
     const skills = createSkills(config);
     const host = config.mac ? new MacHost({ roots: config.mac.roots, stateRoot: config.root }) : null;
@@ -196,6 +204,7 @@ export async function openApp(config: Config): Promise<App> {
       authorizeGhost: (requester, id) => core.coding.authorizeEmbeddedCreate(requester, id),
     }));
     core.setCodingSessions(codingSessions);
+    const workbench = config.coding === false ? null : new Workbench(ledger, codingSessions, terminals);
     const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, herdr, reach: createReach(config), browser, vault, desktop, mail, toss: createToss(), mcp });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
     const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));
@@ -208,7 +217,9 @@ export async function openApp(config: Config): Promise<App> {
       documents,
       skills,
       herdr,
+      terminals,
       codingSessions,
+      workbench,
       omp,
       codingWatcher,
       host,
@@ -284,7 +295,7 @@ export async function serve(config: Config) {
     app.core.catalog.start(catalogChanged);
     app.core.codexCatalog.start(catalogChanged);
     const token = ownerToken(config.root);
-    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, herdr: app.herdr, omp: app.omp, vault: app.vault, browser: app.browser, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
+    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, herdr: app.herdr, terminals: app.terminals, workbench: app.workbench, omp: app.omp, vault: app.vault, browser: app.browser, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
     push = startPush(app.core, config);
     const hostFile = join(config.root, "host.json");
     writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });

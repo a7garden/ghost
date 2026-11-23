@@ -50,6 +50,11 @@ type Ask = { view: HerdrAsk; keys(index: number): string[] };
 export function detectHerdrAsk(output: HerdrOutput): Ask | null {
   const { pane, text } = output;
   if (pane.status !== "blocked" || pane.agent === null) return null;
+  return detectTerminalAsk(text, { id: pane.id, agent: pane.agent });
+}
+
+/** Shared by herdr and Host PTYs after each has obtained the visible terminal screen. */
+export function detectTerminalAsk(text: string, pane: { id: string; agent: string }): Ask | null {
   const omp = pane.agent === "omp";
   const rows: Row[] = [];
   for (const line of text.split("\n")) {

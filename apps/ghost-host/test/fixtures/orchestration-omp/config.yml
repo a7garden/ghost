@@ -1,0 +1,60 @@
+# Sanitized copy: only orchestration-related keys retained.
+retry:
+  fallbackChains:
+    default: []
+    plan: []
+    slow: []
+    worker_hard: []
+    worker_sol: []
+    anthropic/*: []
+    openai-codex/*: []
+    zai/glm-5.3: []
+    worker:
+      - minimax-code/MiniMax-M3.1-Flash:medium
+      - openai-codex/gpt-6-luna:high
+    chore:
+      - zai/glm-5.3-flash:high
+      - openai-codex/gpt-6-luna:medium
+    smol:
+      - zai/glm-5.3-flash:high
+      - openai-codex/gpt-6-luna:low
+    judge:
+      - zai/glm-5.3-flash:high
+      - openai-codex/gpt-6-luna:low
+    zai/*:
+      - minimax-code/MiniMax-M3.1-Flash:medium
+      - openai-codex/gpt-6-luna:high
+    minimax-code/*:
+      - zai/glm-5.3-flash:high
+      - openai-codex/gpt-6-luna:medium
+  usageAwareFallback: true
+  usageReservePolicy: auto
+  rateLimitWalksChain: true
+  modelFallback: true
+  usageReservePct: 0
+  fallbackRevertPolicy: cooldown-expiry
+  waitForUsageReset: false
+modelRoles:
+  plan: anthropic/claude-sonnet-5-5:high
+  slow: anthropic/claude-opus-5-5:high
+  worker: zai/glm-5.3-flash:high
+  worker_hard: zai/glm-5.3:high
+  chore: minimax-code/MiniMax-M3.1-Flash:medium
+  smol: minimax-code/MiniMax-M3.1-Flash:low
+  judge: minimax-code/MiniMax-M3.1-Flash:low
+  worker_sol: openai-codex/gpt-6.2-sol:high
+  default: anthropic/claude-sonnet-5-5
+task:
+  agentSoftRequestBudget:
+    sonic: 16
+    scout: 12
+  agentModelOverrides:
+    task: "@worker"
+    task-hard: "@worker_hard"
+    sol-hard: "@worker_sol"
+    sonic: "@chore"
+    scout: "@chore"
+  showResolvedModelBadge: true
+  completionProbe: false
+  maxConcurrency: 4
+  maxRecursionDepth: 1

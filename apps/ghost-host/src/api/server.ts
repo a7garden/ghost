@@ -73,8 +73,13 @@ import { Access } from "../core/access.ts";
 import { execute, hashSecret } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
 import { CommandError, invalid, notFound } from "../core/errors.ts";
+import { PiInstall, PiPackageFlags, PiPackageOverrides, PiSessionConfigUpdate, PiSettings } from "@ghost/contract";
+import { CodingSessions } from "../coding/index.ts";
 import { CodingModels } from "../coding/models.ts";
+import { serveOrchestration } from "../orchestration/routes.ts";
 import { readRegular as readCodingFile } from "../coding/workspace.ts";
+import type { Terminals } from "../terminal/index.ts";
+import { serveTerminals, terminalStreamBearer, terminalWebSocket, type TerminalSocket } from "../terminal/routes.ts";
 import { newId } from "../core/ids.ts";
 import { HOST_VERSION, snapshot, workDetail } from "../core/state.ts";
 import { Suggestions } from "../core/suggestions.ts";
@@ -90,6 +95,8 @@ import { isIosTokenRoute, serveIosUpdate, serveUpdate } from "../update/api.ts";
 import type { Updater } from "../update/index.ts";
 import type { MailService } from "../integrations/mail.ts";
 import { serveMail } from "./mail.ts";
+import { serveWorkbench } from "../workbench/http.ts";
+import type { Workbench } from "../workbench/service.ts";
 
 const HTTP_STATUS: Record<ErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503, internal: 500 };
 const DIGEST = /^[0-9a-f]{64}$/;
@@ -147,7 +154,7 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; herdr?: HerdrPort | null; omp?: OmpInfoProvider | null; claudeModels?: ClaudeModelCatalog; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null; quotas?: ProviderQuotas }): { port: number; stop(): Promise<void> } {
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; herdr?: HerdrPort | null; terminals?: Terminals | null; workbench?: Workbench | null; omp?: OmpInfoProvider | null; claudeModels?: ClaudeModelCatalog; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null; quotas?: ProviderQuotas }): { port: number; stop(): Promise<void> } {
   const { core, config, ownerToken, documents, skills, herdr = null, omp = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
   const quotas = deps.quotas ?? new ProviderQuotas({ providers: () => core.ledger.providers(), secrets: core.secrets });
   const ownerHash = Buffer.from(hashSecret(ownerToken));
@@ -156,17 +163,21 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   const suggestions = new Suggestions(core, herdr);
   const claudeModels = deps.claudeModels ?? new ClaudeModelCatalog();
 
-  const server: Bun.Server<undefined> = Bun.serve({
+  const server = Bun.serve<TerminalSocket>({
     hostname: config.host,
     port: config.port,
     // Bun closes connections idle for 10 s by default; the SSE keepalive is every 15 s.
     idleTimeout: 60,
     fetch: (request, bound) => handle(request, bound),
+    websocket: terminalWebSocket,
   });
+  // API, app HTML and terminal WebSockets share this listener, including for port 0.
+  if (core.codingSessions instanceof CodingSessions) core.codingSessions.protectHostPort(server.port!);
 
   const loopbackHosts = new Set([`127.0.0.1:${server.port}`, `localhost:${server.port}`, `[::1]:${server.port}`]);
   const allowedHosts = new Set(loopbackHosts);
   const publicOrigin = config.publicOrigin ?? `http://${config.host}:${server.port}`;
+  const terminalPublicOrigin = URL.parse(publicOrigin);
   try {
     allowedHosts.add(new URL(publicOrigin).host.toLowerCase());
   } catch {
@@ -185,8 +196,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     return error("internal", "internal error", 500);
   }
 
-  function authenticate(request: Request): Access | null {
-    const header = request.headers.get("authorization");
+  function authenticate(request: Request, websocketBearer: string | null = null): Access | null {
+    const header = request.headers.get("authorization") ?? websocketBearer;
     if (header === null || !header.startsWith("Bearer ")) return null;
     const token = header.slice("Bearer ".length).trim();
     if (token.length === 0) return null;
@@ -464,7 +475,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     return fallback ?? error("not_found", "not found", 404);
   }
 
-  async function handle(request: Request, bound: Bun.Server<undefined>): Promise<Response> {
+  async function handle(request: Request, bound: Bun.Server<TerminalSocket>): Promise<Response | undefined> {
     // DNS rebinding: only loopback and the public origin may talk to this server.
     const host = (request.headers.get("host") ?? "").toLowerCase();
     if (!allowedHosts.has(host)) return error("forbidden", "untrusted host", 403);
@@ -495,12 +506,25 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       }
     }
 
-    const access = viaEdge ? new Access({ kind: "owner" }) : authenticate(request);
+    const terminalsRoute = pathname === "/api/terminals" || pathname.startsWith("/api/terminals/");
+    const access = viaEdge ? new Access({ kind: "owner" }) : authenticate(request, terminalsRoute ? terminalStreamBearer(request, pathname) : null);
     if (access === null) return error("forbidden", "missing or invalid bearer token", 401);
     const controlRoute = pathname === "/api/herdr/control" || pathname.startsWith("/api/herdr/control/");
     const fetchSite = request.headers.get("sec-fetch-site");
     if (controlRoute && (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site"))) return error("forbidden", "다른 사이트에서는 터미널을 조작할 수 없습니다.", 403);
     const controlPrincipal = access.principal.kind === "owner" ? "owner" : `device:${access.principal.deviceId}`;
+    if (terminalsRoute) {
+      if (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site")) return error("forbidden", "다른 사이트에서는 터미널을 조작할 수 없습니다.", 403);
+      const expectedOrigin = viaEdge ? `https://${host}` : terminalPublicOrigin?.host === host ? terminalPublicOrigin.origin : url.origin;
+      try { return await serveTerminals(request, url, bound, deps.terminals ?? null, expectedOrigin); }
+      catch (caught) { return failure(caught); }
+    }
+    if (pathname.startsWith("/api/workbench/")) {
+      if (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site")) return error("forbidden", "다른 사이트에서는 작업대를 조작할 수 없습니다.", 403);
+      if (!deps.workbench) return error("unavailable", "이 Host에서는 작업대를 열 수 없습니다.", 503);
+      try { return json(await serveWorkbench(deps.workbench, access.principal, request, pathname)); }
+      catch (caught) { return failure(caught); }
+    }
     if (pathname.startsWith("/api/connection-oauth/")) {
       try { return await connectionOAuth.handle(request, url, access) ?? error("not_found", "not found", 404); }
       catch (caught) { return failure(caught); }
@@ -573,6 +597,64 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       } catch (caught) {
         return failure(caught);
       }
+    }
+
+    if (pathname.startsWith("/api/orchestration/")) {
+      // Ghost can use delegation, but policy and omp import are owner/device HTTP operations only.
+      if (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site")) return error("forbidden", "다른 사이트에서는 오케스트레이션을 변경할 수 없습니다.", 403);
+      try { return json(await serveOrchestration(request, pathname, core)); }
+      catch (caught) { return failure(caught); }
+    }
+
+    if (pathname.startsWith("/api/pi/")) {
+      if (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site")) return error("forbidden", "다른 사이트에서는 코딩 설정을 변경할 수 없습니다.", 403);
+      try {
+        const sessions = core.codingSessions;
+        if (!(sessions instanceof CodingSessions)) throw new CommandError("unavailable", "이 Host에서는 내장 코딩을 사용할 수 없습니다.");
+        const body = (): Promise<unknown> => request.json().catch(() => { throw invalid("malformed JSON body"); });
+        const method = request.method;
+        // Package management can execute arbitrary code as the Host. Only the owner
+        // principal can grant it; these effects are not registered as Ghost tools.
+        const manage = () => {
+          if (!access.isOwner) throw new CommandError("forbidden", "Pi 패키지는 소유자만 변경할 수 있습니다.");
+        };
+        if (pathname === "/api/pi/settings") {
+          if (method === "GET") return json({ settings: sessions.piConfig.defaults(), canManagePackages: access.isOwner,
+            imageResizeAvailable: sessions.piConfig.imageResizeAvailable });
+          if (method === "PUT") return json(await sessions.savePiSettings(parse(PiSettings, await body())));
+        }
+        if (pathname === "/api/pi/packages") {
+          if (method === "GET") return json(sessions.piExtensions.list());
+          if (method === "POST") {
+            manage();
+            return json(await sessions.piExtensions.install(parse(PiInstall, await body())), 201);
+          }
+        }
+        const pkg = /^\/api\/pi\/packages\/([A-Za-z0-9-]+)$/.exec(pathname);
+        if (pkg) {
+          if (method === "PUT") {
+            manage();
+            return json(sessions.piExtensions.setFlags(pkg[1]!, parse(PiPackageFlags, await body())));
+          }
+          if (method === "DELETE") {
+            manage();
+            await sessions.piExtensions.remove(pkg[1]!);
+            return json({ ok: true });
+          }
+        }
+        const session = /^\/api\/pi\/sessions\/([A-Za-z0-9-]+)(?:\/(compact|packages)(?:\/([A-Za-z0-9-]+))?)?$/.exec(pathname);
+        if (session) {
+          const [, id, action, packageId] = session;
+          if (!action && method === "GET") return json({ ...sessions.piSession(id!), canManagePackages: access.isOwner });
+          if (!action && method === "PUT") return json({ ...await sessions.setPiSession(id!, parse(PiSessionConfigUpdate, await body()).overrides), canManagePackages: access.isOwner });
+          if (action === "compact" && !packageId && method === "POST") return json({ ...await sessions.compactPiSession(id!), canManagePackages: access.isOwner });
+          if (action === "packages" && packageId && method === "PUT") {
+            manage();
+            return json(await sessions.setPiSessionPackage(id!, packageId, parse(PiPackageOverrides, await body())));
+          }
+        }
+        throw notFound("Pi 설정 경로를 찾을 수 없습니다.");
+      } catch (caught) { return failure(caught); }
     }
 
     const codingRoute = /^\/api\/coding\/sessions\/([^/]+)(?:\/(items|events|prompt|abort|close|changes|file|dialogs)(?:\/([^/]+))?)?$/.exec(pathname);

@@ -43,3 +43,9 @@ it('accepts an exit notification in the web inbox and still rejects a foreign se
   expect(notificationRoute(coding, state, 'studio')).toBe('/coding?herdr=w1%3Ap1');
   expect(notificationRoute(coding, state, 'other')).toBeNull();
 });
+
+it('opens an owner terminal notification in the workbench without a herdr lookup', () => {
+  const id = '78396e40-f7fb-4208-9f60-2b543fa28e21';
+  expect(notificationRoute({ ...notification, id: `coding:terminal:${id}:1`, decisionId: null, workId: null }, state))
+    .toBe(`/coding?terminal=${id}`);
+});

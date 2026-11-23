@@ -10,6 +10,8 @@ export function codingNotificationAddress(id: string) {
 
 /** Inbox and native notification taps share the same precedence, including settled decisions. */
 export function notificationRoute(item: Notification, state: State, coding?: string | null | HerdrView): string | null {
+  const terminal = /^coding:terminal:([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}):\d+$/i.exec(item.id);
+  if (terminal) return `/coding?terminal=${terminal[1]}`;
   const address = coding !== undefined ? codingNotificationAddress(item.id) : null;
   if (address) {
     if (!coding || typeof coding === 'string') return address.session === coding ? herdrPanePath(address.pane) : null;

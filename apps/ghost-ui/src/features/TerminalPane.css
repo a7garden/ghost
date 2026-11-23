@@ -1,0 +1,39 @@
+@layer components {
+  .terminal-pane {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    position: relative;
+    min-block-size: 0;
+    min-inline-size: 0;
+    inline-size: 100%;
+    block-size: 100%;
+    padding: 8px;
+    background: var(--ghost-canvas);
+  }
+
+  .terminal-pane__screen {
+    min-inline-size: 0;
+    font-family: var(--font-mono, ui-monospace, monospace);
+  }
+
+  .terminal-pane__status {
+    position: absolute;
+    z-index: 1;
+    right: 12px;
+    bottom: 12px;
+    padding: 4px 8px;
+    color: var(--ghost-ink2);
+    background: var(--ghost-canvas);
+    box-shadow: 0 0 0 1px var(--ghost-line);
+    font-size: var(--text-caption);
+    pointer-events: none;
+  }
+
+  .terminal-pane__keys { display: none; }
+  .terminal-pane__keys .herdr-keypad { margin: 6px 0 0; }
+  .terminal-pane__keys .herdr-key { min-block-size: 38px; }
+  @media (pointer: coarse), (max-width: 40rem) {
+    .terminal-pane__keys { display: block; }
+    .terminal-pane:has(.terminal-pane__keys) .terminal-pane__status { bottom: 54px; }
+  }
+}

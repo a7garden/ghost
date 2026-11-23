@@ -1,3 +1,4 @@
+import type { PiInstall, PiPackage, PiPackageFlags, PiPackageOverrides, PiSessionConfig, PiSettings, PiSettingsOverrides } from '@ghost/contract';
 import { shell, shellCall } from './shell';
 import type {
   ApiError,
@@ -16,6 +17,9 @@ import type {
   CodingPrompt,
   CodingSession,
   CodingSessionCreate,
+  OrchestrationConfig,
+  OrchestrationImportPreview,
+  OrchestrationView,
   HerdrChangedFile,
   ConnectionOAuthView,
   ConnectionOAuthClientInput,
@@ -70,6 +74,8 @@ import type {
   WorkDetail,
   VoiceSettings,
 } from '@ghost/contract';
+import type { WorkbenchState, WorkbenchTerminalBinding } from '@ghost/contract';
+import { TERMINAL_BEARER_PREFIX, TERMINAL_PROTOCOL, type TerminalCreate, type TerminalView } from '@ghost/contract';
 
 declare global {
   interface Window {
@@ -197,6 +203,8 @@ export type MailUpdateCommand = CommandOf<'mail.update'>;
 
 export type CodingSessionModel = CodingSession['model'] & { name: string; thinking: string[] };
 export type CodingSessionPatch = Partial<Pick<CodingSession, 'title' | 'model' | 'thinking'>>;
+export type PiGlobalConfig = { settings: PiSettings; canManagePackages: boolean; imageResizeAvailable: boolean };
+export type PiSessionView = PiSessionConfig & { canManagePackages: boolean };
 export type CodingSessionChanges = {
   files: (Pick<HerdrChangedFile, 'path' | 'status'> & { additions: number; deletions: number })[];
   diff: string;
@@ -208,6 +216,12 @@ export type CodingSessionChanges = {
 const codingSessionsPath = '/api/coding/sessions';
 const codingSessionPath = (id: string) => `${codingSessionsPath}/${encodeURIComponent(id)}`;
 const codingJson = (method: 'POST' | 'PATCH', input: unknown): RequestInit => ({
+  method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+});
+const piPackagesPath = '/api/pi/packages';
+const piPackagePath = (id: string) => `${piPackagesPath}/${encodeURIComponent(id)}`;
+const piSessionPath = (id: string) => `/api/pi/sessions/${encodeURIComponent(id)}`;
+const piJson = (method: 'POST' | 'PUT', input: unknown): RequestInit => ({
   method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
 });
 
@@ -269,8 +283,60 @@ export class HostClient {
     return this.json('/api/skills');
   }
 
+  createTerminal(spec: TerminalCreate): Promise<{ id: string }> {
+    return this.json('/api/terminals', codingJson('POST', spec));
+  }
+
+  terminals(signal?: AbortSignal): Promise<TerminalView[]> {
+    return this.json('/api/terminals', { signal });
+  }
+
+  closeTerminal(id: string): Promise<{ ok: true }> {
+    return this.json(`/api/terminals/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  openTerminalSocket(id: string, after: number | undefined): WebSocket {
+    const url = new URL(`/api/terminals/${encodeURIComponent(id)}/stream`, window.location.href);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    if (after !== undefined) url.searchParams.set('after', String(after));
+    return new WebSocket(url, this.token ? [TERMINAL_PROTOCOL, `${TERMINAL_BEARER_PREFIX}${this.token}`] : [TERMINAL_PROTOCOL]);
+  }
+
+  workbench(signal?: AbortSignal): Promise<WorkbenchState> {
+    return this.json('/api/workbench/spaces', { signal });
+  }
+
+  changeWorkbench(path: string, method: 'POST' | 'PATCH' | 'DELETE', input: { version: number }): Promise<WorkbenchState> {
+    return this.json(`/api/workbench/${path}`, {
+      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
+  }
+
+  openWorkbenchTerminal(paneId: string, restart?: string): Promise<WorkbenchTerminalBinding> {
+    return this.json(`/api/workbench/panes/${encodeURIComponent(paneId)}/terminal`, codingJson('POST', { restart }));
+  }
+
   codingSetup(): Promise<CodingSetup> {
     return this.json('/api/coding', { cache: 'no-store' });
+  }
+
+  orchestration(signal?: AbortSignal): Promise<OrchestrationView> {
+    return this.json('/api/orchestration/config', { signal, cache: 'no-store' });
+  }
+
+  saveOrchestration(config: OrchestrationConfig): Promise<OrchestrationConfig> {
+    return this.json('/api/orchestration/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
+  }
+
+  previewOrchestrationImport(): Promise<OrchestrationImportPreview> {
+    return this.json('/api/orchestration/import-omp', { method: 'POST' });
+  }
+
+  orchestrationForSession(id: string, enabled?: boolean, signal?: AbortSignal): Promise<{ enabled: boolean }> {
+    return this.json(`/api/orchestration/sessions/${encodeURIComponent(id)}`, {
+      ...(enabled === undefined ? { cache: 'no-store' } : { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }),
+      signal,
+    });
   }
 
   codingSessions(signal?: AbortSignal): Promise<CodingSession[]> {
@@ -318,6 +384,37 @@ export class HostClient {
 
   codingModels(signal?: AbortSignal): Promise<{ models: CodingSessionModel[] }> {
     return this.json('/api/coding/models', { signal });
+  }
+
+  piSettings(signal?: AbortSignal): Promise<PiGlobalConfig> {
+    return this.json('/api/pi/settings', { signal, cache: 'no-store' });
+  }
+  savePiSettings(settings: PiSettings): Promise<PiSettings> {
+    return this.json('/api/pi/settings', piJson('PUT', settings));
+  }
+  piPackages(signal?: AbortSignal): Promise<PiPackage[]> {
+    return this.json(piPackagesPath, { signal, cache: 'no-store' });
+  }
+  installPiPackage(input: PiInstall): Promise<PiPackage> {
+    return this.json(piPackagesPath, piJson('POST', input));
+  }
+  savePiPackage(id: string, enabled: PiPackageFlags): Promise<PiPackage> {
+    return this.json(piPackagePath(id), piJson('PUT', enabled));
+  }
+  removePiPackage(id: string): Promise<{ ok: true }> {
+    return this.json(piPackagePath(id), { method: 'DELETE' });
+  }
+  piSession(id: string, signal?: AbortSignal): Promise<PiSessionView> {
+    return this.json(piSessionPath(id), { signal, cache: 'no-store' });
+  }
+  savePiSession(id: string, overrides: PiSettingsOverrides): Promise<PiSessionView> {
+    return this.json(piSessionPath(id), piJson('PUT', { overrides }));
+  }
+  compactPiSession(id: string): Promise<PiSessionView> {
+    return this.json(`${piSessionPath(id)}/compact`, { method: 'POST' });
+  }
+  savePiSessionPackage(id: string, packageId: string, overrides: PiPackageOverrides): Promise<Record<string, PiPackageOverrides>> {
+    return this.json(`${piSessionPath(id)}/packages/${encodeURIComponent(packageId)}`, piJson('PUT', overrides));
   }
 
   async codingSessionFile(id: string, path: string, signal?: AbortSignal): Promise<Blob> {

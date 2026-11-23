@@ -1,0 +1,55 @@
+@layer components {
+  .pi-settings :where(form, fieldset, ul) { min-inline-size: 0; }
+  .pi-settings fieldset { padding: 0; border: 0; margin: 0; }
+  .pi-settings select {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    min-block-size: 2.1rem;
+    padding: .35rem .55rem;
+    border-radius: .45rem;
+    border: 1px solid var(--ghost-line);
+    background: var(--ghost-canvas);
+    color: var(--ghost-ink);
+    font-size: .82rem;
+  }
+  .pi-settings :where(input, select):focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: 2px; }
+  .pi-settings .ghost-settings-row__control > input[type='number'] { width: min(100%, 8rem); }
+  .pi-settings.ghost-settings-group .pi-disclosure > summary { padding-inline: 16px; }
+  .pi-settings.ghost-settings-group :is(.pi-apply, .pi-install, .pi-packages, .pi-disclosure > .pi-tools, .pi-meta) { margin-inline: 16px; }
+  .pi-settings.ghost-settings-group .ghost-settings-group__rows > :is(.pi-install, .pi-packages, .pi-meta) { margin-block: 14px; }
+  .pi-settings.ghost-settings-group .pi-apply { padding-block-end: 14px; }
+  .pi-settings.ghost-settings-group .pi-package__title .pi-meta { margin-inline: 0; }
+  .pi-meta { color: var(--ghost-ink3); margin: 0; font-size: .8rem; line-height: 1.5; }
+  .pi-disclosure > summary { display: flex; gap: .5rem; align-items: baseline; padding-block: .6rem; cursor: pointer; font-weight: 550; font-size: .88rem; list-style: none; }
+  .pi-disclosure > summary::-webkit-details-marker { display: none; }
+  .pi-disclosure > summary::before { content: '+'; color: var(--ghost-ink3); inline-size: 1ch; }
+  .pi-disclosure[open] > summary::before { content: '−'; }
+  .pi-disclosure[open] { padding-bottom: .5rem; }
+  .pi-apply { display: flex; align-items: center; gap: .65rem; margin-top: .7rem; }
+  .pi-tools { display: flex; flex-wrap: wrap; gap: .5rem 1rem; padding-block: .35rem .7rem; }
+  .pi-tools label, .pi-install__confirm, .pi-override__toggle { display: flex; align-items: baseline; gap: .45rem; font-size: .82rem; }
+  .pi-tools label { overflow-wrap: anywhere; }
+  .pi-settings input[type='checkbox'] { accent-color: var(--ghost-signal); flex-shrink: 0; }
+  .pi-install { display: grid; justify-items: start; gap: .65rem; margin-bottom: 1rem; font-size: .88rem; }
+  .pi-install input:not([type='checkbox']) { width: 100%; }
+  .pi-install__confirm { color: var(--ghost-ink2); }
+  .pi-packages { display: grid; list-style: none; margin: 0 0 .65rem; padding: 0; }
+  .pi-package { display: grid; justify-items: start; gap: .45rem; min-width: 0; padding-block: .7rem; }
+  .pi-package:first-child { padding-top: 0; }
+  .pi-package + .pi-package { border-top: 1px solid var(--ghost-line); }
+  .pi-package__title { display: flex; flex-wrap: wrap; align-items: baseline; gap: .55rem; width: 100%; overflow-wrap: anywhere; }
+  .pi-package__title button { margin-inline-start: auto; }
+  .pi-package__source, .pi-package__names { font-size: .79rem; color: var(--ghost-ink2); overflow-wrap: anywhere; min-width: 0; }
+  .pi-package__names { display: flex; flex-wrap: wrap; gap: .35rem .55rem; }
+  .pi-package__flags { display: flex; flex-wrap: wrap; gap: .45rem .85rem; }
+  .pi-package__flags label { display: flex; align-items: baseline; gap: .4rem; font-size: .82rem; }
+  .pi-session { border-top: 1px solid var(--ghost-line); margin-top: .35rem; padding-top: .6rem; }
+  .pi-session__context { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: .45rem; align-items: center; }
+  .pi-session__context > div { display: flex; flex-direction: column; font-size: .82rem; }
+  .pi-session__context progress { grid-column: 1 / -1; width: 100%; height: .35rem; accent-color: var(--ghost-signal); }
+  .pi-settings .pi-override { margin-top: .7rem; }
+  .pi-override legend { padding: 0; font-weight: 550; font-size: .8rem; }
+  .pi-override__toggle { margin-block: .25rem; color: var(--ghost-ink2); }
+  .pi-session .pi-override fieldset:disabled { display: none; }
+  .embedded-settings:has(.pi-session) { max-height: min(var(--radix-popover-content-available-height), 75dvh); overflow-y: auto; }
+}

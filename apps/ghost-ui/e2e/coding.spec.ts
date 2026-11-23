@@ -3,9 +3,11 @@ import type { ClaudeModels, CodingSetup, Effect, HerdrChat, HerdrChatItem, Herdr
 import { fulfillHerdrFrame, mockCodingApi, visualCodingIds } from './mocks';
 import { openScreen, type Theme } from './visual';
 import { readRunState } from './run-state';
+import { mockWorkbench } from './workbench-mock';
 
 const landing = { name: 'coding', route: () => '/', waits: () => ['최근 끝난 일'], prepare: mockCodingApi };
-const coding = { ...landing, route: () => '/coding', waits: () => ['결제 화면 테스트 추가'] };
+const herdrRoster = '/coding?view=herdr';
+const coding = { ...landing, route: () => herdrRoster, waits: () => ['결제 화면 테스트 추가'] };
 const richCoding = { ...coding, prepare: (page: Page) => mockCodingApi(page, { rich: true }) };
 const stopped = { ...coding, waits: () => ['Mac 터미널에서 herdr를 여세요.'], prepare: (page: Page) => mockCodingApi(page, { stopped: true }) };
 const sizes = [
@@ -48,6 +50,11 @@ const mockPaneSuggestions = (page: Page) => page.route('**/api/herdr/suggestions
 });
 const back = (page: Page) => page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true });
 const codingNav = (page: Page, touch: boolean) => page.getByRole('navigation', { name: touch ? '주요 화면' : '작업실', exact: true });
+async function openHerdrFromWorkbench(page: Page, touch: boolean) {
+  await expect(page).toHaveURL(/#\/coding$/);
+  if (touch) await page.getByRole('button', { name: '스페이스', exact: true }).click();
+  await page.getByRole('link', { name: 'herdr', exact: true }).click();
+}
 const quickAdd = (page: Page) => page.getByRole('button', { name: '새 스페이스', exact: true });
 const quickAddMenu = (page: Page) => page.getByRole('dialog', { name: '새 스페이스', exact: true });
 async function openNewSpace(page: Page) {
@@ -121,12 +128,14 @@ for (const { name, width, height, touch } of sizes) {
           await mockCodingApi(page, { rich: true, owned: [visualCodingIds.shell] });
           await mockPaneSuggestions(page);
         } }, theme);
+        await mockWorkbench(page);
         const nav = codingNav(page, touch);
         const codingLink = nav.getByRole('button', { name: /코딩/ });
         await expect(codingLink).toContainText('입력 필요');
         await expect(codingLink).toContainText('1');
         await codingLink.click();
-        await expect(page).toHaveURL(/#\/coding$/);
+        await openHerdrFromWorkbench(page, touch);
+        await expect(page).toHaveURL(url => url.hash === `#${herdrRoster}`);
         const list = page.getByRole('region', { name: '코딩 세션', exact: true });
         await expect(list.getByRole('region', { name: '입력 필요', exact: true }).getByRole('button', { name: '이번만 실행' })).toBeVisible();
         await expect(list.getByRole('region', { name: '작업 중', exact: true }).getByText('2분')).toBeVisible();
@@ -375,11 +384,13 @@ for (const { name, width, height, touch } of sizes) {
 
     test('restores the open pane after going Home and returning through Coding navigation', async ({ page }) => {
       await openScreen(page, { ...landing, prepare: richCoding.prepare }, 'light');
+      await mockWorkbench(page);
       const nav = codingNav(page, touch);
       const codingLink = nav.getByRole('button', { name: /코딩/ });
       await expect(codingLink).toContainText('입력 필요');
       await codingLink.click();
-      await expect(page).toHaveURL(/#\/coding$/);
+      await openHerdrFromWorkbench(page, touch);
+      await expect(page).toHaveURL(url => url.hash === `#${herdrRoster}`);
       await page.getByRole('link', { name: /로그인 실패 시 안내 문구 고치기/ }).click();
       const hash = `#${paneRoute(visualCodingIds.finished)}`;
       await expect(page).toHaveURL(url => url.hash === hash);
@@ -387,14 +398,15 @@ for (const { name, width, height, touch } of sizes) {
       if (touch) {
         // Compact detail has a back button instead of the dock, and approvals take priority over restore.
         await back(page).click();
-        await expect(page).toHaveURL(/#\/coding$/);
+        await expect(page).toHaveURL(url => url.hash === `#${herdrRoster}`);
       }
       await nav.getByRole('button', { name: '홈', exact: true }).click();
       await expect(page).toHaveURL(/#\/$/);
       await expect(page.getByText('최근 끝난 일', { exact: true })).toBeVisible();
       await codingLink.click();
+      await openHerdrFromWorkbench(page, touch);
       if (touch) {
-        await expect(page).toHaveURL(/#\/coding$/);
+        await expect(page).toHaveURL(url => url.hash === `#${herdrRoster}`);
         const blocked = page.getByRole('region', { name: '입력 필요', exact: true });
         await expect(blocked).toBeVisible();
         await blocked.getByRole('button', { name: '이번만 실행', exact: true }).tap();
@@ -402,6 +414,7 @@ for (const { name, width, height, touch } of sizes) {
         await nav.getByRole('button', { name: '홈', exact: true }).tap();
         await expect(page).toHaveURL(/#\/$/);
         await codingLink.tap();
+        await openHerdrFromWorkbench(page, touch);
       }
       await expect(page).toHaveURL(url => url.hash === hash);
       await expect(followUp(page)).toBeEnabled();
@@ -758,7 +771,7 @@ for (const { name, width, height, touch } of sizes) {
       await page.route('**/api/herdr/terminal?*', route => touch
         ? route.fulfill({ status: 404, json: { error: { code: 'not_found', message: 'pane not found' } } })
         : fulfillHerdrFrame(route, 'panel closed', { end: true }));
-      await expect(page).toHaveURL(/#\/coding$/);
+      await expect(page).toHaveURL(url => url.hash === `#${herdrRoster}`);
       await expect(page.getByText('이 패널은 더 이상 없습니다.')).toBeVisible();
       await expect(terminal(page)).toHaveCount(0);
     });
@@ -1110,7 +1123,7 @@ test('manages workspaces, tabs, splits and shell agents through the roster', asy
   const closing = post(page, '/api/herdr/close');
   await page.getByRole('button', { name: '탭 닫기', exact: true }).click();
   expect((await closing).postDataJSON()).toEqual({ target: 'tab', id: 'w79:t81' });
-  await expect(page).toHaveURL(/#\/coding$/);
+  await expect(page).toHaveURL(url => url.hash === `#${herdrRoster}`);
   await expect(page.getByRole('region', { name: '탭 · 실험' })).toHaveCount(0);
 });
 
@@ -1681,7 +1694,7 @@ test('answers from the inbox without reopening a stale approval', async ({ page 
   unavailable = false;
   await approve.click();
   await expect(inbox).toHaveCount(0);
-  await expect(page).toHaveURL(/#\/coding$/);
+  await expect(page).toHaveURL(url => url.hash === `#${herdrRoster}`);
 });
 
 test('merges tool completion by id and preserves scroll and the unsent draft', async ({ page }) => {

@@ -13,6 +13,7 @@ import { CodingSessionDialog } from './CodingSessionDialog';
 import { useCodingSessionLive, useEmbeddedModels } from './CodingSessionLive';
 import { codingBusy, codingError, codingThinkingLabels, codingThinkingOptions, modelKey } from './CodingSessionModel';
 import { CodingSessionTranscript, EmbeddedSessionState } from './CodingSessionTranscript';
+import { PiSessionSettings } from './PiConfig';
 
 function SessionSettings({ session, disabled, onPatch }: { session: Session; disabled: boolean; onPatch(input: CodingSessionPatch): Promise<void> }) {
   const [open, setOpen] = useState(false);
@@ -24,7 +25,7 @@ function SessionSettings({ session, disabled, onPatch }: { session: Session; dis
   const currentModel = models?.find(model => modelKey(model) === modelKey(session.model));
   const levels = codingThinkingOptions(currentModel);
   const currentTitle = title ?? session.title;
-  const lockModel = disabled || codingBusy(session.state);
+  const lockModel = disabled;
 
   async function patch(input: CodingSessionPatch) {
     setError('');
@@ -74,6 +75,7 @@ function SessionSettings({ session, disabled, onPatch }: { session: Session; dis
       </select>
       {modelError && <InlineError onRetry={reload} retryLabel="다시 불러오기">{modelError}</InlineError>}
       {error && <InlineError>{error}</InlineError>}
+      {open && <PiSessionSettings key={`${session.id}:${session.model.provider}:${session.model.model}:${session.thinking}`} session={session} disabled={disabled}/>}
     </PopoverContent>
   </Popover>;
 }

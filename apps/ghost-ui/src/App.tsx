@@ -31,7 +31,9 @@ import { WorkDetail } from './features/WorkDetail';
 import { InboxView } from './features/Inbox';
 import { HostView } from './features/HostView';
 import { CodingSettings } from './features/CodingSetup';
+import { PiConfigSettings } from './features/PiConfig';
 import { CodingPage } from './features/Coding';
+import { Orchestration, orchestrationPath } from './features/Orchestration';
 import { startsCodingEntry } from './features/CodingModel';
 import { embeddedSessionPath } from './features/CodingSessionModel';
 import { herdrPanePath } from './features/herdrDisplay';
@@ -202,7 +204,9 @@ function Shell() {
   const [path, query = ''] = route.split('?');
   const params = new URLSearchParams(query);
   const section = path.split('/')[1]?.split('?')[0] || 'home';
-  const codingAttention = useHerdrAttention(Boolean(state) && connection === 'live', section === 'coding');
+  const orchestrationOpen = path === orchestrationPath;
+  const legacyCoding = section === 'coding' && (params.get('view') === 'herdr' || params.has('herdr') || params.get('new') === '1' || params.has('session'));
+  const codingAttention = useHerdrAttention(Boolean(state) && connection === 'live', legacyCoding);
   useEffect(() => {
     if (section === 'workspace' && !compact) {
       history.replaceState(history.state, '', '#/');
@@ -302,7 +306,7 @@ function Shell() {
     { id: 'history', label: '구성 기록', icon: RefreshCw, content: <ConfigHistory/> },
     { id: 'metrics', label: '계측', icon: Server, content: <ScopeMetrics/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
-    { id: 'coding', label: '코딩', icon: SquareTerminal, content: <CodingSettings/> },
+    { id: 'coding', label: '코딩', icon: SquareTerminal, content: <><PiConfigSettings/><CodingSettings/></> },
     { id: 'voice', label: '음성', icon: Mic, content: <VoiceSettings/> },
     { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
@@ -325,14 +329,14 @@ function Shell() {
         <CallProvider ghosts={ghosts} engine={state?.settings.voice?.engine} connection={connection}>{callTray =>
         <AppFrame desktop={desktopShell} macOSInset={desktopMac ? 80 : 0}
           section={section} attentionCount={attentionCount} blockedAgents={codingAttention.count} navigate={navigate}
-          hideDock={codingDetail || section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
+          hideDock={orchestrationOpen || codingDetail || section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
           location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
             compactBack={section === 'settings' && params.has('tab') ? '/settings'
               : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? (mainChatPath ? '/workspace' : '/conversations')
               : section === 'workspace' ? '/conversations'
               : section === 'goals' || section === 'mail' ? '/workspace'
               : section === 'work' && path.split('/')[2] ? '/work'
-              : codingDetail ? '/coding'
+              : codingDetail ? (embeddedSessionId === null || params.get('view') === 'herdr' ? '/coding?view=herdr' : '/coding')
               : section === 'scopes' && selectedScope ? '/workspace' : undefined}
             onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
@@ -354,14 +358,16 @@ function Shell() {
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')} codingSession={codingAttention.session}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
-            {section === 'coding' && <CodingPage key={codingEntry.id} restoreLastPane={codingEntry.restore}
+            {orchestrationOpen && <Orchestration/>}
+            {section === 'coding' && !orchestrationOpen && <CodingPage key={codingEntry.id} restoreLastPane={codingEntry.restore}
+              legacy={legacyCoding} terminalId={params.get('terminal')} navigate={navigate}
               scopes={state.scopes} herdrPane={params.get('herdr')} herdrSession={params.get('herdrSession')} creating={params.get('new') === '1'} compact={compact}
               embeddedSessionId={embeddedSessionId} onOpenEmbedded={id => {
-                if (currentRoute() === route) navigate(embeddedSessionPath(id));
+                if (currentRoute() === route) navigate(`${embeddedSessionPath(id)}${params.get('view') === 'herdr' ? '&view=herdr' : ''}`);
               }}
               onRoster={codingAttention.reportRoster}
               onRestore={id => closeCodingForm(herdrPanePath(id))}
-              onCancel={() => closeCodingForm('/coding')} onOpen={id => {
+              onCancel={() => closeCodingForm(embeddedSessionId === null || params.get('view') === 'herdr' ? '/coding?view=herdr' : '/coding')} onOpen={id => {
                 if (currentRoute() !== route) return;
                 if (params.get('new') === '1') closeCodingForm(herdrPanePath(id));
                 else navigate(herdrPanePath(id));

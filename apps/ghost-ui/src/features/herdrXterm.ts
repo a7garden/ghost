@@ -19,18 +19,19 @@ function terminalTheme(node: HTMLElement): ITheme {
   };
 }
 
-export function openHerdrXterm(node: HTMLElement, options: ITerminalOptions & ITerminalInitOnlyOptions) {
+export function openHerdrXterm(node: HTMLElement, options: ITerminalOptions & ITerminalInitOnlyOptions, activateLink?: (event: MouseEvent, text: string) => void) {
   const terminal = new Terminal({
     fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 1.25,
     theme: terminalTheme(node), minimumContrastRatio: 4.5, screenReaderMode: true, cursorBlink: false,
     ...options,
+    ...(activateLink ? { linkHandler: { activate: activateLink } } : {}),
   });
   const fit = new FitAddon();
   terminal.loadAddon(fit);
   terminal.open(node);
-  // Remote output cannot create navigable links in Ghost.
-  const links = terminal.parser.registerOscHandler(8, () => true);
+  // Remote herdr output cannot create navigable links; owner PTYs may opt in.
+  const links = activateLink ? undefined : terminal.parser.registerOscHandler(8, () => true);
   const appearance = new MutationObserver(() => { terminal.options.theme = terminalTheme(node); });
   appearance.observe(document.documentElement, { attributeFilter: ['class'] });
-  return { terminal, fit, dispose: () => { appearance.disconnect(); links.dispose(); terminal.dispose(); } };
+  return { terminal, fit, dispose: () => { appearance.disconnect(); links?.dispose(); terminal.dispose(); } };
 }

@@ -26,7 +26,7 @@ const choices = Type.Object({
   allowText: Type.Optional(Type.Boolean()),
 });
 
-export function toolExtension(files: CodingFiles, dialogs: Dialogs, ownerChoices: boolean, subagent?: ToolDefinition): ExtensionFactory {
+export function toolExtension(files: CodingFiles, dialogs: Dialogs, ownerChoices: boolean, subagent?: ToolDefinition, skillPath?: (path: string) => string | null): ExtensionFactory {
   return pi => {
     const beforeWrites = new Map<string, { path: string; text: string | null }>();
     pi.on("tool_call", event => {
@@ -35,7 +35,7 @@ export function toolExtension(files: CodingFiles, dialogs: Dialogs, ownerChoices
         const raw = "path" in event.input && typeof event.input.path === "string" ? event.input.path : ".";
         const write = event.toolName === "edit" || event.toolName === "write";
         // Don't pass the model's spelling to Pi: it also expands ~/ @ and file:// paths.
-        const path = safePath(files.cwd, raw, event.toolName === "write");
+        const path = (event.toolName === "read" ? skillPath?.(raw) : null) ?? safePath(files.cwd, raw, event.toolName === "write");
         const rel = relative(files.cwd, path);
         if (write && (rel === ".git" || rel.startsWith(".git/"))) throw invalid("file tools cannot rewrite git metadata");
         if (event.toolName === "write") {
@@ -76,16 +76,20 @@ export function toolExtension(files: CodingFiles, dialogs: Dialogs, ownerChoices
   };
 }
 
-export function codingFileTools(files: CodingFiles, root: string): ToolDefinition[] {
+export function codingFileTools(files: CodingFiles, root: string, skillPath?: (path: string) => string | null): ToolDefinition[] {
   const { cwd } = files;
   const readFile = async (path: string) => readRegular(safePath(cwd, path), 32 * 1024 * 1024);
   const writeFile = async (path: string, text: string) => writeRegular(safePath(cwd, path, true), text);
   const access = async (path: string) => { safePath(cwd, path); };
   return [
-    createReadTool(cwd, { autoResizeImages: false, operations: { access, readFile, detectImageMimeType: async path => {
-      const mime = Bun.file(safePath(cwd, path)).type.split(";")[0];
-      return mime && ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mime) ? mime : null;
-    } } }),
+    createReadTool(cwd, { autoResizeImages: false, operations: {
+      access: async path => { if (!skillPath?.(path)) safePath(cwd, path); },
+      readFile: async path => readRegular(skillPath?.(path) ?? safePath(cwd, path), 32 * 1024 * 1024),
+      detectImageMimeType: async path => {
+        const mime = Bun.file(skillPath?.(path) ?? safePath(cwd, path)).type.split(";")[0];
+        return mime && ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mime) ? mime : null;
+      },
+    } }),
     { ...createEditTool(cwd, { operations: { access, readFile, writeFile } }), executionMode: "sequential" },
     { ...createWriteTool(cwd, { operations: { writeFile, mkdir: async path => {
       const target = safePath(cwd, path, true);
@@ -109,9 +113,15 @@ export function codingFileTools(files: CodingFiles, root: string): ToolDefinitio
 
 interface ShellOptions { signal?: AbortSignal; timeout?: number }
 
-function seatbeltCommand(policy: SeatbeltPolicy, argv: string[], network = false): string[] {
+function seatbeltCommand(policy: SeatbeltPolicy, argv: string[], allowedNetwork?: ReadonlySet<number>): string[] {
   const { profile, definitions } = seatbeltProfile(policy);
-  return [SEATBELT_EXEC, ...definitions.flatMap(pair => ["-D", pair]), "-p", network ? `${profile}\n(allow network*)` : profile, ...argv];
+  // Local app HTML carries the owner credential. General-purpose coding bash
+  // must not use the Host listener to turn model output into owner operations.
+  // Match the bound port on every address (including loopback aliases).
+  const network = allowedNetwork
+    ? "\n(allow network*)\n" + Array.from(allowedNetwork, port => `(deny network-outbound (remote ip "*:${port}"))`).join("\n")
+    : "";
+  return [SEATBELT_EXEC, ...definitions.flatMap(pair => ["-D", pair]), "-p", profile + network, ...argv];
 }
 
 function searchTools(cwd: string, root: string): ToolDefinition[] {
@@ -190,7 +200,7 @@ async function shell(argv: string[], cwd: string, options: ShellOptions, onData:
   finally { clearTimeout(timer); options.signal?.removeEventListener("abort", stop); }
 }
 
-export function codingBash(root: string, cwd: string, dialogs: Dialogs, gitCommon: string | null): ToolDefinition {
+export function codingBash(root: string, cwd: string, dialogs: Dialogs, gitCommon: string | null, hostPorts: ReadonlySet<number>): ToolDefinition {
   return { ...createBashTool(cwd, { exposeSessionEnvironment: false, operations: {
     async exec(command, _cwd, options) {
       if (process.platform !== "darwin") throw new Error("coding bash requires macOS Seatbelt");
@@ -199,7 +209,7 @@ export function codingBash(root: string, cwd: string, dialogs: Dialogs, gitCommo
       const policy = buildSeatbeltPolicy(homedir(), root, { writeRoots: [cwd, realpathSync(tmpdir()), ...cache], readRoots: gitCommon ? [gitCommon] : [], proxyPort: null });
       policy.tempRoots = []; // Only the explicit system temp and package cache roots are writable.
       const argv = ["/bin/bash", "--noprofile", "--norc", "-c", command];
-      const confined = seatbeltCommand(policy, argv, true);
+      const confined = seatbeltCommand(policy, argv, hostPorts);
       let tail = "";
       const exitCode = await shell(confined, cwd, options, data => {
         options.onData(data);
