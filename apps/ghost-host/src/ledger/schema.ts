@@ -365,4 +365,11 @@ export const MIGRATIONS: readonly string[] = [
   CREATE UNIQUE INDEX coding_runs_reserve_pane ON coding_runs(session, pane) WHERE reserved = 1 AND pane IS NOT NULL;
   CREATE UNIQUE INDEX coding_runs_reserve_terminal ON coding_runs(session, terminal_id) WHERE reserved = 1 AND terminal_id IS NOT NULL;
   `,
+  /* 13: embedded Pi sessions, turn reservations and durable Ghost settlement evidence. */ `
+  CREATE TABLE coding_sessions (
+    id TEXT PRIMARY KEY,
+    updated_at INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  `,
 ];

@@ -31,6 +31,7 @@ import { HostView } from './features/HostView';
 import { CodingSettings } from './features/CodingSetup';
 import { CodingPage } from './features/Coding';
 import { startsCodingEntry } from './features/CodingModel';
+import { embeddedSessionPath } from './features/CodingSessionModel';
 import { herdrPanePath } from './features/herdrDisplay';
 import { useHerdrAttention } from './features/herdrAttention';
 import { GhostSettings } from './features/GhostSettings';
@@ -225,7 +226,8 @@ function Shell() {
   const switchGhost = (id: string) => navigate(`/ghosts/${encodeURIComponent(id)}`);
 
   const selectedScope = section === 'scopes' && path.split('/')[2] ? decodeURIComponent(path.split('/')[2]!) : undefined;
-  const codingDetail = section === 'coding' && (params.get('new') === '1' || params.has('herdr'));
+  const embeddedSessionId = section === 'coding' ? params.get('session') : null;
+  const codingDetail = section === 'coding' && (embeddedSessionId !== null || params.get('new') === '1' || params.has('herdr'));
   const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail' || section === 'coding';
   const closeCodingForm = (next: string) => {
     // A start can finish after the owner leaves the form, without pulling them back.
@@ -349,6 +351,9 @@ function Shell() {
             {section === 'mail' && <MailView navigate={navigate}/>}
             {section === 'coding' && <CodingPage key={codingEntry.id} restoreLastPane={codingEntry.restore}
               scopes={state.scopes} herdrPane={params.get('herdr')} herdrSession={params.get('herdrSession')} creating={params.get('new') === '1'} compact={compact}
+              embeddedSessionId={embeddedSessionId} onOpenEmbedded={id => {
+                if (currentRoute() === route) navigate(embeddedSessionPath(id));
+              }}
               onRoster={codingAttention.reportRoster}
               onRestore={id => closeCodingForm(herdrPanePath(id))}
               onCancel={() => closeCodingForm('/coding')} onOpen={id => {

@@ -113,7 +113,7 @@ test("code_agents reads the live session and its coding runs, and submits nothin
   expect(result.isError).toBeFalsy();
   const report = JSON.parse(result.text);
   // Installation readiness is preserved beside the live roster.
-  expect(report).toMatchObject({ herdr: "ready", session: "default", usedByDefault: "omp" });
+  expect(report).toMatchObject({ herdr: "ready", session: "default", defaultExecutor: "ghost", usedByDefault: "omp" });
   expect(report.roster).toEqual([{ pane: "w1:p1", agent: "omp", status: "working", work: { id: s.work.id, title: "Add b.txt", state: expect.any(String) }, run: { id: "run-1", state: "working", turn: 1, stopPending: false } }]);
   expect(s.reads.calls.map(call => call.op)).toContain("overview");
   expect(s.reads.calls.filter(call => call.op !== "overview" && call.op !== "setup")).toEqual([]);
@@ -208,4 +208,19 @@ test("an owner pane without a matching terminal and session is inspected without
   const report = JSON.parse(result.text);
   expect(report.roster[0]).not.toHaveProperty("work");
   expect(report.detail).toMatchObject({ run: null, evidence: { claim: "changed b.txt; checked nothing" } });
+});
+
+test("the explicit omp, claude and codex executors and an unqualified pane still use herdr", async () => {
+  const s = codingSetup();
+  await s.core.idle();
+  const conversation = s.ledger.work(s.work.id).conversationId!;
+  s.ledger.setPiConversationId(conversation, "pi-work");
+  for (const agent of ["omp", "claude", "codex"] as const) {
+    const input = { repo: "/repo", agent, task: "Inspect the fixture" };
+    expect((await s.call("code_run", input, agent, "pi-work")).isError).toBeFalsy();
+    expect(s.coding.started.at(-1)).toEqual({ workId: s.work.id, callId: agent, input });
+  }
+  const pane = { pane: "w1:p1", task: "Continue in the pane" };
+  expect((await s.call("code_run", pane, "pane", "pi-work")).isError).toBeFalsy();
+  expect(s.coding.started.at(-1)).toEqual({ workId: s.work.id, callId: "pane", input: pane });
 });

@@ -2,6 +2,8 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startPush } from "./api/push.ts";
 import { startServer } from "./api/server.ts";
+import { CodingSessions } from "./coding/index.ts";
+import type { CodingSessionsPort } from "./coding/ports.ts";
 import type { Config } from "./config.ts";
 import { Core } from "./core/core.ts";
 import type { Engine } from "./core/ports.ts";
@@ -44,6 +46,7 @@ export interface App {
   documents: DocumentsPort;
   skills: SkillsPort | null;
   herdr: HerdrPort | null;
+  codingSessions: CodingSessionsPort | null;
   omp: OmpInfoProvider | null;
   codingWatcher: CodingWatcher | null;
   host: HostPort | null;
@@ -91,6 +94,7 @@ export async function openApp(config: Config): Promise<App> {
   let openedMailWatcher: MailWatcher | null = null;
   let openedCodingWatcher: CodingWatcher | null = null;
   let openedHerdr: Herdr | null = null;
+  let openedCodingSessions: CodingSessions | null = null;
   let openedMcp: McpClients | null = null;
   let openedSourceStore: SourceStore | null = null;
   let openedMemory: MemoryStore | null = null;
@@ -110,6 +114,7 @@ export async function openApp(config: Config): Promise<App> {
       attempt(async () => { await openedCore?.codexCatalog.close(); }),
     ]);
     await attempt(async () => { await openedDreams?.close(); openedDreams = null; });
+    await attempt(async () => { await openedCodingSessions?.shutdown(); openedCodingSessions = null; });
     if (openedCore && !coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
     await Promise.all([
       attempt(async () => { await openedMailWatcher?.stop(); openedMailWatcher = null; }),
@@ -131,7 +136,7 @@ export async function openApp(config: Config): Promise<App> {
     }
     // A rejected engine close is not proof that its tasks stopped. Retain ownership
     // and the ledger in that case; close() can retry, or process exit releases the lock.
-    if (!unsafeEngine && !openedEngine && !openedSandbox && !openedMcp && (!openedCore || (coreStopped && coreDrained))) {
+    if (!unsafeEngine && !openedEngine && !openedSandbox && !openedMcp && !openedCodingSessions && (!openedCore || (coreStopped && coreDrained))) {
       // No tool can run any more: end browser sessions (login state saved) and seal the vault.
       await attempt(async () => { await openedBrowser?.shutdown(); openedBrowser = null; });
       // Stops Ghost Control and the Geist worker under it.
@@ -184,6 +189,11 @@ export async function openApp(config: Config): Promise<App> {
     }
     const omp = config.coding === false ? null : new OmpInfoProvider();
     const codingWatcher = (openedCodingWatcher = herdr === null ? null : new CodingWatcher(core, herdr));
+    const codingSessions = (openedCodingSessions = config.coding === false ? null : new CodingSessions({
+      root: config.root, ledger, settings: () => { core.codexCatalog.sync(); return ledger.settings(); }, secrets: core.secrets, catalog: core.catalog, log,
+      authorizeGhost: (requester, id) => core.coding.authorizeEmbeddedCreate(requester, id),
+    }));
+    core.setCodingSessions(codingSessions);
     const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, herdr, reach: createReach(config), browser, vault, desktop, mail, toss: createToss(), mcp });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
     const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));
@@ -196,6 +206,7 @@ export async function openApp(config: Config): Promise<App> {
       documents,
       skills,
       herdr,
+      codingSessions,
       omp,
       codingWatcher,
       host,

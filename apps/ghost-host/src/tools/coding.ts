@@ -1,6 +1,6 @@
 import { defineTool } from "./define.ts";
 import { Type } from "typebox";
-import type { CodingRun, HerdrPaneView, Work } from "@ghost/contract";
+import type { CodingRun, CodingSession, HerdrPaneView, Work } from "@ghost/contract";
 import { defineExtension, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { NoEffect } from "../core/effects.ts";
@@ -10,21 +10,22 @@ import type { HerdrPort } from "../integrations/ports.ts";
 
 const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
-/** Guidance for a Ghost holding the coding tools: the Ghost scopes, verifies and integrates; the coding agent, in the owner's herdr, writes the code. */
-export const CODING_INSTRUCTIONS = `Repository code is written by a coding agent running in the owner's herdr, the terminal workspace the owner codes in, not by you. code_agents says whether herdr is ready, which agents are installed, and which agents are live in the session now. For a change in a repository, run code_run in an owner-PC Work with the repository path and a task that carries what the agent lacks: the goal, files to read first, decided interfaces, protected files, observable acceptance and the narrowest check. code_run starts the agent and returns at once: herdr opens a new workspace on a new branch and git worktree, so the owner's checkout stays untouched, and the owner sees the agent working in their herdr and in the app's Coding tab. End your turn after starting; when the agent settles, its report is delivered to this Work's conversation, and while it works you can follow it with code_agents (the roster, or one pane in detail) or work_inspect. Its report is a claim: read the diff and run the project's check yourself, then integrate by the project's own rules (its AGENTS.md says whether to merge and push) and remove the worktree and branch you created once merged. To correct or extend a run, call code_run again with pane set to the run's pane so the same agent keeps its conversation and worktree instead of starting over; a run carries only a few such turns, so give each one a whole task. With pane you may also take over an idle agent pane the owner already started in herdr, when no other Work holds it: herdr did not isolate that pane, so it may be working in the owner's own checkout — name the protected files in the task and check the diff exactly where it worked. An agent waiting at a dialog waits for the owner, not for you: never answer a permission dialog for it. Do not edit repository files with write or edit, and do not write the code yourself when code_run fails; report what blocked it.`;
+/** The Ghost scopes, verifies and integrates; the coding agent writes repository code. */
+export const CODING_INSTRUCTIONS = `In an owner-PC Work, have a coding agent write repository code with code_run. Pass the absolute repo and a task with the goal, files to read first, boundaries, acceptance and the narrowest check. Omit agent (or say ghost) for an embedded coding session; explicitly choose omp, claude or codex for herdr. A new repository run uses an isolated worktree. Reuse the session or pane for follow-up; a working embedded session can be steered, while a herdr pane must be idle. An adopted owner pane may not be isolated. code_run returns on admission, not completion: end your turn and wait for the report. code_agents lists both executors and reads a session or pane in detail. The report separates the agent's untrusted claim from the Host's observations; inspect the diff and run the Work's own checks before integrating under the repository rules and calling complete. A dialog is for the owner alone: never answer it or send another prompt while it is open. If coding cannot start, report the blocker instead of editing the repository yourself.`;
 
 function owningWork(core: Core, workId: string): Pick<Work, "id" | "title" | "state"> | null {
   const work = core.ledger.work(workId);
   return work ? { id: work.id, title: work.title, state: work.state } : null;
 }
 
-export function createCodingTools(core: Core, herdr: HerdrPort): Extension {
+export function createCodingTools(core: Core, herdr: HerdrPort | null): Extension {
   const agents = defineTool({
     name: "code_agents",
     description:
-      "Say whether the owner's herdr is ready for coding (installed, a server running in the session coding uses), list the coding agents installed on the Mac (omp, Claude Code, Codex) with whether herdr's integration for each is installed, which agent code_run starts when you name none (the owner's choice in Settings, else the first installed), and the agents live in the session now: one line per pane with its agent, its state, and the 맡긴 일 that owns it when your conversation may see that Work. With pane, also that pane's coding run in bounded detail — its state and turn, the branch and worktree, and the agent's last claim beside what was observed; those are the agent's own untrusted words. Reading only: it never prompts, keys or closes anything.",
+      "List embedded coding sessions and the owner's herdr readiness, installed agents, and live panes. With session or pane, read that executor's recent evidence in bounded detail: the agent's untrusted claim beside what the Host observed. This tool never prompts, sends keys or closes anything.",
     parameters: Type.Object({
       pane: Type.Optional(Type.String({ minLength: 1, maxLength: 40, description: "One pane of the roster to read in bounded detail: its coding run, the agent's last claim and the observed facts" })),
+      session: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "One embedded session's id; read its recent items and git changes" })),
     }),
     replay: "safe",
     async execute(args, api) {
@@ -35,46 +36,93 @@ export function createCodingTools(core: Core, herdr: HerdrPort): Extension {
           if (scope.work && scope.work.execution?.kind !== "host") throw new NoEffect("code_agents requires an owner-PC Work");
           return scope;
         };
-        authorize();
-        const [setup, view] = await Promise.all([herdr.setup(), herdr.overview()]);
+        if (args.pane !== undefined && args.session !== undefined) throw new NoEffect("pass only one of session and pane");
         let scope = authorize();
+        const embedded = core.codingSessions;
+        const visible = () => new Set(visibleWorks(core, scope).map((work) => work.id));
+        const summarize = (session: CodingSession, canSee: Set<string>) => ({
+          id: session.id, title: session.title, state: session.state, cwd: session.cwd, branch: session.branch,
+          pendingDialog: session.pendingDialog !== null,
+          ...(session.workId !== null && canSee.has(session.workId) ? { work: owningWork(core, session.workId) } : {}),
+        });
+        const report: Record<string, unknown> = { defaultExecutor: "ghost" };
+        let detailWorkId: string | null = null;
+        if (args.session !== undefined) {
+          const session = embedded?.get(args.session);
+          if (!embedded || !session) throw new NoEffect(`embedded session ${args.session} is not available`);
+          if (session.workId !== null && !visible().has(session.workId)) throw new NoEffect(`session ${session.id} belongs to a Work this conversation cannot see`);
+          const items = embedded.items(session.id, { limit: 20 });
+          const changes = await embedded.changes(session.id).catch(() => null);
+          scope = authorize();
+          const current = embedded.get(session.id);
+          detailWorkId = current?.workId ?? null;
+          if (!current || current.workId !== session.workId || current.turn !== session.turn) throw new NoEffect("the embedded session changed during inspection; read again");
+          const canSee = visible();
+          if (current.workId !== null && !canSee.has(current.workId)) throw new NoEffect("this conversation can no longer see the session's Work");
+          const claim = items.findLast((item) => item.kind === "assistant" && !item.streaming && item.text.trim());
+          report.detail = {
+            session: summarize(current, canSee),
+            untrusted: true,
+            items: items.filter(({ kind }) => kind !== "thinking").map((item) => {
+              const base = { id: item.id, kind: item.kind, at: item.at };
+              if (item.kind === "tool") return { ...base, summary: item.summary.slice(0, 250), status: item.status };
+              if (item.kind === "subagent") return { ...base, role: item.role, summary: item.summary.slice(0, 250), status: item.status };
+              return { ...base, text: item.text.slice(0, 250) };
+            }),
+            claim: claim?.kind === "assistant" ? { source: "agent_transcript", text: claim.text.slice(-3_000) } : null,
+            observations: changes ? {
+              source: "host_git", dirty: changes.dirty, fileCount: changes.files.length,
+              files: changes.files.slice(0, 20).map((file) => ({ ...file, path: file.path.slice(0, 200) })),
+              commits: changes.commits.slice(0, 10).map((commit) => commit.slice(0, 200)),
+              diff: changes.diff.slice(0, 4_000), truncated: changes.truncated || changes.files.length > 20 || changes.commits.length > 10 || changes.diff.length > 4_000,
+            } : { unavailable: "The Host could not read git changes for this session." },
+          };
+        }
+        const herdrData = herdr && await Promise.all([herdr.setup(), herdr.overview()]).catch((error: unknown) => {
+          if (args.pane !== undefined) throw error;
+          return null;
+        });
+        scope = authorize();
+        const canSee = visible();
+        if (detailWorkId !== null && !canSee.has(detailWorkId)) throw new NoEffect("this conversation can no longer see the session's Work");
+        report.sessions = embedded?.list().map((session) => summarize(session, canSee)) ?? [];
+        if (!herdr || !herdrData) {
+          if (args.pane !== undefined) throw new NoEffect("herdr coding is not available on this host");
+          return text(JSON.stringify({ ...report, herdr: "unavailable", roster: [] }));
+        }
+        const [setup, view] = herdrData;
         if (setup.session !== view.session || herdr.session !== view.session) throw new NoEffect("the herdr session changed during inspection; read again");
         const installed = setup.agents.filter((agent) => agent.path !== null);
         const runs = core.coding.list();
-        let visible = new Set(visibleWorks(core, scope).map((work) => work.id));
         const matchingRun = (pane: HerdrPaneView) =>
           runs.findLast((run) => run.session === view.session && run.pane === pane.id && run.terminalId !== null && run.terminalId === pane.terminalId && run.agent === pane.agent) ?? null;
         const panes = view.workspaces.flatMap((workspace) => workspace.tabs.flatMap((tab) => tab.panes)).filter((pane) => pane.agent !== null);
-        const report: Record<string, unknown> = {
+        Object.assign(report, {
           herdr: setup.herdr.path === null ? "not installed" : setup.server === null ? `installed (${setup.herdr.version ?? "unknown version"}), but no server is running in session ${setup.session}: the owner must open herdr` : "ready",
           session: setup.session,
           agents: setup.agents.map(({ id, name, path, integration }) => ({ id, name, installed: path !== null, integration })),
           usedByDefault: (installed.find((agent) => agent.id === setup.prefs.agent) ?? installed[0])?.id ?? null,
           ...(view.note !== null || !view.available ? { observationError: view.note ?? "herdr is unavailable" } : {}),
-          // The live session as herdr classifies it. Pane words are untrusted, so a line carries only the agent, its state and, when this conversation may see the Work, what owns it.
           roster: panes.map((pane) => {
             const run = matchingRun(pane);
-            const owned = run !== null && visible.has(run.workId);
             return {
-              pane: pane.id,
-              agent: pane.agent,
-              status: pane.status,
-              ...(run !== null && owned ? { work: owningWork(core, run.workId), run: { id: run.id, state: run.state, turn: run.turn, stopPending: run.stopPending } } : {}),
+              pane: pane.id, agent: pane.agent, status: pane.status,
+              ...(run !== null && canSee.has(run.workId) ? { work: owningWork(core, run.workId), run: { id: run.id, state: run.state, turn: run.turn, stopPending: run.stopPending } } : {}),
             };
           }),
-        };
+        });
         if (args.pane !== undefined) {
           const pane = panes.find((candidate) => candidate.id === args.pane);
           if (!pane) throw new NoEffect(`agent pane ${args.pane} is not in the live session`);
           const run = matchingRun(pane);
-          if (run && !visible.has(run.workId)) throw new NoEffect(`pane ${args.pane} belongs to a Work this conversation cannot see`);
+          if (run && !canSee.has(run.workId)) throw new NoEffect(`pane ${args.pane} belongs to a Work this conversation cannot see`);
           const evidence = await core.coding.inspect(args.pane);
           scope = authorize();
-          visible = new Set(visibleWorks(core, scope).map((work) => work.id));
+          const stillVisible = visible();
           if (herdr.session !== view.session) throw new NoEffect("the herdr session changed during inspection; read again");
-          if (run && !visible.has(run.workId)) throw new NoEffect("this conversation can no longer see the pane's Work");
+          if (run && !stillVisible.has(run.workId)) throw new NoEffect("this conversation can no longer see the pane's Work");
           if (evidence && typeof evidence === "object" && "workId" in evidence
-            && typeof evidence.workId === "string" && !visible.has(evidence.workId)) throw new NoEffect("the pane's owning Work changed during inspection");
+            && typeof evidence.workId === "string" && !stillVisible.has(evidence.workId)) throw new NoEffect("the pane's owning Work changed during inspection");
           report.detail = {
             run: run ? { id: run.id, state: run.state, turn: run.turn, deliveredTurn: run.deliveredTurn, branch: run.branch, checkout: run.checkout, stopPending: run.stopPending, updatedAt: run.updatedAt } : null,
             evidence,
@@ -90,12 +138,13 @@ export function createCodingTools(core: Core, herdr: HerdrPort): Extension {
   const run = defineTool({
     name: "code_run",
     description:
-      "Start a coding agent on a task in the owner's herdr (code_agents says whether it is ready) and return at once; the agent keeps working in herdr after this call and its report is delivered to this Work's conversation when it settles. In a git repository herdr first opens a new workspace on a new branch and worktree, so the checkout the owner works in is never touched; the agent commits there and is told never to push or merge. The owner sees the agent working in herdr and in the app. Follow it with code_agents (the roster, or its pane in detail) and work_inspect; the agent's summary is a claim, so verify the diff and run the project's check yourself before you integrate. To correct or extend a run, pass its pane: the same agent carries on in the same conversation and worktree, and repo, agent and branch are not needed. An idle agent pane the owner already started in herdr, that no other Work holds, can be taken over the same way — herdr did not isolate it, so it may be working in the owner's own checkout rather than a fresh worktree: name the protected files and check the diff where it worked.",
+      "Give an owner-PC Work's coding agent a task and return on admission. Pass repo to open an isolated worktree, session to continue this Work's embedded session, or pane to continue or adopt an idle herdr pane. Embedded Ghost coding is the default; explicitly name omp, claude or codex with repo for herdr. Inspect the outcome with code_agents and verify it independently.",
     parameters: Type.Object({
-      repo: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: "Absolute path of the repository (or directory) to change; not needed with pane" })),
+      repo: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: "Absolute repository path for a new run; omit for an existing session or pane" })),
       pane: Type.Optional(Type.String({ minLength: 1, maxLength: 40, description: "The pane of an earlier code_run to carry on in its conversation and worktree, or an idle agent pane the owner started that no other Work holds; task is then the instruction given there" })),
+      session: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "An embedded session opened by this Work" })),
       task: Type.String({ minLength: 1, maxLength: 24_000, description: "The goal, files to read first, decided interfaces, protected files, observable acceptance and the narrowest check to run" }),
-      agent: Type.Optional(Type.Union([Type.Literal("omp"), Type.Literal("claude"), Type.Literal("codex")], { description: "Which agent; default the owner's choice in Settings, else the first installed" })),
+      agent: Type.Optional(Type.Union([Type.Literal("ghost"), Type.Literal("omp"), Type.Literal("claude"), Type.Literal("codex")], { description: "Executor for a new run: ghost (embedded, default) or an explicit herdr agent" })),
       branch: Type.Optional(Type.String({ minLength: 1, maxLength: 80, description: "Short name for the branch and worktree, such as fix-login; defaults to one derived from the task" })),
     }),
     replay: "unsafe",
@@ -104,9 +153,20 @@ export function createCodingTools(core: Core, herdr: HerdrPort): Extension {
         const scope = requireWork(requireAllowed(core, api, "code_run"));
         if (scope.work.execution?.kind !== "host") throw new NoEffect("code_run needs an owner-PC Work: create the Work with execution {kind:\"host\", cwd:\"/Users/garden/Workspace/Projects\"}");
         if (!scope.ghost.hostExecution) throw new NoEffect("PC execution was revoked by the owner");
-        if (args.pane === undefined && args.repo === undefined) throw new NoEffect("pass repo, or pane to carry on an earlier run");
+        if ([args.repo, args.session, args.pane].filter((address) => address !== undefined).length !== 1) throw new NoEffect("pass exactly one of repo, session or pane");
         if (!api.callId) throw new NoEffect("code_run needs the model call id to journal the run under");
-        // The core coding service owns the effect, the pane reservation and the agent launch; the tool only passes the call through.
+        if (args.pane === undefined && (args.agent === undefined || args.agent === "ghost")) {
+          if (args.session !== undefined && args.branch !== undefined) throw new NoEffect("branch is only for a new run");
+          const receipt = await core.coding.startEmbedded(scope.work.id, api.callId, {
+            task: args.task,
+            ...(args.session !== undefined ? { session: args.session } : { repo: args.repo!, ...(args.branch !== undefined ? { branch: args.branch } : {}) }),
+          });
+          return text(JSON.stringify({
+            ...receipt, work: scope.work.id, agent: "ghost",
+            note: "tracked; end this turn and wait for the report in this Work conversation. Read with code_agents; do not resend the prompt.",
+          }));
+        }
+        if (args.session !== undefined || args.agent === "ghost") throw new NoEffect("use session with the embedded agent, or pane without an agent name");
         const run: CodingRun = await core.coding.start(scope.work.id, api.callId, {
           ...(args.repo !== undefined ? { repo: args.repo } : {}),
           ...(args.pane !== undefined ? { pane: args.pane } : {}),

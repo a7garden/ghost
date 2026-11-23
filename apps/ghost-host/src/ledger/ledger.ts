@@ -11,6 +11,7 @@ import type {
   Connection,
   Avatar,
   CodingRun,
+  CodingSession,
   Conversation,
   Decision,
   Device,
@@ -29,6 +30,7 @@ import type {
   ArtifactRef,
   Verdict,
 } from "@ghost/contract";
+import type { CodingRequester, CodingSettled } from "../coding/ports.ts";
 import { idFor } from "../core/ids.ts";
 import { approvalRules } from "../core/policy.ts";
 import { MIGRATIONS } from "./schema.ts";
@@ -45,6 +47,18 @@ const bool = (value: unknown) => value === 1 || value === true;
 /** Days of change events kept for reconnecting clients. */
 const EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** The Pi JSONL owns the transcript. This record owns admissions and durable settlement. */
+export interface CodingSessionRecord {
+  session: CodingSession;
+  requester: CodingRequester;
+  /** Turns accepted but not yet settled, including queued follow-ups. */
+  pending: number[];
+  /** The turn which had actually started (rather than merely been queued). */
+  active: number | null;
+  reports: Omit<CodingSettled, "session">[];
+  interrupted: { turn: number; at: number }[];
+}
 
 /** Internal collaboration records; clients observe the associated Work change event. */
 export interface WorkQuestion {
@@ -84,7 +98,7 @@ export interface CodingRunRecord {
   foreignPrompt: boolean;
   claim: string | null;
   blockedNoticeAt: number | null;
-  finishing: { message: string; tail: string | null } | null;
+  finishing: { message: string; tail: string | null; outcome?: "done" | "failed" | "aborted" | "interrupted" } | null;
   interrupted: boolean;
   /** Used for reservation and reconciliation indexes, not inferred from an owner's UI state. */
   reserved: boolean;
@@ -664,6 +678,19 @@ export class Ledger {
         work.budgetMinutes, work.budgetUsedMs, work.budgetSince, work.budgetExtended ? 1 : 0, work.hold, work.scopeId, json(work.attachments), work.slot, json(work.retry), json(work.scopeReferences ?? []),
       );
     this.emit({ type: "work", work });
+  }
+
+  codingSessions(): CodingSessionRecord[] {
+    return (this.db.query("SELECT data FROM coding_sessions ORDER BY updated_at DESC, id").all() as Row[])
+      .map(row => parseJson<CodingSessionRecord>(row.data));
+  }
+
+  putCodingSession(record: CodingSessionRecord): void {
+    const { id, updatedAt } = record.session;
+    // This projection has its own session change feed, not a global snapshot event.
+    this.db.query(`INSERT INTO coding_sessions (id, updated_at, data) VALUES (?, ?, ?)
+      ON CONFLICT (id) DO UPDATE SET updated_at=excluded.updated_at, data=excluded.data`)
+      .run(id, updatedAt, JSON.stringify(record));
   }
 
   findCodingRun(id: string): CodingRunRecord | null {

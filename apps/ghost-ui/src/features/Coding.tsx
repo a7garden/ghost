@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
-import type { HerdrPaneView, HerdrView, Scope } from '@ghost/contract';
+import type { CodingSession as EmbeddedSession, HerdrPaneView, HerdrView, Scope } from '@ghost/contract';
 import { Button, InlineError, Popover, PopoverContent, PopoverTrigger, SegmentedControl } from '../ui';
 import { useHost } from '../host/context';
 import { useCodingPageSetup } from './CodingSetup';
@@ -14,15 +14,20 @@ import { CodingSkeleton } from './HerdrParts';
 import { useHerdrAsks } from './HerdrAsk';
 import { directoryName, recentCodingDirectories } from './CodingModel';
 import { readCodingValue, writeCodingValue } from './herdrInboxModel';
+import { CodingSession } from './CodingSession';
+import { CodingSessionRoster } from './CodingSessionRoster';
 import './coding.css';
+import './CodingSession.css';
 
 const rosterModes = [{ value: 'agents', label: '에이전트' }, { value: 'spaces', label: '스페이스' }] as const;
 
-export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, onRestore, onCancel, compact, onRoster, restoreLastPane }: {
+export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, onRestore, onCancel, compact, onRoster, restoreLastPane, embeddedSessionId, onOpenEmbedded }: {
   scopes: Scope[]; herdrPane: string | null; herdrSession: string | null; creating: boolean; compact: boolean; restoreLastPane: boolean;
   onOpen(id: string): void; onRestore(id: string): void; onCancel(): void; onRoster(view: HerdrView): void;
+  embeddedSessionId: string | null; onOpenEmbedded(id: string): void;
 }) {
-  const showDetail = creating || herdrPane !== null;
+  const showDetail = creating || herdrPane !== null || embeddedSessionId !== null;
+  const [embeddedView, setEmbeddedView] = useState<EmbeddedSession | null>(null);
   const [revision, refresh] = useReducer((count: number) => count + 1, 0);
   const { client } = useHost();
   const [action, setAction] = useState<RosterAction | null>(null);
@@ -48,7 +53,7 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
   // A pane id is unique only inside its herdr session: a link naming another session never opens this session's same-id pane.
   const foreignSession = linkSession !== null && liveSession !== null && linkSession !== liveSession;
   const pane = foreignSession ? undefined : created?.snapshot === view && created.pane.id === paneId ? created.pane : findHerdrPane(workspaces, paneId);
-  const restore = useRef(restoreLastPane && !creating && herdrPane === null);
+  const restore = useRef(restoreLastPane && !showDetail);
   const openRemembered = useEffectEvent(onRestore);
   const session = liveSession;
   const log = useHerdrActivity(session, workspaces, pane?.id ?? null);
@@ -64,14 +69,14 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
   const resolvedId = pane?.id;
   useEffect(() => { if (session && resolvedId) writeCodingValue(`last-pane:${session}`, resolvedId); }, [session, resolvedId]);
   useEffect(() => {
-    if (herdrPane !== null || creating) restore.current = false;
+    if (showDetail) restore.current = false;
     if (!restore.current || !session || !roster) return;
     restore.current = false;
     // On the phone an approval takes priority over restoring the previous pane.
     if (compact && blockedPanes.length) return;
     const remembered = findHerdrPane(roster.workspaces, parseHerdrPane(readCodingValue(`last-pane:${session}`)));
     if (remembered) openRemembered(remembered.id);
-  }, [creating, herdrPane, roster, session, compact, blockedPanes.length]);
+  }, [showDetail, roster, session, compact, blockedPanes.length]);
   const sessionChanged = Boolean(setup && view && setup.session !== view.session);
   const needsSetup = sessionChanged || Boolean(setup && !required && (view?.available === false || view?.note));
   // A ready setup stops polling; the roster can tell us the server stopped or the owner switched sessions.
@@ -168,6 +173,8 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
         </Popover>
       </header>
       <div className="coding-roster-scroll">
+        <CodingSessionRoster directories={recentCodingDirectories(workspaces, scopes, log)} selected={embeddedSessionId}
+          observed={embeddedView?.id === embeddedSessionId ? embeddedView : null} onOpen={onOpenEmbedded}/>
         {notice && <p className="coding-hint" role="status">{notice}</p>}
         {!required && !errors && (error || roster?.note) && <InlineError onRetry={refresh} retryLabel="다시 불러오기">{error || roster?.note}</InlineError>}
         {!required && !errors && !error && !roster && <CodingSkeleton/>}
@@ -179,7 +186,8 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
         {!required && showSetupInRoster && setupNotice}
       </div>
     </section>
-    {showDetail ? <div className="coding-pane" data-enter key={creating ? 'new' : paneId}>
+    {embeddedSessionId !== null ? <div className="coding-pane"><CodingSession key={embeddedSessionId} id={embeddedSessionId} onUpdate={setEmbeddedView}/></div>
+      : showDetail ? <div className="coding-pane" data-enter key={creating ? 'new' : paneId}>
       {(required || (compact && errors)) && <div className="coding-pane-setup">{errors}{required && panel}</div>}
       {creating ? <NewHerdrWorkspace scopes={scopes} setup={setup} onCancel={onCancel} onStarted={changed}/>
         : !paneId ? <div className="coding-pane-status"><InlineError>herdr 패널 주소가 올바르지 않습니다.</InlineError></div>

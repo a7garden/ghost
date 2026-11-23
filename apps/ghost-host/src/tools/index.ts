@@ -198,7 +198,7 @@ export function createToolSet(deps: {
   memoryEngine?: () => Partial<MemoryEngine> | null;
   documents: DocumentsPort | null;
   host?: HostPort | null;
-  /** The owner's herdr (ghost.coding); null leaves the coding tools out. */
+  /** The owner's herdr, if installed alongside embedded coding. */
   herdr?: HerdrPort | null;
   skills: SkillsPort | null;
   /** Read-only web research (ghost.web); null leaves the tools out. */
@@ -232,7 +232,7 @@ export function createToolSet(deps: {
   const memory = deps.memory === null ? null : createMemoryTools(deps.core, deps.memory, deps.memoryEngine);
   const documents = deps.documents === null ? null : harden(createDocumentsTools(deps.core, deps.documents));
   const host = deps.host ? harden(createHostTools(deps.core, deps.host)) : null;
-  const coding = deps.herdr ? harden(createCodingTools(deps.core, deps.herdr)) : null;
+  const coding = deps.herdr || deps.core.codingSessions ? harden(createCodingTools(deps.core, deps.herdr ?? null)) : null;
   const skills = harden(createSkillsTools(deps.core, deps.skills));
   const web = deps.reach ? harden(createWebTools(deps.core, deps.reach)) : null;
   // Citation tools come with web_read; the engine hides them from a Ghost without it, never from a reviewer.

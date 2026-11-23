@@ -36,6 +36,11 @@ import {
   type HerdrPaneView,
   type HerdrView,
   CodingStart,
+  CodingSessionCreate,
+  CodingThinking,
+  CodingPrompt,
+  CodingDialogAnswer,
+  type CodingEvent,
   HerdrAgentStart,
   HerdrAnswer,
   HerdrClose,
@@ -68,6 +73,8 @@ import { Access } from "../core/access.ts";
 import { execute, hashSecret } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
 import { CommandError, invalid, notFound } from "../core/errors.ts";
+import { CodingModels } from "../coding/models.ts";
+import { readRegular as readCodingFile } from "../coding/workspace.ts";
 import { newId } from "../core/ids.ts";
 import { HOST_VERSION, snapshot, workDetail } from "../core/state.ts";
 import { Suggestions } from "../core/suggestions.ts";
@@ -563,6 +570,107 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       try {
         if (!skills) throw new CommandError("unavailable", "skill folders are not configured");
         return json({ skills: skills.catalog() } satisfies SkillCatalog);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+
+    const codingRoute = /^\/api\/coding\/sessions\/([^/]+)(?:\/(items|events|prompt|abort|close|changes|file|dialogs)(?:\/([^/]+))?)?$/.exec(pathname);
+    if (codingRoute || pathname === "/api/coding/sessions" || pathname === "/api/coding/models") {
+      if (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site")) return error("forbidden", "다른 사이트에서는 코딩 세션을 열 수 없습니다.", 403);
+      try {
+        const sessions = core.codingSessions;
+        if (!sessions) throw new CommandError("unavailable", "embedded coding is not available on this Host");
+        const body = (): Promise<unknown> => request.json().catch(() => { throw invalid("malformed JSON body"); });
+        const method = request.method;
+        if (pathname === "/api/coding/models" && method === "GET") {
+          core.codexCatalog.sync();
+          return json({ models: new CodingModels({ settings: () => core.ledger.settings(), secrets: core.secrets, catalog: core.catalog }).list() });
+        }
+        if (pathname === "/api/coding/sessions") {
+          if (method === "GET") return json(sessions.list());
+          if (method === "POST") return json(await sessions.create(parse(CodingSessionCreate, await body()), { kind: "owner" }), 201);
+        }
+        if (!codingRoute) throw notFound("coding route not found");
+        const decode = (value: string): string => {
+          try { return decodeURIComponent(value); } catch { throw invalid("invalid coding route ID"); }
+        };
+        const [, rawId, action, rawDialog] = codingRoute;
+        const id = parse(Id, decode(rawId!));
+        const session = sessions.get(id);
+        if (!session) throw notFound("coding session not found");
+        if (!action && method === "GET") return json(session);
+        if (!action && method === "PATCH") {
+          const patch = parse(Type.Object({
+            title: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+            model: Type.Optional(Type.Object({ provider: Type.String({ minLength: 1 }), model: Type.String({ minLength: 1 }) })),
+            thinking: Type.Optional(CodingThinking),
+          }, { additionalProperties: false }), await body());
+          return json(await sessions.rename(id, patch));
+        }
+        if (action === "dialogs" && rawDialog && method === "POST") {
+          await sessions.answer(id, parse(Id, decode(rawDialog)), parse(CodingDialogAnswer, await body()));
+          return json({ ok: true });
+        }
+        if (rawDialog) throw notFound("coding route not found");
+        if (action === "items" && method === "GET") {
+          const after = url.searchParams.get("after") ?? undefined;
+          const rawLimit = url.searchParams.get("limit") ?? "100";
+          if (!/^(?:[1-9]\d?|100)$/.test(rawLimit)) throw invalid("coding item limit must be 1–100");
+          return json({ items: sessions.items(id, { after, limit: Number(rawLimit) }) });
+        }
+        if (action === "changes" && method === "GET") return json(await sessions.changes(id));
+        if (action === "file" && method === "GET") {
+          const file = sessions.file(id, url.searchParams.get("path") ?? "");
+          if (!file) throw notFound("coding file not found");
+          let bytes: Buffer;
+          try { bytes = readCodingFile(file.path, 32 * 1024 * 1024); } catch { throw notFound("coding file not found"); }
+          return new Response(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) as Uint8Array<ArrayBuffer>, { headers: {
+            "content-type": file.mimeType || "application/octet-stream",
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+            "content-security-policy": "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
+          } });
+        }
+        if (action === "events" && method === "GET") {
+          const encoder = new TextEncoder();
+          let unsubscribe: (() => void) | undefined;
+          let pings: ReturnType<typeof setInterval> | undefined;
+          let closed = false;
+          let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+          const stop = () => {
+            if (closed) return;
+            closed = true;
+            request.signal.removeEventListener("abort", stop);
+            unsubscribe?.();
+            clearInterval(pings);
+            try { controller?.close(); } catch { /* disconnected */ }
+          };
+          const enqueue = (line: string) => {
+            if (closed) return;
+            try { controller?.enqueue(encoder.encode(line)); } catch { stop(); }
+          };
+          const send = (event: CodingEvent) => enqueue(`data: ${JSON.stringify(event)}\n\n`);
+          const stream = new ReadableStream<Uint8Array>({
+            start(streamController) {
+              controller = streamController;
+              if (request.signal.aborted) { stop(); return; }
+              send({ type: "session", session });
+              unsubscribe = sessions.subscribe(id, send);
+              pings = setInterval(() => enqueue(": keepalive\n\n"), 15_000);
+              request.signal.addEventListener("abort", stop, { once: true });
+            },
+            cancel: stop,
+          });
+          return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-store" } });
+        }
+        if (action === "prompt" && method === "POST") return json(await sessions.prompt(id, parse(CodingPrompt, await body())));
+        if ((action === "abort" || action === "close") && method === "POST") {
+          if (action === "abort") await sessions.abort(id);
+          else await sessions.close(id);
+          return json(sessions.get(id));
+        }
+        throw notFound("coding route not found");
       } catch (caught) {
         return failure(caught);
       }

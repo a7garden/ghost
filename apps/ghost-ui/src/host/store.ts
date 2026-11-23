@@ -48,6 +48,8 @@ export function applyEvent(state: State, data: LedgerEventData): State {
       return { ...state, decisions: upsert(state.decisions, data.decision) };
     case 'effect':
       return state;
+    case 'call':
+      return state;
     case 'notification':
       return { ...state, notifications: upsert(state.notifications, data.notification) };
     case 'schedule':

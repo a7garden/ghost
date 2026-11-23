@@ -222,12 +222,14 @@ export function describeWorkLine(core: Core, work: Work): string {
 }
 
 /**
- * One line per coding run a Work has in herdr: state facts only (agent, state, turn, pane, branch), never the
- * prompt, the report or the terminal text — those reach the conversation the run reports to, not an inspect.
+ * Show run state and address, never the prompt, report or transcript. The owning conversation receives the report.
  */
 export function describeCodingRuns(runs: readonly CodingRun[]): string {
   if (runs.length === 0) return "";
-  return `Coding runs:\n${runs.map((run) => `  - ${run.agent ?? "agent"} ${run.state}, turn ${run.turn} on ${run.pane ?? "no pane yet"}${run.branch ? `, branch ${run.branch}` : ""}${run.stopPending ? ", stop pending" : ""}`).join("\n")}`;
+  return `Coding runs:\n${runs.map((run) => {
+    const address = run.agent === "ghost" ? `session ${run.session.slice("ghost:".length)}` : run.pane ?? "no pane yet";
+    return `  - ${run.agent ?? "agent"} ${run.state}, turn ${run.turn} on ${address}${run.branch ? `, branch ${run.branch}` : ""}${run.stopPending ? ", stop pending" : ""}`;
+  }).join("\n")}`;
 }
 
 /**

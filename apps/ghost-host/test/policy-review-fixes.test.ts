@@ -891,7 +891,7 @@ async function codingFixture(options: { installed?: ("omp" | "claude" | "codex")
 
 test("code_run starts the agent asynchronously in a fresh worktree, and its settled report reaches the Work conversation", async () => {
   const s = await codingFixture();
-  const result = await s.call("code_run", { repo: s.repo, task: "Add b.txt\nwith the number two", branch: "add-b" }, "run-1");
+  const result = await s.call("code_run", { repo: s.repo, agent: "omp", task: "Add b.txt\nwith the number two", branch: "add-b" }, "run-1");
   expect(result.isError).toBeFalsy();
   const started = JSON.parse(result.text);
   expect(started).toMatchObject({ work: s.work.id, pane: "w1:p1", agent: "omp", branch: "ghost/add-b", turn: 1 });
@@ -917,7 +917,7 @@ test("code_run starts the agent asynchronously in a fresh worktree, and its sett
 
 test("a settled pane carries on in the same conversation and worktree; a busy pane and an unknown pane are refused", async () => {
   const s = await codingFixture();
-  const first = JSON.parse((await s.call("code_run", { repo: s.repo, task: "Add b", branch: "again" }, "c-1")).text);
+  const first = JSON.parse((await s.call("code_run", { repo: s.repo, agent: "omp", task: "Add b", branch: "again" }, "c-1")).text);
   await s.drive();
   const second = await s.call("code_run", { pane: first.pane, task: "Also touch it again" }, "c-2");
   expect(second.isError).toBeFalsy();
@@ -933,7 +933,7 @@ test("a settled pane carries on in the same conversation and worktree; a busy pa
   expect(s.git("branch", "--list", "ghost/*").trim().split("\n")).toHaveLength(1);
 
   // A pane that is still working refuses a new instruction before any mutation.
-  const busy = JSON.parse((await s.call("code_run", { repo: s.repo, task: "Add b first", branch: "busy" }, "c-3")).text);
+  const busy = JSON.parse((await s.call("code_run", { repo: s.repo, agent: "omp", task: "Add b first", branch: "busy" }, "c-3")).text);
   const rejected = await s.call("code_run", { pane: busy.pane, task: "cut in" }, "c-4");
   expect(rejected.isError).toBe(true);
   expect(s.calls.filter(call => call.op === "prompt")).toHaveLength(1);
@@ -942,7 +942,7 @@ test("a settled pane carries on in the same conversation and worktree; a busy pa
   expect(unknown.isError).toBe(true);
   const neither = await s.call("code_run", { task: "x" }, "c-6");
   expect(neither.isError).toBe(true);
-  expect(neither.text).toContain("pass repo, or pane");
+  expect(neither.text).toContain("pass exactly one of repo, session or pane");
 });
 
 test("code_run adopts an idle owner-started pane no Work holds: no worktree is cut, and the agent works where the owner had it", async () => {
@@ -971,13 +971,13 @@ test("code_run adopts an idle owner-started pane no Work holds: no worktree is c
 
 test("code_run says what herdr could not do: refused before anything opened, uncertain after a pane opened, blocked at the owner", async () => {
   const refused = await codingFixture({ startFails: "no herdr server is running at /x" });
-  const none = await refused.call("code_run", { repo: refused.repo, task: "x" }, "refused");
+  const none = await refused.call("code_run", { repo: refused.repo, agent: "omp", task: "x" }, "refused");
   expect(none.isError).toBe(true);
   expect(none.text).toContain("no herdr server is running");
 
   const half = await codingFixture({ startFails: "agent_not_ready: the agent is waiting at a login prompt", failAfterPane: true });
   // What happened after herdr opened a pane reaches the Ghost with the pane named, so it can watch it; the failed opening window is never retried and settles uncertain.
-  const halfRun = await half.call("code_run", { repo: half.repo, task: "x", branch: "half" }, "half");
+  const halfRun = await half.call("code_run", { repo: half.repo, agent: "omp", task: "x", branch: "half" }, "half");
   expect(halfRun.isError).toBeFalsy();
   expect(halfRun.text).toContain("w1:p1");
   await half.core.coding.poll();
@@ -987,7 +987,7 @@ test("code_run says what herdr could not do: refused before anything opened, unc
 
   // An agent waiting at a dialog is blocked on the owner, not failed: the turn stays open and nothing is delivered.
   const waiting = await codingFixture({ blocked: true });
-  expect((await waiting.call("code_run", { repo: waiting.repo, task: "x", branch: "blocked" }, "blocked")).isError).toBeFalsy();
+  expect((await waiting.call("code_run", { repo: waiting.repo, agent: "omp", task: "x", branch: "blocked" }, "blocked")).isError).toBeFalsy();
   await waiting.core.coding.poll();
   const run = waiting.core.coding.list(waiting.work.id)[0]!;
   expect(run.state).toBe("blocked");
@@ -995,17 +995,17 @@ test("code_run says what herdr could not do: refused before anything opened, unc
   expect(JSON.stringify(waiting.engine.to(waiting.conversationId))).not.toContain("ghost/blocked");
 });
 
-test("code_agents says whether herdr is ready, which installed agent code_run would start, and which agents are live with the Work they run for", async () => {
+test("code_agents says whether herdr is ready, which agents are installed, and which live agents run for a Work", async () => {
   const ready = await codingFixture({ installed: ["claude", "codex"] });
   expect(JSON.parse((await ready.call("code_agents", {}, "list")).text)).toEqual({
-    herdr: "ready", session: "default", usedByDefault: "claude", roster: [],
+    defaultExecutor: "ghost", sessions: [], herdr: "ready", session: "default", usedByDefault: "claude", roster: [],
     agents: [{ id: "omp", name: "omp", installed: false, integration: "current" }, { id: "claude", name: "claude", installed: true, integration: "current" }, { id: "codex", name: "codex", installed: true, integration: "current" }],
   });
   const closed = await codingFixture({ server: false });
   expect(JSON.parse((await closed.call("code_agents", {}, "closed")).text).herdr).toContain("no server is running in session default");
 
   const live = await codingFixture();
-  await live.call("code_run", { repo: live.repo, task: "Add b", branch: "roster" }, "start");
+  await live.call("code_run", { repo: live.repo, agent: "omp", task: "Add b", branch: "roster" }, "start");
   const roster = JSON.parse((await live.call("code_agents", {}, "roster")).text).roster;
   expect(roster).toEqual([{ pane: "w1:p1", agent: "omp", status: "working", work: { id: live.work.id, title: expect.any(String), state: expect.any(String) }, run: expect.objectContaining({ turn: 1 }) }]);
   const detail = JSON.parse((await live.call("code_agents", { pane: "w1:p1" }, "detail")).text).detail;

@@ -5,6 +5,13 @@ import type {
   Command,
   CodingSetup,
   CommandOf,
+  CodingDialogAnswer,
+  CodingEvent,
+  CodingItem,
+  CodingPrompt,
+  CodingSession,
+  CodingSessionCreate,
+  HerdrChangedFile,
   ConnectionOAuthView,
   ConnectionOAuthClientInput,
   ConnectionOAuthStart,
@@ -182,6 +189,22 @@ export type MailQuery = { mailbox: string; q?: string; before?: number; limit?: 
 export type MailSendCommand = CommandOf<'mail.send'>;
 export type MailUpdateCommand = CommandOf<'mail.update'>;
 
+export type CodingSessionModel = CodingSession['model'] & { name: string; thinking: string[] };
+export type CodingSessionPatch = Partial<Pick<CodingSession, 'title' | 'model' | 'thinking'>>;
+export type CodingSessionChanges = {
+  files: (Pick<HerdrChangedFile, 'path' | 'status'> & { additions: number; deletions: number })[];
+  diff: string;
+  truncated: boolean;
+  commits: string[];
+  dirty: boolean;
+};
+
+const codingSessionsPath = '/api/coding/sessions';
+const codingSessionPath = (id: string) => `${codingSessionsPath}/${encodeURIComponent(id)}`;
+const codingJson = (method: 'POST' | 'PATCH', input: unknown): RequestInit => ({
+  method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+});
+
 /**
  * The only way the UI talks to the host. Same origin; the owner token comes from the
  * host-injected global. In `vite dev` the dev proxy adds it instead.
@@ -243,6 +266,79 @@ export class HostClient {
   codingSetup(): Promise<CodingSetup> {
     return this.json('/api/coding', { cache: 'no-store' });
   }
+
+  codingSessions(signal?: AbortSignal): Promise<CodingSession[]> {
+    return this.json(codingSessionsPath, { signal });
+  }
+
+  createCodingSession(input: CodingSessionCreate): Promise<CodingSession> {
+    return this.json(codingSessionsPath, codingJson('POST', input));
+  }
+
+  codingSession(id: string, signal?: AbortSignal): Promise<CodingSession> {
+    return this.json(codingSessionPath(id), { signal });
+  }
+
+  patchCodingSession(id: string, input: CodingSessionPatch): Promise<CodingSession> {
+    return this.json(codingSessionPath(id), codingJson('PATCH', input));
+  }
+
+  codingSessionItems(id: string, query: { after?: string; limit?: number }, signal?: AbortSignal): Promise<{ items: CodingItem[] }> {
+    const params = new URLSearchParams();
+    if (query.after !== undefined) params.set('after', query.after);
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    return this.json(`${codingSessionPath(id)}/items?${params}`, { signal });
+  }
+
+  promptCodingSession(id: string, input: CodingPrompt): Promise<{ disposition: 'started' | 'queued' }> {
+    return this.json(`${codingSessionPath(id)}/prompt`, codingJson('POST', input));
+  }
+
+  abortCodingSession(id: string): Promise<CodingSession> {
+    return this.json(`${codingSessionPath(id)}/abort`, { method: 'POST' });
+  }
+
+  closeCodingSession(id: string): Promise<CodingSession> {
+    return this.json(`${codingSessionPath(id)}/close`, { method: 'POST' });
+  }
+
+  answerCodingSession(id: string, dialogId: string, answer: CodingDialogAnswer): Promise<{ ok: true }> {
+    return this.json(`${codingSessionPath(id)}/dialogs/${encodeURIComponent(dialogId)}`, codingJson('POST', answer));
+  }
+
+  codingSessionChanges(id: string, signal?: AbortSignal): Promise<CodingSessionChanges> {
+    return this.json(`${codingSessionPath(id)}/changes`, { signal });
+  }
+
+  codingModels(signal?: AbortSignal): Promise<{ models: CodingSessionModel[] }> {
+    return this.json('/api/coding/models', { signal });
+  }
+
+  async codingSessionFile(id: string, path: string, signal?: AbortSignal): Promise<Blob> {
+    const response = await this.request(`${codingSessionPath(id)}/file?${new URLSearchParams({ path })}`, {
+      headers: this.headers(), cache: 'no-store', signal,
+    });
+    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
+    if (!response.ok) throw new HostError('not_found', '파일을 불러올 수 없습니다.');
+    return response.blob();
+  }
+
+  /** The caller refetches items after the first event on each fetch-based SSE connection. */
+  async subscribeCodingSession(id: string, onEvent: (event: CodingEvent) => void, signal: AbortSignal): Promise<void> {
+    const response = await this.request(`${codingSessionPath(id)}/events`, {
+      headers: this.headers({ Accept: 'text/event-stream' }), cache: 'no-store', signal,
+    });
+    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
+    if (!response.ok || !response.body) {
+      if (response.status === 404) throw new HostError('not_found', '코딩 세션을 찾을 수 없습니다.');
+      if (response.status === 401 || response.status === 403) throw new HostError('forbidden', '코딩 세션을 열 수 없습니다.');
+      throw new HostError('network', '코딩 세션에 연결할 수 없습니다.');
+    }
+    for await (const { data } of serverEvents(response.body)) {
+      if (data) onEvent(JSON.parse(data) as CodingEvent);
+    }
+  }
+
   installHerdrIntegration(input: HerdrIntegrationInstall): Promise<CodingSetup> {
     return this.json('/api/coding/integrations', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),

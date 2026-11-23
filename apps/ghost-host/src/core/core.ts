@@ -1,5 +1,6 @@
 import { DEFAULT_GHOST_TOOLS, type ArtifactRef, type DocRef, type Conversation, type Ghost, type Notification } from "@ghost/contract";
 import type { Ledger } from "../ledger/ledger.ts";
+import type { CodingSessionsPort } from "../coding/ports.ts";
 import { CodingRuns } from "./coding.ts";
 import { checkAttachments } from "./configuration.ts";
 import { Decisions } from "./decisions.ts";
@@ -72,6 +73,7 @@ export class Core implements EngineEvents {
   readonly activitySources: ActivitySourcePort | null;
   readonly sources: SourceStore | null;
   readonly log: (message: string, detail?: unknown) => void;
+  private codingSessionsRef: CodingSessionsPort | null = null;
   private engineRef: Engine | null = null;
   private readonly lanes = new Map<string, Promise<void>>();
   private readonly unsubscribeLedgerEvents: () => void;
@@ -149,6 +151,14 @@ export class Core implements EngineEvents {
 
   attach(engine: Engine) {
     this.engineRef = engine;
+  }
+
+  get codingSessions(): CodingSessionsPort | null {
+    return this.codingSessionsRef;
+  }
+
+  setCodingSessions(sessions: CodingSessionsPort | null): void {
+    this.codingSessionsRef = sessions;
   }
 
   /**

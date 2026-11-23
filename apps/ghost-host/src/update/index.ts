@@ -33,7 +33,7 @@ export interface UpdaterOptions {
 /** The engine mirrors live running state into the ledger's busy flag. */
 export function hostIsIdle(core: Core): boolean {
   const conversations = core.ledger.conversations();
-  return !core.hasQueuedLanes() && !conversations.some((conversation) => conversation.busy);
+  return !core.hasQueuedLanes() && !core.codingSessions?.busy() && !conversations.some((conversation) => conversation.busy);
 }
 
 /** launchd must regain control even when a graceful shutdown cannot finish. */
