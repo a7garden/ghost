@@ -13,7 +13,7 @@ Durable Ghosts you hand work to. One Bun process keeps every Ghost's conversatio
 | `apps/ghost-ui` | web UI, served by the host |
 | `apps/ghost-desktop` | Tauri Mac app around the host and UI |
 | `apps/ghost-ios` | iPhone app |
-| `apps/ghost-voice-server` | local voice server (follow-up scope) |
+| `apps/ghost-voice-server` | local voice server (call feature, see docs/voice-calls.md) |
 
 ## Develop
 
