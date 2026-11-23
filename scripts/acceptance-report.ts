@@ -64,8 +64,29 @@ table(
 );
 
 table(
-  "code_run trunk (coding_runs rows)",
-  db.query(`SELECT COUNT(*) AS runs FROM coding_runs`).all() as Record<string, unknown>[],
+  "code_run metrics: coding_runs by state",
+  db.query(`SELECT COALESCE(json_extract(data, '$.run.state'), '(unknown)') AS state, COUNT(*) AS runs
+            FROM coding_runs GROUP BY 1 ORDER BY 2 DESC, 1`).all() as Record<string, unknown>[],
+);
+
+table(
+  "code_run metrics: root Work with code_run",
+  db.query(`
+    WITH root_works AS (
+      SELECT DISTINCT w.id AS id, w.state AS state, w.created_at AS created_at, w.ended_at AS ended_at
+      FROM coding_runs cr JOIN works c ON c.id = cr.work_id JOIN works w ON w.id = c.root_id
+    ),
+    settled AS (
+      SELECT (ended_at - created_at) / 60000.0 AS mins FROM root_works WHERE ended_at IS NOT NULL
+    )
+    SELECT
+      (SELECT COUNT(*) FROM root_works) AS roots,
+      (SELECT COUNT(*) FROM root_works WHERE state = 'done') AS done,
+      (SELECT COUNT(*) FROM settled) AS settled_roots,
+      ROUND((SELECT AVG(mins) FROM (SELECT mins FROM settled ORDER BY mins
+                LIMIT 2 - (SELECT COUNT(*) FROM settled) % 2
+                OFFSET (SELECT (COUNT(*) - 1) / 2 FROM settled))), 1) AS median_mins,
+      ROUND((SELECT AVG(mins) FROM settled), 1) AS avg_mins`).all() as Record<string, unknown>[],
 );
 
 table(
