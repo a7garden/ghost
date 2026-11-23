@@ -1,6 +1,6 @@
 import { realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 /**
  * macOS Seatbelt (sandbox-exec) boundary for the workspace execution kind. The kernel, not this
@@ -77,8 +77,12 @@ export interface SeatbeltBoundary {
   readRoots: string[];
   /** Read-only roots that beat the secret deny: a reviewed Work's own directories. */
   viewRoots?: string[];
-  /** Git plumbing derived from the owner's canonical common directory, not Work-writable metadata. */
-  git?: { objects: string; refs: string[] };
+  /**
+   * Git plumbing derived from the owner's canonical common directory, not Work-writable metadata.
+   * `admin` is the worktree's own private git directory: the only place a worktree may write
+   * (index, HEAD, ORIG_HEAD); it never covers the common directory itself.
+   */
+  git?: { objects: string; refs: string[]; admin?: string };
   /** Loopback port of the Host egress proxy; null denies all network. */
   proxyPort: number | null;
 }
@@ -91,7 +95,7 @@ export interface SeatbeltPolicy {
   viewRoots: string[];
   /** Per-user macOS scratch dirs; kernel-writable, unlike the read-only toolchain tier. */
   tempRoots: string[];
-  git: { objects: string; refs: string[] } | null;
+  git: { objects: string; refs: string[]; admin: string | null } | null;
   proxyPort: number | null;
   secrets: string[];
   privacy: string[];
@@ -126,13 +130,16 @@ function lexicalPaths(paths: readonly string[]): string[] {
  */
 export function buildSeatbeltPolicy(home: string, stateRoot: string, boundary: SeatbeltBoundary): SeatbeltPolicy {
   const objects = boundary.git ? lexicalPaths([boundary.git.objects])[0]! : null;
+  // The admin directory keeps its trusted lexical spelling like a write root: resolving a
+  // Work-writable symlink here would grant its target instead of the directory itself.
+  const admin = boundary.git?.admin ? lexicalPaths([boundary.git.admin])[0] ?? null : null;
   const policy: SeatbeltPolicy = {
     home,
     stateRoot,
     writeRoots: lexicalPaths(boundary.writeRoots),
     readRoots: realPaths(boundary.readRoots),
     viewRoots: lexicalPaths(boundary.viewRoots ?? []),
-    git: boundary.git && objects !== null ? { objects, refs: lexicalPaths(gitRefPlumbing(boundary.git.refs)) } : null,
+    git: boundary.git && objects !== null ? { objects, refs: lexicalPaths(gitRefPlumbing(boundary.git.refs)), admin } : null,
     proxyPort: boundary.proxyPort,
     secrets: realPaths(secretPaths(home, stateRoot)),
     privacy: privacyPaths(home),
@@ -153,6 +160,29 @@ export function gitRefPlumbing(refs: string[]): string[] {
     plumbing.push(ref, `${ref}.lock`, reflog, `${reflog}.lock`, dirname(reflog));
   }
   return plumbing;
+}
+
+/**
+ * The files a linked worktree rewrites while it works, and nothing else in its admin
+ * directory: its index, its HEAD and the state files of a merge, cherry-pick, revert or reset.
+ * The directory's identity files (`commondir`, `gitdir`, `config.worktree`) stay read-only on
+ * purpose. A rewritten `commondir` points the Host's own git calls at another repository, and
+ * that repository's config can run a command (a filesystem monitor, an external diff) outside
+ * the sandbox.
+ */
+export const GIT_ADMIN_FILES = [
+  "index", "index.lock",
+  "HEAD", "HEAD.lock",
+  "ORIG_HEAD", "ORIG_HEAD.lock",
+  "MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "AUTO_MERGE",
+  "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD",
+  "COMMIT_EDITMSG",
+  join("logs", "HEAD"), join("logs", "HEAD.lock"),
+];
+
+/** The whitelisted admin files of one worktree, as the exact paths a grant may name. */
+export function gitAdminPlumbing(admin: string): string[] {
+  return GIT_ADMIN_FILES.map((name) => join(admin, name));
 }
 
 export type SeatbeltDecision = { ok: true } | { ok: false; why: "unwritable" | "secret" | "privacy" | "unreadable" };
@@ -243,26 +273,35 @@ export function seatbeltProfile(policy: SeatbeltPolicy): { profile: string; defi
       .join("\n"),
   ];
   if (policy.git !== null) {
-    definitions.push(`O0=${policy.git.objects}`);
+    const { objects, refs, admin } = policy.git;
+    definitions.push(`O0=${objects}`);
     // This SBPL flavor has no `{n}` intervals; classes repeat instead.
-    const objects = policy.git.objects.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const objectsPattern = objects.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     // New loose objects only: create the fan-out dir and the object (or its temp name), write it,
     // unlink a temp a failed write leaves behind. Existing objects are never modified or removed.
-    const fanout = `${objects}/[0-9a-f][0-9a-f]`;
+    const fanout = `${objectsPattern}/[0-9a-f][0-9a-f]`;
     const objectFile = `${fanout}/(tmp_obj_[0-9A-Za-z]+|[0-9a-f]+)`;
     // A branch ref, its lock file and its reflog entry: lock, write, rename into place.
-    const refRules = policy.git.refs.map((ref) => {
-      const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // A branch ref, its lock file and its reflog entry: lock, write, rename into place.
+    const writeRules = (paths: string[]): string => paths.map((path) => {
+      const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const filter = `(regex #"^${escaped}$")`;
       return [`(allow file-write* file-write-create ${filter})`, `(allow file-unlink ${filter})`].join("\n");
-    });
+    }).join("\n");
+    const refRules = writeRules(refs);
+    // The worktree's own private git files: index, HEAD, ORIG_HEAD and the state files of a
+    // merge or a cherry-pick. Each file is named exactly, never its directory: the directory
+    // also holds commondir and gitdir, and a rewritten commondir would send the Host's own git
+    // calls to a repository the session chooses.
+    const adminRules = admin ? writeRules(gitAdminPlumbing(admin)) : "";
     rules.push([
       `(allow file-read* (subpath (param "O0")))`,
       `(allow file-write-xattr (subpath (param "O0")))`,
       `(allow file-write-data file-write-create (regex #"^${fanout}$"))`,
       `(allow file-write-data file-write-create (regex #"^${objectFile}$"))`,
       `(allow file-unlink (regex #"^${fanout}/tmp_obj_[0-9A-Za-z]+$"))`,
-      refRules.join("\n"),
+      refRules,
+      adminRules,
     ].join("\n"));
   }
   const outbound = policy.proxyPort === null ? "" : `(allow network* (remote ip "localhost:${policy.proxyPort}"))`;

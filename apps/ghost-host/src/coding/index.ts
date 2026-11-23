@@ -590,7 +590,7 @@ export class CodingSessions implements CodingSessionsPort {
     const tools = role
       ? [...role.tools.filter(tool => writable || (ORCHESTRATION_READ_TOOLS as readonly string[]).includes(tool)), "subagent"]
       : [...WORKER_TOOLS, "ask_owner_choices", "subagent"];
-    const gitCommon = writable ? worktreeGit(handle.record.session)?.common ?? null : null;
+    const git = writable ? worktreeGit(handle.record.session) : null;
     if (!role && config?.toolAllowlist == null) settings.applyOverrides({ defaultTools: tools });
     const { session } = await createAgentSession({ cwd: files.cwd, agentDir: anchor,
       model: selected.model, modelRuntime: selected.runtime, thinkingLevel: selected.thinking,
@@ -598,7 +598,7 @@ export class CodingSessions implements CodingSessionsPort {
       sessionManager: role ? SessionManager.inMemory(files.cwd) : handle.manager!,
       // PowerShell has no Ghost execution boundary; never expose Pi's unwrapped implementation.
       tools: role ? tools : config?.toolAllowlist ?? undefined, excludeTools: ["powershell"],
-      customTools: [...codingFileTools(files, this.root, skillPath), ...(writable ? [codingBash(this.root, files.cwd, dialogs!, gitCommon, this.hostPorts)] : [])],
+      customTools: [...codingFileTools(files, this.root, skillPath), ...(writable ? [codingBash(this.root, files.cwd, dialogs!, git, this.hostPorts)] : [])],
     });
     try {
       await dialogs!.bind(session, error => {
