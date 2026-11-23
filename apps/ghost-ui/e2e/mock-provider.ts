@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { AUTONOMOUS_WAKE, QUIET_REPLY } from '@ghost/contract';
 
 /**
  * Tiny OpenAI-compatible chat completions mock the host talks to through
@@ -8,6 +9,7 @@ import { createServer, type Server } from 'node:http';
  *
  * - `MEDIC-COMPLETE` in the prompt → `complete` tool call (finishes the Work).
  * - `MEDIC-QUESTION` in the prompt → `ask_owner` tool call (opens a decision).
+ * - autonomous wakes after seeding stay quiet so unattended turns don't change fixtures mid-suite.
  * - anything else → `reasoning_content` + a fixed Korean text reply.
  * - a tool result last → the follow-up text reply ending the turn.
  */
@@ -46,11 +48,12 @@ function textOf(content: unknown): string {
 }
 
 /** What the mock should answer, from the last transcript entry. */
-function replyFor(messages: ChatMessage[]): MockReply {
+function replyFor(messages: ChatMessage[], seeding: boolean): MockReply {
   const last = messages[messages.length - 1];
   const lastText = textOf(last?.content);
   if (last?.role === 'tool') return { kind: 'text', withThinking: false, text: AFTER_QUESTION };
   if (lastText.startsWith('Work "')) return { kind: 'text', withThinking: false, text: afterReport(/\(([0-9a-f-]{36})\)/.exec(lastText)?.[1] ?? '') };
+  if (!seeding && lastText.startsWith(AUTONOMOUS_WAKE)) return { kind: 'text', withThinking: false, text: QUIET_REPLY };
   if (lastText.includes('MEDIC-COMPLETE')) return { kind: 'tool', name: 'complete', args: { summary: COMPLETE_SUMMARY, artifacts: [] } };
   if (lastText.includes('MEDIC-QUESTION')) return { kind: 'tool', name: 'ask_owner', args: { question: QUESTION, options: QUESTION_OPTIONS } };
   if (lastText.includes('좋아. 중요한 항목은 따로 모아서')) {
@@ -92,7 +95,7 @@ async function writeStream(response: ServerResponse, reply: MockReply): Promise<
 }
 
 /** Start listening on a spare loopback port; keeps the runner process alive. */
-export function startMockProvider(): Promise<MockProvider> {
+export function startMockProvider(isSeeding: () => boolean): Promise<MockProvider> {
   const server = createServer((request, response) => {
     if (request.method !== 'POST' || !request.url?.endsWith('/chat/completions')) {
       response.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: 'not found' } }));
@@ -107,7 +110,7 @@ export function startMockProvider(): Promise<MockProvider> {
       } catch {
         // An unreadable body gets the plain text reply; the host surfaces whatever it decides.
       }
-      void writeStream(response, replyFor(messages)).catch(() => response.destroy());
+      void writeStream(response, replyFor(messages, isSeeding())).catch(() => response.destroy());
     });
     request.on('error', () => response.destroy());
   });

@@ -211,6 +211,12 @@
   .coding-dock .coding-composer { width: 100%; }
   .coding-shell-start { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
   .coding-shell-start [role='alert'] { flex-basis: 100%; }
+  /* The stop control matches the 34px send button beside it. */
+  .coding-composer .chat-stop { display: grid; flex: none; width: 34px; height: 34px; place-items: center; padding: 0; border: 0; border-radius: var(--radius-pill);
+    background: var(--ghost-hover2); color: var(--ghost-ink); cursor: pointer; }
+  .coding-composer .chat-stop:hover { background: color-mix(in srgb, var(--ghost-ink) 12%, transparent); }
+  .coding-composer .chat-stop svg { width: 12px; height: 12px; fill: currentColor; }
+  .coding-page[data-compact] .coding-composer .chat-stop { width: 44px; height: 44px; }
   .coding-model { display: inline-flex; align-items: center; gap: 4px; max-width: 12rem; min-height: 28px; padding: 2px 8px; border: 0; border-radius: var(--radius-pill);
     background: none; color: var(--ghost-ink2); font: inherit; font-size: var(--text-caption); font-weight: 550; cursor: pointer; }
   .coding-model span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

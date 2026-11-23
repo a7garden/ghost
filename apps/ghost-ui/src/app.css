@@ -550,6 +550,9 @@ details.transcript-event[open] { background: var(--ghost-hover); }
 .trail__chip[data-live] { color: var(--ghost-signal-ink); background: var(--ghost-signal-tint); }
 .trail__chip[data-live]::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 5px; vertical-align: 1px; border-radius: 50%; background: currentColor; animation: island-breathe 1s ease-in-out infinite; }
 .trail__chip[data-more] { color: var(--ghost-ink3); background: none; }
+.thread-panel .trail__summary { flex-wrap: wrap; row-gap: 4px; }
+.thread-panel .trail__chips { flex-wrap: wrap; max-width: 100%; }
+.thread-panel .trail__chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trail__steps { display: grid; gap: 12px; margin: 8px 0 4px 13px; padding: 4px 0 4px 18px; list-style: none; border-left: 1.5px solid var(--ghost-line-strong); }
 .trail__steps li { position: relative; display: grid; gap: 6px; min-width: 0; }
 .trail__steps li::before { content: ''; position: absolute; top: 6px; left: -22.5px; width: 7px; height: 7px; border-radius: 50%; background: var(--ghost-canvas); box-shadow: inset 0 0 0 1.5px var(--ghost-ink3); }

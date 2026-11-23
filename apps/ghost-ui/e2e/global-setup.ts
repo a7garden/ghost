@@ -69,10 +69,12 @@ export default async function globalSetup(): Promise<void> {
   process.env.GHOST_VISUAL_RUN_ROOT = tempRoot;
   const hostPids: number[] = [];
   writeCleanupState({ hostPids, tempRoot });
-  const mock = await startMockProvider();
+  let seeding = true;
+  const mock = await startMockProvider(() => seeding);
   // Activity edits install policy rules, which invalidate pending approvals on the primary Host.
   await Promise.all([
     startSeededHost(tempRoot, 'primary', mock.port, hostPids),
     startSeededHost(tempRoot, 'activities', mock.port, hostPids),
   ]);
+  seeding = false;
 }

@@ -146,9 +146,12 @@ export function fulfillHerdrFrame(route: Route, text: string, { end = false, tra
 }
 
 /** Coding requests use a page-local herdr session; other API calls go to the seeded Host. */
-export async function mockCodingApi(page: Page, { stopped = false, rich = false, owned = [], held = [], mouse = [], finishedAgent = 'omp', finishedScreen }: {
+export async function mockCodingApi(page: Page, {
+  stopped = false, rich = false, owned = [], held = [], mouse = [], finishedAgent = 'omp', finishedStatus = 'done', finishedScreen,
+}: {
   stopped?: boolean; rich?: boolean; owned?: readonly string[]; held?: readonly string[]; mouse?: readonly string[];
-  finishedAgent?: 'omp' | 'claude';
+  finishedAgent?: 'omp' | 'claude' | null;
+  finishedStatus?: 'done' | 'idle';
   finishedScreen?(text: string): string;
 } = {}): Promise<void> {
   // Playwright fulfills a finite body. Keep successful mock leases open until the caller cancels.
@@ -200,7 +203,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false,
       { id: 'codex', name: 'Codex', path: null, integration: 'missing' },
     ],
     kinds: ['omp', 'claude', 'pi', 'gemini'],
-    prefs: { session: null, agent: 'claude', notify: 'blocked' },
+    prefs: { session: null, agent: 'claude', notify: 'all' },
   };
   const entries = new Map<string, HerdrOutput>();
   for (const output of [
@@ -222,7 +225,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false,
     },
     {
       pane: { id: visualCodingIds.finished, workspaceId: 'w79', tabId: 'w79:tA', workspace: 'app', tab: 'login', agent: finishedAgent,
-        status: 'done', owned: owned.includes(visualCodingIds.finished), focused: false, cwd: '/Users/garden/Workspace/Projects/wt/app-fix-login', title: '로그인 실패 시 안내 문구 고치기' },
+        status: finishedAgent ? finishedStatus : 'unknown', owned: owned.includes(visualCodingIds.finished), focused: false, cwd: '/Users/garden/Workspace/Projects/wt/app-fix-login', title: '로그인 실패 시 안내 문구 고치기' },
       text: [
         '❯ 로그인 실패 시 안내 문구를 고쳐 주세요.',
         '',
@@ -280,6 +283,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false,
       { id: 'ask-a1', kind: 'agent', at: now - 22_000, text: '**탭 순서와 초점 표시**를 검증하는 테스트가 있습니다. 기존 테스트를 실행해 확인하겠습니다.' },
     ]],
   ]);
+  if (!finishedAgent) initialChats.delete(visualCodingIds.finished);
   const models = new Map([[visualCodingIds.finished, finishedAgent === 'omp' ? 'anthropic/claude-sonnet-4-6' : 'claude-sonnet-4-6']]);
   const question: HerdrAsk = {
     pane: visualCodingIds.blocked, kind: 'approval', title: '설정 테스트를 실행할까요?', detail: 'bun test src/ui/settings.test.tsx',

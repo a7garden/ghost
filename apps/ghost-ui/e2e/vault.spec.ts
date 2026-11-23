@@ -43,6 +43,10 @@ test('a secure form answers through the vault route and never through the answer
   await mockVaultRequest(page, vaultAnswers);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${baseUrl}/#/ghosts/${researchGhostId}`);
+  const fold = page.getByRole('button', { name: /^확인 필요 2건/ });
+  await expect(fold).toHaveAttribute('aria-expanded', 'false');
+  await fold.click();
+  await expect(fold).toHaveAttribute('aria-expanded', 'true');
   await page.getByRole('button', { name: /^서비스 로그인/ }).click();
   await expect(page.getByRole('button', { name: '금고에 전달' })).toBeInViewport({ ratio: 1 });
   // The chat answer path is not on the card.

@@ -103,6 +103,7 @@
   .workspace-page .sidebar-pool-toggle, .workspace-page .sidebar-group-action { width: 44px; height: 44px; margin-block: 10px 0; }
   .workspace-page .sidebar-scroll-frame { margin-inline: 0; }
   .workspace-page .sidebar-scroll { padding-inline: 0; }
+  .workspace-page .sidebar-scroll > .ghost-navigation-group + :is(.presence-row__main, .touch-context:has(.presence-row__main)) { margin-block-start: var(--ghost-space-6); }
   .ghost-conversation__dock {
     --composer-glow-blur: 5px;
     padding: 6px max(var(--ghost-space-3), env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(var(--ghost-space-3), env(safe-area-inset-left));
