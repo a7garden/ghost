@@ -40,6 +40,22 @@ export function ensureWorktree(root: string, work: Work, cwd: string): string {
 }
 
 /**
+ * Refuse a grant whose path, or any ancestor below `root`, is a symlink. A link swapped before
+ * the profile is compiled must never promote its target into a privilege, so every path a
+ * boundary grants is checked from the leaf up to (but not including) the trusted root.
+ */
+export function assertNoSymlinkGrants(grants: string[], root: string): void {
+  for (const grant of grants) {
+    let current = grant;
+    while (current !== root) {
+      const info = lstatSync(current, { throwIfNoEntry: false });
+      if (info?.isSymbolicLink()) throw new Error("sandbox: refusing a git grant reached through a symlink");
+      current = dirname(current);
+    }
+  }
+}
+
+/**
  * Derive privileged git paths from the owner's checkout, never the Work-writable `.git` file.
  * Validate both sides of the worktree link and its branch before granting any metadata writes.
  */
@@ -62,13 +78,6 @@ export function verifiedWorktree(root: string, work: Work, ownerCwd: string): { 
   // Check all grants, including lock paths; fixed lexical policy rules also prevent a later
   // swap from promoting a symlink target into a privilege.
   const ref = join(common, "refs/heads", worktreeBranch(work.id));
-  for (const grant of [join(common, "objects"), ...gitRefPlumbing([ref])]) {
-    let current = grant;
-    while (current !== common) {
-      const info = lstatSync(current, { throwIfNoEntry: false });
-      if (info?.isSymbolicLink()) refuse();
-      current = dirname(current);
-    }
-  }
+  try { assertNoSymlinkGrants([join(common, "objects"), ...gitRefPlumbing([ref])], common); } catch { refuse(); }
   return { path, admin, common };
 }

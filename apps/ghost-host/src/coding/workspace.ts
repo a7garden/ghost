@@ -5,8 +5,8 @@ import { basename, extname, isAbsolute, join, relative, resolve } from "node:pat
 import type { CodingImage, CodingSession } from "@ghost/contract";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { invalid } from "../core/errors.ts";
-import { insidePath, secretPaths } from "../sandbox/seatbelt.ts";
-import { repositoryOf } from "../sandbox/worktree.ts";
+import { gitRefPlumbing, insidePath, secretPaths } from "../sandbox/seatbelt.ts";
+import { assertNoSymlinkGrants, repositoryOf } from "../sandbox/worktree.ts";
 import type { CodingChanges } from "./ports.ts";
 
 const imageExtensions: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
@@ -102,16 +102,25 @@ export function prepareWorkspace(root: string, directory: string, sessionDir: st
   return { cwd: realpathSync(checkout), repo, branch, base };
 }
 
-export function worktreeGit(session: Pick<CodingSession, "cwd" | "repo">): { common: string; admin: string } | null {
-  const { cwd, repo } = session;
+export function worktreeGit(session: Pick<CodingSession, "cwd" | "repo" | "branch">): { common: string; admin: string; branch: string | null } | null {
+  const { cwd, repo, branch } = session;
   if (!repo) return null;
   const common = realpathSync(git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
   const admin = safePath(common, join("worktrees", basename(cwd)));
   const link = readRegular(safePath(cwd, ".git"), 8192).toString("utf8").trim();
   if (!link.startsWith("gitdir: ") || resolve(cwd, link.slice(8)) !== admin) throw invalid("coding worktree git metadata was replaced");
+  // The worktree may have been moved to another branch since the session started. Only the
+  // session's own branch may be written; any other HEAD earns no git write access at all.
+  const head = readRegular(safePath(admin, "HEAD"), 8192).toString("utf8").trim();
+  const own = branch && head === `ref: refs/heads/${branch}` ? branch : null;
+  // No grant may be reached through a symlink: a link swapped in place would otherwise promote
+  // its target into a writable path.
+  const grants = [join(common, "objects"), admin];
+  if (own) grants.push(...gitRefPlumbing([join(common, "refs/heads", own)]));
+  try { assertNoSymlinkGrants(grants, common); } catch { throw invalid("coding worktree git metadata was replaced"); }
   // Pass the verified admin directory explicitly to git. A later change to the worktree's .git
   // pointer must not make an owner GET endpoint operate on a different repository.
-  return { common, admin };
+  return { common, admin, branch: own };
 }
 
 export class CodingFiles {

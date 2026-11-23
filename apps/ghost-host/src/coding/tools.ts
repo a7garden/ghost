@@ -6,7 +6,7 @@ import { createBashTool, createEditTool, createLsTool, createReadTool, createWri
 import { Type } from "typebox";
 import type { CodingDialogOption } from "@ghost/contract";
 import { invalid } from "../core/errors.ts";
-import { buildSeatbeltPolicy, explainSeatbeltRefusal, SEATBELT_EXEC, seatbeltProfile, type SeatbeltPolicy } from "../sandbox/seatbelt.ts";
+import { buildSeatbeltPolicy, explainSeatbeltRefusal, SEATBELT_EXEC, seatbeltProfile, type SeatbeltBoundary, type SeatbeltPolicy } from "../sandbox/seatbelt.ts";
 import { killTree } from "../sandbox/workspace-env.ts";
 import type { Dialogs } from "./dialogs.ts";
 import { type CodingFiles, readRegular, safePath, writePatch, writeRegular } from "./workspace.ts";
@@ -200,13 +200,18 @@ async function shell(argv: string[], cwd: string, options: ShellOptions, onData:
   finally { clearTimeout(timer); options.signal?.removeEventListener("abort", stop); }
 }
 
-export function codingBash(root: string, cwd: string, dialogs: Dialogs, gitCommon: string | null, hostPorts: ReadonlySet<number>): ToolDefinition {
+export function codingBash(root: string, cwd: string, dialogs: Dialogs, git: { common: string; admin: string; branch: string | null } | null, hostPorts: ReadonlySet<number>): ToolDefinition {
   return { ...createBashTool(cwd, { exposeSessionEnvironment: false, operations: {
     async exec(command, _cwd, options) {
       if (process.platform !== "darwin") throw new Error("coding bash requires macOS Seatbelt");
       if (realpathSync(cwd) !== cwd) throw invalid("coding directory was replaced");
       const cache = [".bun", ".cache", ".npm", "Library/Caches"].map(path => join(homedir(), path));
-      const policy = buildSeatbeltPolicy(homedir(), root, { writeRoots: [cwd, realpathSync(tmpdir()), ...cache], readRoots: gitCommon ? [gitCommon] : [], proxyPort: null });
+      const boundary: SeatbeltBoundary = { writeRoots: [cwd, realpathSync(tmpdir()), ...cache], readRoots: git ? [git.common] : [], proxyPort: null };
+      // The session may write its own git state: the objects it creates, the one branch it owns
+      // and its worktree's private admin directory (index, HEAD, ORIG_HEAD). Nothing else in the
+      // common directory is writable, and a worktree on another branch earns no git write at all.
+      if (git && git.branch) boundary.git = { objects: join(git.common, "objects"), refs: [join(git.common, "refs/heads", git.branch)], admin: git.admin };
+      const policy = buildSeatbeltPolicy(homedir(), root, boundary);
       policy.tempRoots = []; // Only the explicit system temp and package cache roots are writable.
       const argv = ["/bin/bash", "--noprofile", "--norc", "-c", command];
       const confined = seatbeltCommand(policy, argv, hostPorts);

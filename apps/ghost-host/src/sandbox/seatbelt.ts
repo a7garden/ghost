@@ -77,8 +77,12 @@ export interface SeatbeltBoundary {
   readRoots: string[];
   /** Read-only roots that beat the secret deny: a reviewed Work's own directories. */
   viewRoots?: string[];
-  /** Git plumbing derived from the owner's canonical common directory, not Work-writable metadata. */
-  git?: { objects: string; refs: string[] };
+  /**
+   * Git plumbing derived from the owner's canonical common directory, not Work-writable metadata.
+   * `admin` is the worktree's own private git directory: the only place a worktree may write
+   * (index, HEAD, ORIG_HEAD); it never covers the common directory itself.
+   */
+  git?: { objects: string; refs: string[]; admin?: string };
   /** Loopback port of the Host egress proxy; null denies all network. */
   proxyPort: number | null;
 }
@@ -91,7 +95,7 @@ export interface SeatbeltPolicy {
   viewRoots: string[];
   /** Per-user macOS scratch dirs; kernel-writable, unlike the read-only toolchain tier. */
   tempRoots: string[];
-  git: { objects: string; refs: string[] } | null;
+  git: { objects: string; refs: string[]; admin: string | null } | null;
   proxyPort: number | null;
   secrets: string[];
   privacy: string[];
@@ -126,13 +130,16 @@ function lexicalPaths(paths: readonly string[]): string[] {
  */
 export function buildSeatbeltPolicy(home: string, stateRoot: string, boundary: SeatbeltBoundary): SeatbeltPolicy {
   const objects = boundary.git ? lexicalPaths([boundary.git.objects])[0]! : null;
+  // The admin directory keeps its trusted lexical spelling like a write root: resolving a
+  // Work-writable symlink here would grant its target instead of the directory itself.
+  const admin = boundary.git?.admin ? lexicalPaths([boundary.git.admin])[0] ?? null : null;
   const policy: SeatbeltPolicy = {
     home,
     stateRoot,
     writeRoots: lexicalPaths(boundary.writeRoots),
     readRoots: realPaths(boundary.readRoots),
     viewRoots: lexicalPaths(boundary.viewRoots ?? []),
-    git: boundary.git && objects !== null ? { objects, refs: lexicalPaths(gitRefPlumbing(boundary.git.refs)) } : null,
+    git: boundary.git && objects !== null ? { objects, refs: lexicalPaths(gitRefPlumbing(boundary.git.refs)), admin } : null,
     proxyPort: boundary.proxyPort,
     secrets: realPaths(secretPaths(home, stateRoot)),
     privacy: privacyPaths(home),
@@ -243,19 +250,29 @@ export function seatbeltProfile(policy: SeatbeltPolicy): { profile: string; defi
       .join("\n"),
   ];
   if (policy.git !== null) {
-    definitions.push(`O0=${policy.git.objects}`);
+    const { objects, refs, admin } = policy.git;
+    definitions.push(`O0=${objects}`);
     // This SBPL flavor has no `{n}` intervals; classes repeat instead.
-    const objects = policy.git.objects.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const objectsPattern = objects.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     // New loose objects only: create the fan-out dir and the object (or its temp name), write it,
     // unlink a temp a failed write leaves behind. Existing objects are never modified or removed.
-    const fanout = `${objects}/[0-9a-f][0-9a-f]`;
+    const fanout = `${objectsPattern}/[0-9a-f][0-9a-f]`;
     const objectFile = `${fanout}/(tmp_obj_[0-9A-Za-z]+|[0-9a-f]+)`;
     // A branch ref, its lock file and its reflog entry: lock, write, rename into place.
-    const refRules = policy.git.refs.map((ref) => {
+    const refRules = refs.map((ref) => {
       const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const filter = `(regex #"^${escaped}$")`;
       return [`(allow file-write* file-write-create ${filter})`, `(allow file-unlink ${filter})`].join("\n");
     });
+    // The worktree's own private git directory: index, HEAD, ORIG_HEAD and its reflog. Nothing
+    // outside this subtree is writable, so the common config, hooks, packed refs and the other
+    // worktrees' admin directories stay read-only.
+    const adminRules = admin
+      ? (() => {
+        const escaped = admin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return `(allow file-read* file-write* (regex #"^${escaped}(/|$)"))`;
+      })()
+      : "";
     rules.push([
       `(allow file-read* (subpath (param "O0")))`,
       `(allow file-write-xattr (subpath (param "O0")))`,
@@ -263,6 +280,7 @@ export function seatbeltProfile(policy: SeatbeltPolicy): { profile: string; defi
       `(allow file-write-data file-write-create (regex #"^${objectFile}$"))`,
       `(allow file-unlink (regex #"^${fanout}/tmp_obj_[0-9A-Za-z]+$"))`,
       refRules.join("\n"),
+      adminRules,
     ].join("\n"));
   }
   const outbound = policy.proxyPort === null ? "" : `(allow network* (remote ip "localhost:${policy.proxyPort}"))`;
