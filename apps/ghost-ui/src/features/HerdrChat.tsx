@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, Braces, CircleAlert, FilePenLine, FileSearch, Globe2, SquareTerminal } from 'lucide-react';
 import type { HerdrChat as Chat, HerdrChatItem, HerdrPaneView } from '@ghost/contract';
 import { MessageBody } from '../components/MessageBody';
@@ -8,6 +8,8 @@ import { HerdrState } from './herdrDisplay';
 import { WorkingTime } from './HerdrParts';
 import { elapsedLabel, foldChat, mergeChat, stepLines, type ChatRow } from './herdrInboxModel';
 
+/** What a slash command printed, kept beside the conversation (it is not in the agent's record), after the first `afterCount` messages. */
+export type CommandOutput = { id: string; afterCount: number; command: string; text: string };
 type ChatSnapshot = { items: readonly HerdrChatItem[]; source?: Chat['source']; title?: string | null; model?: string | null };
 const emptyItems: readonly HerdrChatItem[] = [];
 export function useHerdrChat(pane: HerdrPaneView, watching: boolean) {
@@ -70,10 +72,27 @@ function Steps({ row }: { row: Extract<ChatRow, { kind: 'steps' }> }) {
   </details>;
 }
 
-export function HerdrConversation({ items, busy, since, error }: {
+function renderRow(row: ChatRow) {
+  if (row.kind === 'steps') return <Steps row={row}/>;
+  if (row.kind === 'note') return <div className="herdr-chat-note">{row.text}</div>;
+  return row.kind === 'user' ? <div className="herdr-chat-user" aria-label="내 지시">{row.text}</div>
+    : <article className="herdr-chat-agent" aria-label="에이전트 응답"><ChatMessage text={row.text}/></article>;
+}
+
+function CommandResult({ result, onOpenTerminal }: { result: CommandOutput; onOpenTerminal?(): void }) {
+  return <section className="herdr-chat-result" aria-label={`${result.command} 결과`}>
+    <header><code>{result.command}</code>{onOpenTerminal && <button type="button" onClick={onOpenTerminal}>터미널에서 보기</button>}</header>
+    <pre>{result.text}</pre>
+  </section>;
+}
+
+export function HerdrConversation({ items, busy, since, error, results = [], onOpenTerminal }: {
   items: readonly HerdrChatItem[]; busy: boolean; since: number; error: string;
+  results?: readonly CommandOutput[]; onOpenTerminal?(): void;
 }) {
   const rows = useMemo(() => foldChat(items), [items]);
+  // Each result sits where the conversation stood when its command was sent.
+  const placed = useMemo(() => results.map(result => ({ result, at: foldChat(items.slice(0, result.afterCount)).length })), [items, results]);
   const scroll = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -101,12 +120,11 @@ export function HerdrConversation({ items, busy, since, error }: {
           });
         }
       }}>
-        {rows.map(row => {
-          if (row.kind === 'steps') return <Steps key={row.id} row={row}/>;
-          if (row.kind === 'note') return <div key={row.id} className="herdr-chat-note">{row.text}</div>;
-          return row.kind === 'user' ? <div key={row.id} className="herdr-chat-user" aria-label="내 지시">{row.text}</div>
-            : <article key={row.id} className="herdr-chat-agent" aria-label="에이전트 응답"><ChatMessage text={row.text}/></article>;
-        })}
+        {rows.map((row, index) => <Fragment key={row.id}>
+          {placed.filter(entry => entry.at === index).map(({ result }) => <CommandResult key={result.id} result={result} onOpenTerminal={onOpenTerminal}/>)}
+          {renderRow(row)}
+        </Fragment>)}
+        {placed.filter(entry => entry.at >= rows.length).map(({ result }) => <CommandResult key={result.id} result={result} onOpenTerminal={onOpenTerminal}/>)}
         {busy && <div className="herdr-chat-working"><HerdrState status="working"/><WorkingTime since={since}/></div>}
         {error && <InlineError>{error}</InlineError>}
         {!rows.length && !busy && !error && <p className="herdr-chat-empty">아직 대화가 없습니다.</p>}

@@ -146,8 +146,10 @@ export function fulfillHerdrFrame(route: Route, text: string, { end = false, tra
 }
 
 /** Coding requests use a page-local herdr session; other API calls go to the seeded Host. */
-export async function mockCodingApi(page: Page, { stopped = false, rich = false, owned = [], held = [], mouse = [] }: {
+export async function mockCodingApi(page: Page, { stopped = false, rich = false, owned = [], held = [], mouse = [], finishedAgent = 'omp', finishedScreen }: {
   stopped?: boolean; rich?: boolean; owned?: readonly string[]; held?: readonly string[]; mouse?: readonly string[];
+  finishedAgent?: 'omp' | 'claude';
+  finishedScreen?(text: string): string;
 } = {}): Promise<void> {
   // Playwright fulfills a finite body. Keep successful mock leases open until the caller cancels.
   await page.addInitScript(() => {
@@ -219,7 +221,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false,
       ].join('\n'),
     },
     {
-      pane: { id: visualCodingIds.finished, workspaceId: 'w79', tabId: 'w79:tA', workspace: 'app', tab: 'login', agent: 'omp',
+      pane: { id: visualCodingIds.finished, workspaceId: 'w79', tabId: 'w79:tA', workspace: 'app', tab: 'login', agent: finishedAgent,
         status: 'done', owned: owned.includes(visualCodingIds.finished), focused: false, cwd: '/Users/garden/Workspace/Projects/wt/app-fix-login', title: '로그인 실패 시 안내 문구 고치기' },
       text: [
         '❯ 로그인 실패 시 안내 문구를 고쳐 주세요.',
@@ -278,7 +280,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false,
       { id: 'ask-a1', kind: 'agent', at: now - 22_000, text: '**탭 순서와 초점 표시**를 검증하는 테스트가 있습니다. 기존 테스트를 실행해 확인하겠습니다.' },
     ]],
   ]);
-  const models = new Map([[visualCodingIds.finished, 'anthropic/claude-sonnet-4-6']]);
+  const models = new Map([[visualCodingIds.finished, finishedAgent === 'omp' ? 'anthropic/claude-sonnet-4-6' : 'claude-sonnet-4-6']]);
   const question: HerdrAsk = {
     pane: visualCodingIds.blocked, kind: 'approval', title: '설정 테스트를 실행할까요?', detail: 'bun test src/ui/settings.test.tsx',
     choices: [
@@ -371,7 +373,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false,
     const pane = query.get('pane') ?? '';
     const items = rich ? initialChats.get(pane) : undefined;
     const after = Number(query.get('after') ?? 0);
-    const source = items ? pane === visualCodingIds.finished ? 'omp' : 'claude' : null;
+    const source = items ? pane === visualCodingIds.finished ? finishedAgent : 'claude' : null;
     return fulfillJson(route, 200, { pane, source, items: items?.slice(after) ?? [], title: null, model: source ? models.get(pane) ?? null : null,
       cursor: String(items?.length ?? 0), reset: !after } satisfies HerdrChat);
   });
@@ -432,6 +434,9 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false,
     const query = new URL(route.request().url()).searchParams;
     const entry = entries.get(query.get('pane') ?? '');
     if (!setup.server || !entry) return error(route, 404, '패널을 찾을 수 없습니다.');
+    if (query.get('format') === 'text' && entry.pane.id === visualCodingIds.finished && finishedScreen) {
+      return fulfillJson(route, 200, { ...entry, text: finishedScreen(entry.text) });
+    }
     if (query.get('format') !== 'ansi') return fulfillJson(route, 200, entry);
     const text = rich && entry.pane.id === visualCodingIds.finished
       ? `${Array.from({ length: 60 }, (_, index) => `  실행 로그 · ${String(index + 1).padStart(2, '0')}`).join('\n')}\n${entry.text}` : entry.text;

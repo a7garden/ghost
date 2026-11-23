@@ -807,8 +807,11 @@ export class Herdr implements HerdrPort {
       if (!["idle", "done"].includes(pane.status)) throw conflict("the coding agent is not ready for another prompt");
       guard.authorize(pane);
     }
+    // omp's TUI uses bare /model for its picker and /switch for a session-only selector.
+    // Passing /model with arguments through verbatim would submit it to the model as chat.
+    const model = pane.agent === "omp" ? /^\/models?(?:[ \t]+|:[ \t]*)(\S[^\r\n]*)$/.exec(text) : null;
     // Take a fresh status before sending raw bytes. `agent prompt` itself refuses blocked agents.
-    const queueTarget = delivery === "queue" && pane.agent === "omp" && pane.status === "working"
+    const queueTarget = model === null && delivery === "queue" && pane.agent === "omp" && pane.status === "working"
       ? await this.agentPane(id, session) : null;
     let settled: HerdrRun["settled"] = "unwaited";
     if (queueTarget?.agent === "omp" && queueTarget.status === "working" && queueTarget.terminalId === pane.terminalId) {
@@ -817,7 +820,7 @@ export class Herdr implements HerdrPort {
       const paste = `\x1b[200~${text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "")}\x1b[201~\x11`;
       await this.sendInput({ pane: id, text: paste }, session);
     } else {
-      settled = await this.submit(id, text, wait, session);
+      settled = await this.submit(id, model === null ? text : `/switch ${model[1]}`, wait, session);
     }
     const after = await this.agentPane(id, session);
     // Only a caller that waits for the work reports on it, and it needs the branch the agent is on.

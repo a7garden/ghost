@@ -187,7 +187,7 @@ function collect(data: Buffer, start: number, emitFrom: number, source: Source, 
 
 function modelFromRecord(record: unknown, source: Source): string | null {
   if (!object(record) || record.isSidechain === true || record.isMeta === true || record.isCompactSummary === true) return null;
-  if (source === "omp" && record.type === "model_change" && (record.role === undefined || record.role === "default")) {
+  if (source === "omp" && record.type === "model_change" && (record.role === undefined || record.role === "default" || record.role === "temporary")) {
     const model = string(record.model);
     if (model.includes("/")) return model;
   }

@@ -165,10 +165,11 @@ test("reads the live omp model across a switch and delta pagination", async () =
     appendFileSync(file, omp("user", "x".repeat(1024 * 1024)) + omp("user", "latest question"));
     const cold = await new HerdrChatReader(dir).read(PANE, ref, null);
     expect(cold).toMatchObject({ model: switched.model, items: [{ kind: "user", text: "latest question" }] });
-    appendFileSync(file, row({ type: "model_change", model: "openai/gpt-6.2" }));
+    appendFileSync(file, row({ type: "model_change", role: "temporary", model: "openai/gpt-6.2" }));
     const past = await reader.read(PANE, ref, switched.cursor);
     expect(past).toMatchObject({ model: "openai/gpt-6.2", items: [] });
     expect(Number(past.cursor)).toBeLessThan(Number(cold.cursor));
+    expect(await reader.read(PANE, ref, past.cursor)).toMatchObject({ model: "openai/gpt-6.2" });
 
     renameSync(file, `${file}.old`);
     writeFileSync(file, omp("user", "new conversation"));

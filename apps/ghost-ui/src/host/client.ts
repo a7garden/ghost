@@ -32,6 +32,7 @@ import type {
   HerdrAnswer,
   HerdrAsk,
   HerdrChat,
+  ClaudeModels,
   HerdrCommands,
   NextMessageSuggestions,
   OmpInfo,
@@ -257,6 +258,12 @@ export class HostClient {
   }
   herdrOutput(pane: string, signal?: AbortSignal): Promise<HerdrOutput> {
     return this.json(`/api/herdr/output?${new URLSearchParams({ pane, format: 'ansi', lines: '2000' })}`, { signal });
+  }
+  claudeModels(signal?: AbortSignal): Promise<ClaudeModels> {
+    return this.json('/api/herdr/claude-models', { signal });
+  }
+  herdrScreen(pane: string, signal?: AbortSignal): Promise<HerdrOutput> {
+    return this.json(`/api/herdr/output?${new URLSearchParams({ pane, format: 'text', lines: '200' })}`, { signal });
   }
   herdrChanges(pane: string, signal?: AbortSignal): Promise<HerdrChanges> {
     return this.json(`/api/herdr/changes?${new URLSearchParams({ pane })}`, { signal });

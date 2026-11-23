@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { ListEnd, Navigation, Paperclip, Slash, Square } from 'lucide-react';
-import type { HerdrDelivery, HerdrSlashCommand, HerdrUpload, OmpInfo } from '@ghost/contract';
+import type { HerdrDelivery, HerdrSlashCommand, HerdrUpload } from '@ghost/contract';
 import { Composer, InlineError } from '../ui';
 import { NextSuggestions } from '../components/composer/NextSuggestions';
 import { ComposerSuggest, type Suggestion } from '../components/composer/ComposerSuggest';
-import { HerdrModelChip } from './HerdrModel';
+import { HerdrModelChip, type ModelChoice } from './HerdrModel';
 import { readCodingValue, writeCodingValue } from './herdrInboxModel';
 
 export interface HerdrDraft {
@@ -62,7 +62,7 @@ export function HerdrComposer({ agent, working, pending, delivery, draft, field,
   /** The slash commands the agent accepts; typing `/` offers them. */
   commands: readonly HerdrSlashCommand[];
   /** The conversation's model and the directory its choices are read for; absent when the agent has no model switch. */
-  model?: { cwd: string | null; current: string | null; load(cwd: string, signal: AbortSignal): Promise<OmpInfo['models']> };
+  model?: { cwd: string | null; current: string | null; load(cwd: string, signal: AbortSignal): Promise<readonly ModelChoice[]> };
   onSubmit(text: string, delivery?: HerdrDelivery): Promise<boolean>; onStop?(): void; canUpload: boolean;
 }) {
   const picker = useRef<HTMLInputElement>(null);

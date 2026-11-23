@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useReducer, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Keyboard } from 'lucide-react';
-import type { HerdrDelivery, HerdrPaneView, HerdrSlashCommand, HerdrUpload, HerdrView, OmpInfo } from '@ghost/contract';
+import type { HerdrDelivery, HerdrPaneView, HerdrSlashCommand, HerdrUpload, HerdrView } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { HostError } from '../host/client';
@@ -11,8 +11,10 @@ import { HerdrComposer, useHerdrDraft } from './HerdrComposer';
 import { HerdrChangesView, usePaneChanges } from './HerdrChanges';
 import { modifiedTerminalKey, noModifiers, type TerminalModifiers } from './herdrMobileInput';
 import { lastReply, useNextSuggestions } from './nextSuggestions';
+import { BUSY, commandResult } from './herdrCommandResult';
+import type { ModelChoice } from './HerdrModel';
 import { HerdrAskCard, type HerdrAsks } from './HerdrAsk';
-import { HerdrConversation, useHerdrChat } from './HerdrChat';
+import { HerdrConversation, useHerdrChat, type CommandOutput } from './HerdrChat';
 import { CodingSkeleton } from './HerdrParts';
 import { readCodingValue, writeCodingValue } from './herdrInboxModel';
 import { HerdrPaneHeader, herdrModes, type HerdrMode, type PaneNavigation } from './HerdrPaneHeader';
@@ -96,7 +98,7 @@ export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = f
   terminal?: RefObject<HerdrTerminalControls | null>; terminalAction?: ReactNode;
   delivery?: HerdrDelivery; suggestions?: readonly string[];
   commands?: readonly HerdrSlashCommand[]; model?: string | null;
-  loadModels?(cwd: string, signal: AbortSignal): Promise<OmpInfo['models']>;
+  loadModels?(cwd: string, signal: AbortSignal): Promise<readonly ModelChoice[]>;
 }) {
   const draft = useHerdrDraft(draftKey, onUpload);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -134,12 +136,7 @@ export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = f
       {composing && <HerdrComposer agent={pane.agent} working={working} pending={pending} delivery={delivery}
         draft={draft} field={field} suggestions={mode === 'chat' ? suggestions : []} commands={commands} canUpload={Boolean(onUpload)} onStop={() => onKey('esc')}
         model={pane.agent === 'omp' || pane.agent === 'claude' ? { cwd: pane.cwd, current: model, load: loadModels } : undefined}
-        // A slash command answers in the terminal, not in the conversation record, so show it there.
-        onSubmit={async (text, how) => {
-          const sent = await onPrompt(text, how);
-          if (sent && mode === 'chat' && text.startsWith('/') && !text.startsWith('/model ')) onMode('live');
-          return sent;
-        }}/>}
+        onSubmit={onPrompt}/>}
     </div>}
   </section>;
 }
@@ -154,6 +151,9 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
   const select = (value: HerdrMode) => { setMode(value); writeCodingValue(`mode:${preferencesKey}`, value); };
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
+  const [results, setResults] = useState<CommandOutput[]>([]);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [reply, setReply] = useState<{ snapshot: HerdrPaneView; pane: HerdrPaneView } | null>(null);
   const queue = useRef<HerdrInputQueue | null>(null);
   const terminal = useRef<HerdrTerminalControls>(null);
@@ -197,8 +197,27 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
     return () => { live = false; writer.close(); queue.current = null; };
   }, [client, id]);
 
+  /** A slash command prints in the terminal, not in the session record: read what it printed and show it in the conversation. */
+  const showResult = useEffectEvent(async (command: string, before: string) => {
+    let last = '';
+    let after = before;
+    for (let poll = 0; poll < 12; poll++) {
+      await new Promise(resolve => setTimeout(resolve, 400));
+      if (!mounted.current) return;
+      try { after = (await client.herdrScreen(id)).text; } catch { break; }
+      // A running turn or compaction still redraws; the result is what stays once it stops.
+      if (after === last && after !== before && !BUSY.test(after)) break;
+      last = after;
+    }
+    const result = commandResult(before, after, command);
+    // A picker waits for a choice only the terminal can take.
+    if (result.interactive) select('live');
+    else if (result.text) setResults(current => [...current.slice(-9), { id: `${Date.now()}`, afterCount: chat.items.length, command, text: result.text }]);
+  });
   async function prompt(text: string, delivery?: HerdrDelivery) {
     terminal.current?.latest(true);
+    const slash = text.startsWith('/') && pane.agent !== null && activeMode === 'chat';
+    const before = slash ? await client.herdrScreen(id).then(screen => screen.text, () => null) : null;
     const writer = queue.current;
     if (!writer || busy.current) return false;
     busy.current = true;
@@ -211,6 +230,7 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
           if (queue.current === writer) {
             setReply({ snapshot: pane, pane: next });
             onChanged();
+            if (before !== null) void showResult(text, before);
           }
           return true;
         } catch (reason) {
@@ -268,8 +288,9 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
     onUpload={file => client.herdrUpload(file)} changes={changesVisible} chat={chatVisible} fontSize={fontSize} onFontSize={setFontSize}
     branch={changes?.branch ?? branch} navigation={navigation} asks={asks} draftKey={`draft:${preferencesKey}`} terminal={activeTerminal}
     terminalAction={terminalAction} delivery={delivery} suggestions={suggestions} commands={commands} model={chat.model ?? null}
-    loadModels={(cwd, signal) => client.ompInfo(cwd, signal).then(info => info.models)}
-    screen={activeMode === 'chat' ? <HerdrConversation items={chat.items} busy={displayed.status === 'working'} since={since} error={chatError}/>
+    loadModels={(cwd, signal) => displayed.agent === 'claude' ? client.claudeModels(signal).then(list => list.models) : client.ompInfo(cwd, signal).then(info => info.models)}
+    screen={activeMode === 'chat' ? <HerdrConversation items={chat.items} busy={displayed.status === 'working'} since={since} error={chatError}
+        results={results} onOpenTerminal={() => select('live')}/>
       : activeMode === 'changes' ? <HerdrChangesView pane={displayed} compact={compact} data={changes} error={changesError}
         onRefresh={refreshChanges} revision={changesRevision}/>
       : checkingChat ? <CodingSkeleton detail/> : <Suspense fallback={<CodingSkeleton detail/>}>

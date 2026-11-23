@@ -52,6 +52,7 @@ import {
   parse,
 } from "@ghost/contract";
 import type { Config } from "../config.ts";
+import { ClaudeModelCatalog } from "../integrations/claude-models.ts";
 import type { BrowserPort, DocumentsPort, HerdrPort, SkillsPort } from "../integrations/ports.ts";
 import { HerdrControlRefusal } from "../integrations/herdr-control.ts";
 import { mergeFrames } from "../integrations/herdr.ts";
@@ -139,13 +140,14 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; herdr?: HerdrPort | null; omp?: OmpInfoProvider | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null; quotas?: ProviderQuotas }): { port: number; stop(): Promise<void> } {
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; herdr?: HerdrPort | null; omp?: OmpInfoProvider | null; claudeModels?: ClaudeModelCatalog; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null; quotas?: ProviderQuotas }): { port: number; stop(): Promise<void> } {
   const { core, config, ownerToken, documents, skills, herdr = null, omp = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
   const quotas = deps.quotas ?? new ProviderQuotas({ providers: () => core.ledger.providers(), secrets: core.secrets });
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
   const oauth = new OAuthLogins(core);
   const suggestions = new Suggestions(core, herdr);
+  const claudeModels = deps.claudeModels ?? new ClaudeModelCatalog();
 
   const server: Bun.Server<undefined> = Bun.serve({
     hostname: config.host,
@@ -607,6 +609,14 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         if (pathname === "/api/herdr/ask") return json(await herdr.ask(pane));
         if (pathname === "/api/herdr/commands") return json(await herdr.commands(pane));
         return json(await herdr.chat(pane, url.searchParams.get("after")));
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+    if (pathname === "/api/herdr/claude-models" && request.method === "GET") {
+      try {
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
+        return json(await claudeModels.list());
       } catch (caught) {
         return failure(caught);
       }

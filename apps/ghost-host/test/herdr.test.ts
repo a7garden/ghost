@@ -292,6 +292,35 @@ test("a prompt reaches only an agent, and a blocked agent's refusal is the owner
   }
 });
 
+test("omp /model with a selector uses the session-only /switch command; bare /model and Claude are unchanged", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  const pane = "w9:p1";
+  const herdr = new Herdr(fake.path);
+  const view = structuredClone(snapshot);
+  const target = view.result.snapshot.panes.find(p => p.pane_id === pane)!;
+  try {
+    for (const [agent, status, text, delivery, sent] of [
+      ["omp", "idle", "/model anthropic/claude-opus-5-5:high", undefined, "/switch anthropic/claude-opus-5-5:high"],
+      ["omp", "working", "/models @smol", "queue", "/switch @smol"],
+      ["omp", "idle", "/model", undefined, "/model"],
+      ["omp", "idle", "/model  ", undefined, "/model  "],
+      ["omp", "idle", "/modelpreset switch", undefined, "/modelpreset switch"],
+      ["omp", "idle", "/model options\nExplain these settings", undefined, "/model options\nExplain these settings"],
+      ["claude", "idle", "/model haiku", undefined, "/model haiku"],
+    ] as const) {
+      target.agent = agent;
+      target.agent_status = status;
+      writeFileSync(join(dir, "snapshot.json"), JSON.stringify(view));
+      const previous = (await fake.runs()).length;
+      await herdr.prompt(pane, text, undefined, undefined, delivery);
+      expect((await fake.runs()).slice(previous).filter(run => run[2] !== "api")).toEqual([
+        ["--session", "default", "agent", "prompt", pane, sent],
+      ]);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("only a working omp receives a queued prompt as one multiline paste with the follow-up chord", async () => {
   const dir = tempDir();
   const fake = fakeHerdr(dir);

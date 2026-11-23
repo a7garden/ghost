@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import type { CodingSetup, Effect, HerdrChat, HerdrChatItem, HerdrCommands, HerdrControlCommand, HerdrOutput, WorkDetail } from '@ghost/contract';
+import type { ClaudeModels, CodingSetup, Effect, HerdrChat, HerdrChatItem, HerdrCommands, HerdrControlCommand, HerdrOutput, WorkDetail } from '@ghost/contract';
 import { fulfillHerdrFrame, mockCodingApi, visualCodingIds } from './mocks';
-import { openScreen } from './visual';
+import { openScreen, type Theme } from './visual';
 import { readRunState } from './run-state';
 
 const landing = { name: 'coding', route: () => '/', waits: () => ['최근 끝난 일'], prepare: mockCodingApi };
@@ -58,6 +58,32 @@ async function chooseRosterAction(page: Page, node: string, label: string) {
   const menu = `${node} 작업`;
   await page.getByRole('button', { name: menu, exact: true }).click();
   await page.getByRole('dialog', { name: menu, exact: true }).getByRole('button', { name: label, exact: true }).click();
+}
+
+// Footer lines captured from omp stay on screen after both inline commands and pickers.
+const ompScreen = '\n π > ◒ Sonnet 4.6 > 🗑 work ▶─0.9%──────────┃──────────1M─\n╰─                         ⇧⇥ to change thinking effort';
+
+async function openCommandPane(page: Page, theme: Theme, after: readonly string[]) {
+  const pane = visualCodingIds.finished;
+  const events: Array<'screen' | 'prompt'> = [];
+  let sent = false;
+  let polls = 0;
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname === '/api/herdr/prompt' && request.method() === 'POST') {
+      events.push('prompt');
+      sent = true;
+    } else if (url.pathname === '/api/herdr/output' && url.searchParams.get('format') === 'text') {
+      events.push('screen');
+      expect(request.method()).toBe('GET');
+      expect(Object.fromEntries(url.searchParams)).toEqual({ pane, format: 'text', lines: '200' });
+    }
+  });
+  await openScreen(page, { ...richCoding, route: () => paneRoute(pane), waits: () => ['기본 안내 문구'], prepare: page =>
+    mockCodingApi(page, { rich: true, finishedScreen: () => sent ? after[Math.min(polls++, after.length - 1)]! : ompScreen }),
+  }, theme);
+  await expect(paneMode(page, '대화')).toBeChecked();
+  return events;
 }
 
 for (const { name, width, height, touch } of sizes) {
@@ -156,6 +182,7 @@ for (const { name, width, height, touch } of sizes) {
         await expect(history(page).locator('.xterm-rows')).toContainText('3 pass');
         await expect(history(page).locator('.xterm-rows .xterm-fg-6').first()).toBeVisible();
         await expect(history(page).locator('.xterm-rows b')).toHaveCount(0);
+        await expect(nextMessages(page)).toHaveCount(0);
         await captureCoding(page, `history-${theme}-${name}.png`);
 
         await page.getByRole('radio', { name: '변경' }).click();
@@ -378,7 +405,7 @@ for (const { name, width, height, touch } of sizes) {
       await expect(field).toHaveCount(0);
     });
 
-    test('filters slash commands, completes without sending and shows submitted output in the terminal', async ({ page }, info) => {
+    test('filters slash commands and completes them without sending', async ({ page }, info) => {
       const pane = visualCodingIds.finished;
       const commands = [
         { name: 'compact', description: 'Compact the conversation', hint: null, source: 'builtin' },
@@ -425,14 +452,54 @@ for (const { name, width, height, touch } of sizes) {
       await expect(list).toHaveCount(0);
       await expect(field).toHaveValue('/compact');
       expect(prompts).toEqual([]);
+    });
 
-      await expect(paneMode(page, '대화')).toBeChecked();
+    for (const theme of ['light', 'dark'] as const) {
+      test(`renders noninteractive slash output in chat in ${theme}`, async ({ page }) => {
+        await page.emulateMedia({ colorScheme: theme });
+        const command = '/compact';
+        const warning = 'Warning: Nothing to compact (no messages yet)';
+        const longLine = 'Session log: /Projects/app/.omp/sessions/2026-11-23T080000.000Z-session-with-a-long-directory-name.jsonl';
+        const settled = `❯ ${command}\n ${warning}\n ${longLine}\n${ompScreen}`;
+        const busy = `❯ ${command}\n⎋ Working… 1s\n${ompScreen}`;
+        const events = await openCommandPane(page, theme, [busy, busy, settled]);
+        const field = followUp(page);
+        await field.fill(command);
+        const sent = post(page, '/api/herdr/prompt');
+        await page.getByRole('button', { name: '보내기', exact: true }).click();
+        expect((await sent).postDataJSON()).toEqual({ pane: visualCodingIds.finished, text: command });
+        await expect(field).toHaveValue('');
+
+        const conversation = page.getByRole('region', { name: '에이전트 대화' });
+        const result = conversation.getByRole('region', { name: `${command} 결과`, exact: true });
+        await expect(result.locator('header code')).toHaveText(command);
+        await expect(result.locator('pre')).toHaveJSProperty('textContent', `${warning}\n ${longLine}`);
+        expect(events).toEqual(['screen', 'prompt', 'screen', 'screen', 'screen', 'screen']);
+        await expect(paneMode(page, '대화')).toBeChecked();
+        await expect(terminal(page)).toHaveCount(0);
+        await captureCoding(page, `chat-command-result-${theme}-${name}.png`);
+
+        await result.getByRole('button', { name: '터미널에서 보기', exact: true }).click();
+        await expect(paneMode(page, '터미널')).toBeChecked();
+        await expect(terminal(page)).toContainText(command);
+      });
+    }
+
+    test('opens Terminal instead of rendering a chat block when a slash picker waits for keys', async ({ page }) => {
+      const command = '/model';
+      const hint = 'Enter to select · Esc to cancel';
+      const picker = `Select model\n  1. Opus\n  2. Sonnet\n${hint}`;
+      const events = await openCommandPane(page, 'light', [`${ompScreen}\n${picker}`]);
+      await page.route('**/api/herdr/terminal?*', route => fulfillHerdrFrame(route, picker));
+      await followUp(page).fill(command);
       const sent = post(page, '/api/herdr/prompt');
       await page.getByRole('button', { name: '보내기', exact: true }).click();
-      expect((await sent).postDataJSON()).toEqual({ pane, text: '/compact' });
+      expect((await sent).postDataJSON()).toEqual({ pane: visualCodingIds.finished, text: command });
       await expect(paneMode(page, '터미널')).toBeChecked();
-      await expect(terminal(page)).toContainText('/compact');
-      await expect(field).toHaveValue('');
+      await expect(terminal(page)).toContainText(hint);
+      expect(events).toEqual(['screen', 'prompt', 'screen', 'screen']);
+      await paneMode(page, '대화').click();
+      await expect(page.getByRole('region', { name: `${command} 결과`, exact: true })).toHaveCount(0);
     });
 
     test('shows the session model, changes it without leaving chat and locks the chip while working', async ({ page }, info) => {
@@ -462,6 +529,35 @@ for (const { name, width, height, touch } of sizes) {
       await expect(terminal(page)).toContainText('3 pass');
       await expect(chip).toBeDisabled();
       await page.screenshot({ path: info.outputPath('omp-terminal-working.png'), animations: 'disabled', caret: 'hide' });
+    });
+
+    test('loads Claude model aliases and session IDs, then sends the chosen ID', async ({ page }) => {
+      const pane = visualCodingIds.finished;
+      const aliases = [
+        { selector: 'default', name: '기본', provider: 'Claude' },
+        { selector: 'opus', name: 'Opus', provider: 'Claude' },
+        { selector: 'sonnet', name: 'Sonnet', provider: 'Claude' },
+        { selector: 'haiku', name: 'Haiku', provider: 'Claude' },
+      ] satisfies ClaudeModels['models'];
+      const ids = [
+        { selector: 'claude-sonnet-4-6', name: 'claude-sonnet-4-6', provider: 'Claude' },
+        { selector: 'claude-opus-5-5', name: 'claude-opus-5-5', provider: 'Claude' },
+      ] satisfies ClaudeModels['models'];
+      await openScreen(page, { ...richCoding, route: () => paneRoute(pane), waits: () => ['기본 안내 문구'], prepare: async page => {
+        await mockCodingApi(page, { rich: true, finishedAgent: 'claude' });
+        await page.route('**/api/herdr/claude-models', route => route.fulfill({ json: { models: [...aliases, ...ids] } satisfies ClaudeModels }));
+      } }, 'light');
+      const chip = page.getByRole('button', { name: '모델 · claude-sonnet-4-6', exact: true });
+      const loaded = page.waitForRequest(request => request.url().endsWith('/api/herdr/claude-models'));
+      await chip.click();
+      expect((await loaded).method()).toBe('GET');
+      const choices = page.getByRole('group', { name: '모델 목록' }).getByRole('button');
+      await expect(choices).toHaveText([...aliases, ...ids].map(model => `${model.name}Claude`));
+      await expect(choices.filter({ hasText: 'claude-sonnet-4-6' })).toHaveAttribute('aria-pressed', 'true');
+      const picked = post(page, '/api/herdr/prompt');
+      await choices.filter({ hasText: 'claude-opus-5-5' }).click();
+      expect((await picked).postDataJSON()).toEqual({ pane, text: '/model claude-opus-5-5' });
+      await expect(paneMode(page, '대화')).toBeChecked();
     });
 
     test('moves the blocked choice with arrows, submits it and returns to the roster when the terminal ends', async ({ page }) => {

@@ -286,6 +286,12 @@ export const OmpInfo = Type.Object({
 });
 export type OmpInfo = Static<typeof OmpInfo>;
 
+/** Claude Code's aliases, recently used model IDs, and the model set in the owner's user settings. */
+export const ClaudeModels = Type.Object({
+  models: Type.Array(Type.Object({ selector: Type.String(), name: Type.String(), provider: Type.Literal("Claude") })),
+});
+export type ClaudeModels = Static<typeof ClaudeModels>;
+
 /** One file a pane's work changed, relative to the commit its worktree was cut from (uncommitted and untracked included). */
 export const HerdrChangedFile = Type.Object({
   path: Type.String(),

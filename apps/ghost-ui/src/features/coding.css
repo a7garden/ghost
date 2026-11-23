@@ -165,6 +165,13 @@
   .herdr-chat-steps li[data-failed] { color: var(--ghost-danger-ink); }
   .herdr-chat-note { display: flex; align-items: center; gap: 10px; color: var(--ghost-ink3); text-align: center; font-size: var(--text-caption); }
   .herdr-chat-note::before, .herdr-chat-note::after { content: ''; flex: 1 0 12px; height: 1px; background: var(--ghost-line); }
+  /* What a slash command printed: a quiet mono block, not an agent reply. */
+  .herdr-chat-result { min-width: 0; padding: 8px 12px 10px; border-inline-start: 2px solid var(--ghost-line-strong); }
+  .herdr-chat-result header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .herdr-chat-result code { color: var(--ghost-ink2); font-size: var(--text-caption); font-weight: 600; }
+  .herdr-chat-result button { padding: 0; border: 0; background: none; color: var(--ghost-ink3); font: inherit; font-size: var(--text-caption); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+  .herdr-chat-result button:hover { color: var(--ghost-ink); }
+  .herdr-chat-result pre { margin: 0; max-height: 18rem; overflow: auto; color: var(--ghost-ink); font: var(--text-caption)/1.55 var(--font-mono, ui-monospace, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
   .herdr-chat-working { display: flex; align-items: center; gap: 8px; }
   .herdr-chat-empty { margin: 20px 0; color: var(--ghost-ink3); text-align: center; font-size: var(--text-ui); }
   .herdr-chat-latest { position: absolute; inset-inline-end: 24px; bottom: 12px; }
