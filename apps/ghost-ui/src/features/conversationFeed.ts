@@ -12,7 +12,7 @@ export type ConversationFeed = { messages: Message[]; before: string | null; liv
 export function useConversationFeed(conversationId: string | null) {
   const { store, client } = useHost();
   const [feed, setFeed] = useState<ConversationFeed>({ messages: [], before: null, live: null });
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(conversationId !== null);
   const [olderLoading, setOlderLoading] = useState(false);
   const [error, setError] = useState('');
   const open = useRef(conversationId);

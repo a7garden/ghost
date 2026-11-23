@@ -189,7 +189,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   };
   return <>
     <input ref={fileInput} type="file" multiple hidden onChange={event => { attachments.add(Array.from(event.target.files ?? [])); event.target.value = ''; focus(); }}/>
-    <Composer inputId="message-input" inputRef={inputRef} value={draft} onValueChange={value => { projects.onChange(value); setActive(0); }} onSubmit={value => void send(value)}
+    <Composer className="chat-composer" inputId="message-input" inputRef={inputRef} value={draft} onValueChange={value => { projects.onChange(value); setActive(0); }} onSubmit={value => void send(value)}
       onKeyDown={steer}
       onSelect={projects.onSelect}
       inputAria={projects.open ? projects.inputAria : { role: 'combobox', 'aria-expanded': open, 'aria-controls': open ? suggestId : undefined, 'aria-activedescendant': open ? `${suggestId}-${current}` : undefined, 'aria-autocomplete': 'list' }}
@@ -225,7 +225,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
       leading={<ComposerPlus disabled={!conversationId || sending} actions={actions} onBlocked={setBlocked}/>}
       footer={confirmation ? <span className="composer-confirmation" role="status">{confirmation}</span> : hint && <span className="composer-hint" role="status">{hint}</span>}
       trailing={<>
-        {conversationId && mode !== 'work' && <ModelPicker conversationId={conversationId} disabled={sending || busy}/>}
+        {conversationId && mode !== 'work' && <ModelPicker className="chat-composer__model" conversationId={conversationId} disabled={sending || busy}/>}
         {running && <button type="button" className="chat-stop" aria-label="응답 취소" title="응답 취소" onClick={onStop}><Square aria-hidden="true"/></button>}
       </>}/>
   </>;

@@ -33,10 +33,7 @@ export function ghostAgenda(state: State, ghostId: string): AgendaItem[] {
   return items.sort((a, b) => Number(a.paused) - Number(b.paused) || (a.at ?? Infinity) - (b.at ?? Infinity));
 }
 
-/**
- * The clock under the thread button: this Ghost's agenda in the same kind of popover as its threads.
- * 2026.11.11 : 예약은 설정 화면에만 있어 대화하다가 「이 Ghost 가 언제 무엇을 하나」를 보려면 화면을 떠나야 했다.
- */
+/** Upcoming work and schedules, beside the conversation's thread control. */
 export function GhostAgenda({ ghost, state, navigate }: { ghost: Ghost; state: State; navigate(path: string): void }) {
   const { client } = useHost();
   const [open, setOpen] = useState(false);
@@ -55,7 +52,7 @@ export function GhostAgenda({ ghost, state, navigate }: { ghost: Ghost; state: S
   };
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
-      <button type="button" className="chat-threads chat-agenda" data-live={waiting > 0 || undefined}
+      <button type="button" className="chat-tool" data-live={waiting > 0 || undefined}
         aria-label={`예약${waiting ? `, ${waiting}건` : ''}`} title="예약">
         <Clock3 aria-hidden="true"/>{waiting > 0 && <span className="tabular" aria-hidden="true">{waiting}</span>}
       </button>

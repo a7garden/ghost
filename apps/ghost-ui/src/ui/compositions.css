@@ -115,6 +115,7 @@
 .sidebar-scroll-frame > .ghost-rail { top: 8px; right: 0; bottom: 8px; }
 .sidebar-scroll-frame:hover > .ghost-rail { opacity: .7; }
 .sidebar-primary { display: flex; flex-direction: column; gap: 2px; }
+.sidebar-scroll > .presence-row__main { width: 100%; margin-top: var(--ghost-space-2); }
 .sidebar-foot { flex: none; padding-top: 8px; border-top: 1px solid var(--ghost-line); }
 .sidebar-count { margin-left: auto; color: var(--ghost-ink3); font-size: var(--text-micro); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sidebar-count[data-tone="amber"] { min-width: 20px; padding: 2px 6px; border-radius: var(--radius-pill); color: var(--ghost-amber-ink); background: var(--ghost-amber-tint); text-align: center; }
@@ -296,6 +297,20 @@
 .ghost-composer__footer-actions > :is(.chat-stop, [data-slot="button"]) { flex: none; }
 .composer-confirmation { color: var(--ghost-signal-ink); font-size: var(--text-caption); font-weight: 500; animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .ghost-composer__footer-actions { justify-content: flex-end; }
+.chat-composer { --composer-action-size: 34px; --composer-action-radius: var(--radius-control); }
+.chat-composer .ghost-composer__footer-slot:empty { display: none; }
+.chat-composer .ghost-composer__footer-actions {
+  flex: 0 1 auto; margin-inline-start: auto;
+  max-width: calc(100% - var(--composer-action-size) - var(--ghost-space-2));
+}
+.chat-composer :is(.composer-plus__trigger, .chat-stop, .chat-composer__model) {
+  height: var(--composer-action-size); border-radius: var(--composer-action-radius);
+}
+.chat-composer :is(.composer-plus__trigger, .chat-stop) { width: var(--composer-action-size); }
+.chat-composer__model { min-width: 0; }
+.chat-composer :is(.composer-plus__trigger, .chat-stop, .chat-composer__model, .ghost-composer__send):focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
+@media (pointer: coarse) { .chat-composer { --composer-action-size: 44px; } }
+
 /* While the Ghost responds two soft arcs circle the composer at an even pace, over a faint steady ring so the
    busy state reads everywhere, and the glow behind them breathes.
    2026.11.11 : 가속·감속 곡선 하나짜리 혜성이 울컥거리며 돌았다. 마주 보는 긴 꼬리 두 개를 일정 속도로 돌리고 빛은 숨 쉬듯 바꾼다. */
@@ -324,15 +339,16 @@
 /* Conversation --------------------------------------------------------- */
 .ghost-conversation { container-type: inline-size; display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; overflow: hidden; color: var(--ghost-ink); background: var(--ghost-canvas); }
 .ghost-conversation__column { box-sizing: border-box; width: min(100%, var(--ghost-layout-document-max)); min-width: 0; margin-inline: auto; }
-.ghost-conversation__header { flex: 0 0 auto; padding: 10px var(--ghost-space-6) 10px; }
-/* Clipped so the floating face and thread button never spill over the docked decisions in a short window. */
+.ghost-conversation__header { flex: 0 0 auto; padding: 4px var(--ghost-space-6); }
 .ghost-conversation__transcript-frame { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; overflow: clip; }
 .ghost-conversation__transcript-frame::before { content: ''; position: absolute; z-index: 1; top: 0; left: 0; right: 0; height: 24px; background: linear-gradient(var(--ghost-canvas), transparent); pointer-events: none; }
 .ghost-conversation__transcript { box-sizing: border-box; width: 100%; min-width: 0; min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; overflow-anchor: auto; padding-inline: var(--ghost-space-6); }
 .ghost-conversation__transcript:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
 .ghost-conversation__transcript-content { padding-block: 24px 48px; }
+.chat-layout .ghost-conversation__transcript-content { padding-block-end: var(--ghost-space-6); }
 .ghost-conversation__messages { display: flex; min-width: 0; flex-direction: column; }
 .ghost-conversation__messages > * + * { margin-block-start: 24px; }
+.ghost-conversation__messages > :is([data-kind="thread"], .touch-context:has(> [data-kind="thread"])) + :is([data-kind="thread"], .touch-context:has(> [data-kind="thread"])) { margin-block-start: var(--ghost-space-2); }
 .ghost-conversation__messages > [data-role="user"] + [data-role="assistant"],
 .ghost-conversation__messages > [data-role="assistant"] + [data-role="user"] { margin-block-start: 32px; }
 .ghost-conversation__messages > [data-kind="trail"] + [data-kind="trail"],
@@ -363,7 +379,6 @@
 /* ScrollRail placed in its frame, here the transcript's. Fine pointers only; touch keeps native scrolling. */
 .ghost-rail { position: absolute; z-index: 2; top: 30px; right: 2px; bottom: 18px; width: 22px; opacity: 0; touch-action: none; user-select: none; cursor: default; transition: opacity var(--duration-base) ease; }
 .ghost-rail[hidden] { display: none; }
-.ghost-conversation__transcript-frame[data-overlay] > .ghost-rail { top: 64px; }
 .ghost-conversation__transcript-frame:hover > .ghost-rail { opacity: .7; }
 .ghost-rail:hover, .ghost-rail[data-active], .ghost-rail[data-dragging] { opacity: 1 !important; }
 .ghost-rail__thumb {

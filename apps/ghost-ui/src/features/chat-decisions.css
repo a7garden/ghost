@@ -1,5 +1,5 @@
 /* Keep the compact summary fixed while the expanded deck shares the dock with the draft. */
-.chat-decisions { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 6px; margin-bottom: 10px; }
+.chat-decisions { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 6px; margin-bottom: var(--chat-dock-gap); }
 .chat-decisions:has(.chat-decisions__row) { min-height: 44px; }
 .chat-decisions:not(:has(.chat-decisions__row, .deck)) { display: none; }
 .chat-decisions .deck[data-docked] { margin-bottom: 0; }

@@ -59,7 +59,7 @@ export function TerminalTextSize({ size, onSize }: { size: number; onSize(size: 
     if (next !== undefined) { onSize(next); writeCodingValue(terminalSizeKey, String(next)); }
   }
   return <Popover>
-    <PopoverTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label="터미널 글자 크기"><Type aria-hidden="true"/></Button></PopoverTrigger>
+    <PopoverTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label="터미널 글자 크기" title="글자 크기"><Type aria-hidden="true"/></Button></PopoverTrigger>
     <PopoverContent className="herdr-type-menu" aria-label="터미널 글자 크기">
       <Button type="button" variant="ghost" aria-label="글자 작게" disabled={index <= 0} onClick={() => change(-1)}>A−</Button>
       <output>{size}px</output>

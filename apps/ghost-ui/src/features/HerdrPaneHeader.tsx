@@ -1,6 +1,6 @@
 import { useContext, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, GitBranch } from 'lucide-react';
+import { ChevronDown, GitCompare, MessageSquare, SquareTerminal } from 'lucide-react';
 import { CompactTitleSlot } from '../components/AppFrame';
 import type { HerdrPaneView } from '@ghost/contract';
 import { Button, Popover, PopoverContent, PopoverTrigger, SegmentedControl } from '../ui';
@@ -10,7 +10,11 @@ import { TerminalTextSize } from './HerdrTerminalControls';
 
 export type HerdrMode = 'chat' | 'live' | 'changes';
 export const herdrModes: readonly HerdrMode[] = ['chat', 'live', 'changes'];
-const modes = [{ value: 'chat', label: '대화' }, { value: 'live', label: '터미널' }, { value: 'changes', label: '변경' }] as const;
+const modes = [
+  { value: 'chat', label: '대화', Icon: MessageSquare },
+  { value: 'live', label: '터미널', Icon: SquareTerminal },
+  { value: 'changes', label: '변경', Icon: GitCompare },
+] as const;
 export type PaneNavigation = { panes: readonly HerdrPaneView[]; onNavigate(id: string): void };
 
 export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, branch, navigation, fontSize, onFontSize, terminalAction }: {
@@ -26,15 +30,8 @@ export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, br
   const current = siblings.findIndex(item => item.id === pane.id);
   const canSwipe = compact && siblings.length > 1 && current >= 0;
   const buttons = modes.filter(item => item.value === 'chat' ? chat : item.value === 'changes' ? changes : true);
-  const identity = <div className="coding-detail-title">
-        <div className="coding-context"><HerdrState status={pane.status} size={15} label={compact}/><span>{pane.agent ?? '셸'}</span>
-          {pane.codingWorkId && <a className="link-quiet coding-work-link" href={`#/work/${encodeURIComponent(pane.codingWorkId)}`}>{uiTerms.work}</a>}</div>
-        <h2>{pane.title}</h2>
-        {(branch || pane.cwd) && <code className="coding-directory" title={pane.cwd ?? undefined} aria-label={branch ? `브랜치 ${branch}` : `작업 디렉터리 ${pane.cwd}`}>
-          {branch && <GitBranch aria-hidden="true" size={13}/>}<span>{branch || pane.cwd}</span>
-        </code>}
-        {compact && branch && pane.cwd && <code className="coding-directory">{pane.cwd}</code>}
-      </div>;
+  const context = `${pane.agent ?? '셸'}${branch ? ` · ${branch}` : ''}`;
+  const workLink = pane.codingWorkId && <a className="link-quiet coding-work-link" href={`#/work/${encodeURIComponent(pane.codingWorkId)}`}>{uiTerms.work}</a>;
   const title = compact && <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild><button type="button" className="coding-pane-picker" aria-label={`패널 정보 · ${pane.title}`}
       onTouchStart={event => {
@@ -52,7 +49,10 @@ export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, br
       <HerdrState status={pane.status} size={15} label={false}/><strong>{pane.title}</strong><ChevronDown size={14} aria-hidden="true"/>
     </button></PopoverTrigger>
     <PopoverContent className="coding-pane-info" aria-label="패널 정보">
-      {identity}
+      <h2>{pane.title}</h2>
+      <p className="coding-detail-meta">{context}</p>
+      {pane.cwd && <code className="coding-directory">{pane.cwd}</code>}
+      {workLink}
       {canSwipe && <nav aria-label="탭의 패널">{siblings.map(item =>
         <button key={item.id} type="button" aria-current={item.id === pane.id ? 'page' : undefined}
           onClick={() => { setOpen(false); if (item.id !== pane.id) navigation?.onNavigate(item.id); }}>
@@ -60,14 +60,23 @@ export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, br
         </button>)}</nav>}
     </PopoverContent>
   </Popover>;
+  const controls = buttons.length > 1 || mode === 'live';
   return <header className="coding-detail-head">
-    {compact ? slot ? createPortal(title, slot) : title : <div className="coding-detail-top">{identity}</div>}
-    <div className="herdr-view-actions">
-      {buttons.length > 1 ? <SegmentedControl aria-label="패널 보기" value={mode} options={buttons} onValueChange={onMode}/> : <span/>}
+    {compact ? slot ? createPortal(title, slot) : title : <div className="coding-detail-title" title={pane.cwd ?? pane.title}>
+      <HerdrState status={pane.status} size={15} label={false}/>
+      <h2>{pane.title}</h2>
+      <span className="coding-detail-meta" title={context}>{context}</span>
+      {workLink}
+    </div>}
+    {controls && <div className="herdr-view-actions">
+      {buttons.length > 1 && <SegmentedControl aria-label="패널 보기" value={mode}
+        options={buttons.map(({ value, label, Icon }) => ({
+          value, label: <span title={label}><Icon aria-hidden="true"/><span className="sr-only">{label}</span></span>,
+        }))} onValueChange={onMode}/>}
       {mode === 'live' && <div className="herdr-pane-tools" role="toolbar" aria-label="터미널 도구">
         {terminalAction}
         <TerminalTextSize size={fontSize} onSize={onFontSize}/>
       </div>}
-    </div>
+    </div>}
   </header>;
 }

@@ -1,5 +1,5 @@
 import { createContext, useState, type ReactNode } from 'react';
-import { Ellipsis, Home, Inbox, Menu, MessageCircle, Search, Settings, SquareTerminal } from 'lucide-react';
+import { Ellipsis, Home, Inbox, Menu, MessageCircle, PanelsTopLeft, Search, Settings, SquareTerminal } from 'lucide-react';
 import { CommandPalette, Dialog, DialogContent, DialogTitle, Popover, PopoverContent, PopoverTrigger, TitleBar, type CommandItem } from '../ui';
 import { useCompact } from '../ui/adaptive';
 import { routeLabels } from '../uiText';
@@ -67,6 +67,7 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar,
             <PopoverContent aria-label="작업실 메뉴" className="coding-shell-menu">
               {focusedChat && island}
               {duty}
+              {focusedChat && <button type="button" onClick={() => { setToolsOpen(false); navigate('/workspace'); }}><PanelsTopLeft/>작업실</button>}
               <button type="button" onClick={() => { setToolsOpen(false); onPaletteOpenChange(true); }}><Search/>명령 검색</button>
               <button type="button" onClick={() => { setToolsOpen(false); navigate('/settings'); }}><Settings/>설정</button>
             </PopoverContent>

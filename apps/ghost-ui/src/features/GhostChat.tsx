@@ -119,7 +119,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   const panelClosing = !threadId && panelId !== null;
 
   const live = page.live;
-  const hasContent = page.messages.length > 0 || outbox.rows.length > 0 || Boolean(live?.running);
+  const hasContent = page.messages.length > 0 || outbox.rows.length > 0;
   const speaker = (message: Message) => message.role === 'user' ? '나' : message.role === 'tool' ? '도구 기록' : message.role === 'note' ? '기록' : ghost.name;
   // The in-app browser shows only when the Ghost may drive one at all; the toggle follows the session.
   const browserCapable = ghost.tools.some(tool => tool.startsWith('browser_'));
@@ -159,33 +159,28 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         onOpen={() => openThread(work.id)} onOpenPage={() => openWork(work.id)}/> };
     }) : [];
 
-  const tools = <>
-        <div className="chat-float">
-          <GhostProfile ghostID={ghost.id} name={ghost.name} summary={profileSummary(ghost.persona)} presence={ghostPresence(ghost, state).state}
-            activity={{ model: projectGhostActivity(ghost, state), onInspectWork: openWork, onCancelTurn: () => stop() }}
-            onOpenWork={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}
-            onManage={() => navigate(`/settings?tab=team&ghost=${encodeURIComponent(ghost.id)}`)}
-            design={<GhostDesignEditor ghostId={ghost.id}/>}
-            isMain={ghost.isDefault}/>
-        </div>
-        <div className="chat-corner">
-          {conversationId && browserCapable && (browserSession || browserOpen) &&
-            <button type="button" className="chat-threads chat-browser" aria-pressed={browserOpen} data-live={browserSession ? '' : undefined}
-              aria-label="브라우저 화면" title="브라우저 화면" onClick={() => setBrowserOpen(value => !value)}>
-              <Monitor aria-hidden="true"/>
-            </button>}
-          <Threads ghost={ghost} state={state} conversations={conversations} currentId={conversationId} waiting={waiting} now={now}
-            onOpenWork={openThread} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
-            onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
-        </div>
-        <GhostAgenda ghost={ghost} state={state} navigate={navigate}/>
-      </>;
+  const tools = <div className="chat-tools" role="group" aria-label="대화 도구">
+    <GhostProfile ghostID={ghost.id} name={ghost.name} summary={profileSummary(ghost.persona)} presence={ghostPresence(ghost, state).state}
+      activity={{ model: projectGhostActivity(ghost, state), onInspectWork: openWork, onCancelTurn: stop }}
+      onOpenWork={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}
+      onManage={() => navigate(`/settings?tab=team&ghost=${encodeURIComponent(ghost.id)}`)}
+      design={<GhostDesignEditor ghostId={ghost.id}/>}
+      isMain={ghost.isDefault}/>
+    <Threads ghost={ghost} state={state} conversations={conversations} currentId={conversationId} waiting={waiting} now={now}
+      onOpenWork={openThread} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
+      onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
+    <GhostAgenda ghost={ghost} state={state} navigate={navigate}/>
+    {conversationId && browserCapable && (browserSession || browserOpen) &&
+      <button type="button" className="chat-tool chat-browser" aria-pressed={browserOpen} data-live={browserSession ? '' : undefined}
+        aria-label="브라우저 화면" title="브라우저 화면" onClick={() => setBrowserOpen(value => !value)}>
+        <Monitor aria-hidden="true"/>
+      </button>}
+  </div>;
   return <OpenWorkProvider value={openThread}><div className="chat-layout" data-thread={threadId ? '' : undefined}>
-    {compact && titleSlot && createPortal(tools, titleSlot)}
+    {compact && titleSlot && !threadId && createPortal(tools, titleSlot)}
     <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
       scrollKey={`${page.messages.length}:${outbox.rows.length}:${live?.running ? 1 : 0}:${live?.partial ? 1 : 0}`} followKey={followKey}
-      overlay={compact ? null : tools}
-      header={compact && !titleSlot ? <div className="chat-title-tools">{tools}</div> : null}
+      header={compact ? null : tools}
       composer={<>
         <BrowserPaneContext.Provider value={conversationId ? { conversationId, open: () => setBrowserOpen(true) } : null}>
           <ChatDecisions state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread}/>
@@ -198,8 +193,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         {error && <div className="chat-error" role="alert"><CircleAlert size={15} aria-hidden="true"/><span>{error}</span><Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" aria-label="오류 메시지 닫기" onClick={() => setError('')}><X size={14}/></Button></div>}
         <p id="composer-keyboard-help" className="sr-only m-0">{touch ? '보내기 버튼으로 전송 · Return으로 줄바꿈' : 'Enter로 보내기 · Shift + Enter로 줄바꿈'}{busy ? ' · 추가 지시는 진행 중인 응답에 전달됩니다.' : ''}</p>
       </>}>
-      {!hasContent && !loading && <div className="chat-empty">
-        <h2>{ghost.name}</h2>
+      {!hasContent && !running && !loading && !error && extras.length === 0 && <div className="chat-empty">
+        <h2>무엇부터 이야기할까요?</h2>
         {ghost.persona.trim() && <div className="chat-empty__starters" role="group" aria-label="대화 시작 제안">{conversationStarters(ghost.persona).map(({ label, prompt }) =>
           <button type="button" key={label} title={prompt} onClick={() => { setDraft(prompt); inputRef.current?.focus(); }}>{label}</button>)}</div>}
       </div>}
@@ -265,7 +260,7 @@ function Threads({ ghost, state, conversations, currentId, waiting, now, onOpenW
   </Row>;
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
-      <button type="button" className="chat-threads" data-live={live.length > 0 || undefined} aria-label={`스레드${live.length ? `, 진행 중 ${live.length}` : ''}`} title="스레드">
+      <button type="button" className="chat-tool" data-live={live.length > 0 || undefined} aria-label={`스레드${live.length ? `, 진행 중 ${live.length}` : ''}`} title="스레드">
         <GitBranch aria-hidden="true"/>{live.length > 0 && <span className="tabular" aria-hidden="true">{live.length}</span>}
       </button>
     </PopoverTrigger>

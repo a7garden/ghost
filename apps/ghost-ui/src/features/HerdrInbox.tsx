@@ -60,14 +60,14 @@ export function HerdrInbox({ workspaces, open, log, asks, onSpaces }: {
   </div>;
   return <div className="herdr-inbox" ref={root}>
     {agentGroups.map(group => groups[group].length ? <section key={group} className="herdr-inbox-group" data-group={group} aria-label={agentGroupName[group]}>
-      <h2>{agentGroupName[group]} <span>{groups[group].length}</span></h2>
-      <ul>{groups[group].map(({ pane, location, changedAt }) => {
+      <h2>{agentGroupName[group]}</h2>
+      <ul>{groups[group].map(({ pane, changedAt }) => {
         const approval = group === 'blocked' ? asks.entries[pane.id] : undefined;
         const selected = open === pane.id;
         return <li key={pane.id} data-agent-row={pane.id} data-agent-group={group}>
-          <a href={`#${herdrPanePath(pane.id)}`} aria-current={selected ? 'page' : undefined} className="herdr-agent-link">
-            <HerdrState status={pane.status} size={19} label={false} unread={group === 'done'}/>
-            <span className="herdr-agent-title"><strong>{pane.title}</strong><span>{location}</span></span>
+          <a href={`#${herdrPanePath(pane.id)}`} aria-current={selected ? 'page' : undefined} className="herdr-agent-link" title={pane.workspace}>
+            {group === 'shell' ? <SquareTerminal size={17} role="img" aria-label="셸"/> : <HerdrState status={pane.status} size={16} label={false} unread={group === 'done'}/>}
+            <strong className="herdr-agent-title">{pane.title}</strong>
             {group === 'working' ? <WorkingTime since={changedAt}/> : group === 'blocked' && !approval
               ? <span className="herdr-ask-open">열기</span> : <ChevronRight aria-hidden="true" size={15} className="herdr-agent-chevron"/>}
           </a>

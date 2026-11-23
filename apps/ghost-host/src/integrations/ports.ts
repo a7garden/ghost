@@ -343,7 +343,7 @@ export interface HerdrPort {
   installIntegration(agent: CodingAgentId): Promise<void>;
   /** Persist the opened handle before the first agent launch or prompt. Omitted wait returns after admission, not completion. */
   start(input: CodingStart, wait?: HerdrWait, opened?: (prepared: HerdrRun) => void, guard?: { session: string; authorize: (stage?: "open" | "launch" | "prompt", pane?: HerdrPaneView) => void }): Promise<HerdrRun>;
-  prompt(pane: string, text: string, wait?: HerdrWait, guard?: { session: string; terminalId: string; agent: string; authorize: (pane?: HerdrPaneView) => void }, delivery?: HerdrDelivery): Promise<HerdrRun>;
+  prompt(pane: string, text: string, wait?: HerdrWait, guard?: { session: string; terminalId: string; agent: string; authorize: (pane?: HerdrPaneView) => void }, delivery?: HerdrDelivery, uploads?: readonly string[]): Promise<HerdrRun>;
   /** Interrupt only the same terminal in its recorded session; never close the pane or delete its worktree. */
   interrupt?(session: string, pane: string, terminalId: string, guard?: { agent: string; authorize: (pane?: HerdrPaneView) => void }): Promise<void>;
   createWorkspace(input: HerdrWorkspaceCreate): Promise<HerdrPaneView>;

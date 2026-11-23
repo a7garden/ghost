@@ -40,8 +40,8 @@ export function GhostProfile({ ghostID, name, summary, note, activity, onOpenWor
   return <div className="flex flex-col items-center gap-1">
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" aria-label={`${name} 프로필 ${open ? '닫기' : '열기'}`} title={name} className="profile-trigger">
-          <PresenceAvatar ghostId={ghostID} state={presence} size={36}/>
+        <button type="button" aria-label={`${name} 프로필 ${open ? '닫기' : '열기'}`} title={`${name} 프로필`} className="chat-tool profile-trigger">
+          <PresenceAvatar ghostId={ghostID} state={presence} size={22}/>
         </button>
       </PopoverTrigger>
       <PopoverContent side="bottom" align="center" aria-label={`${name} 프로필`}

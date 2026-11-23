@@ -1,14 +1,21 @@
-import type { Notification, State } from '@ghost/contract';
-import { herdrPanePath, parseHerdrPane } from './herdrDisplay';
+import type { HerdrView, Notification, State } from '@ghost/contract';
+import { herdrPanePath, parseHerdrPane, parseHerdrSession } from './herdrDisplay';
+
+export function codingNotificationAddress(id: string) {
+  const match = /^coding:([^:]+):([^:]+:[^:]+):(blocked|done|exit):\d+$/.exec(id);
+  const session = parseHerdrSession(match?.[1]);
+  const pane = parseHerdrPane(match?.[2]);
+  return session && pane ? { session, pane } : null;
+}
 
 /** Inbox and native notification taps share the same precedence, including settled decisions. */
-export function notificationRoute(item: Notification, state: State, codingSession?: string | null): string | null {
-  if (codingSession !== undefined) {
-    const coding = /^coding:([A-Za-z0-9._-]+):([A-Za-z0-9]+:[A-Za-z0-9]+):(blocked|done):\d+$/.exec(item.id);
-    if (coding) {
-      const pane = parseHerdrPane(coding[2] ?? null);
-      return pane && coding[1] === codingSession ? herdrPanePath(pane) : null;
-    }
+export function notificationRoute(item: Notification, state: State, coding?: string | null | HerdrView): string | null {
+  const address = coding !== undefined ? codingNotificationAddress(item.id) : null;
+  if (address) {
+    if (!coding || typeof coding === 'string') return address.session === coding ? herdrPanePath(address.pane) : null;
+    const exists = coding.available && !coding.note && address.session === coding.session &&
+      coding.workspaces.some(workspace => workspace.tabs.some(tab => tab.panes.some(pane => pane.id === address.pane)));
+    return exists ? herdrPanePath(address.pane, address.session) : '/coding';
   }
   if (item.decisionId && state.decisions.some(decision => decision.id === item.decisionId && decision.state === 'pending')) return `/inbox?decision=${encodeURIComponent(item.decisionId)}`;
   if (item.workId) return `/work/${encodeURIComponent(item.workId)}`;

@@ -85,6 +85,15 @@ it('marks the open Ghost while any of its conversations is on screen', () => {
   expect(current.slice(0, current.indexOf('</button>'))).toContain('sage');
 });
 
+it('shows the sole main Ghost without roster labels or a redundant role badge', () => {
+  const html = render({ state: team(['도우미']) });
+  expect(html).toContain('도우미');
+  expect(html).not.toContain('고정</p>');
+  expect(html).not.toContain('presence-row__main-mark');
+  expect(html).not.toContain('Ghost 목록');
+  expect(html).toContain('프로젝트');
+});
+
 it('shows host trouble on the settings entry only once it is announced, toned by severity', () => {
   expect(render()).not.toContain('연결됨');
   expect(render({ status: { state: 'connecting', label: '연결 확인 중', quiet: true } })).not.toContain('연결 확인 중');

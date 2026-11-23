@@ -9,7 +9,7 @@ import { nullable, Timestamp } from "./entities.ts";
 export const CodingAgentId = Type.Union([Type.Literal("omp"), Type.Literal("claude"), Type.Literal("codex")]);
 export type CodingAgentId = Static<typeof CodingAgentId>;
 
-/** When an agent in the session in use tells the owner (a push and an inbox entry): never, only when it waits for an answer, or also when it finishes. */
+/** Coding alerts: never, only when an agent needs an answer, or also when it finishes a turn or exits (default). */
 export const CodingNotify = Type.Union([Type.Literal("off"), Type.Literal("blocked"), Type.Literal("all")]);
 export type CodingNotify = Static<typeof CodingNotify>;
 
@@ -243,8 +243,13 @@ export type HerdrClose = Static<typeof HerdrClose>;
 export const HerdrDelivery = Type.Union([Type.Literal("steer"), Type.Literal("queue")]);
 export type HerdrDelivery = Static<typeof HerdrDelivery>;
 
-/** A follow-up instruction submitted to the agent in a pane, as herdr submits a prompt (refused while the agent waits at a dialog). */
-export const HerdrPrompt = Type.Object({ ...PaneRef, text: Task, delivery: Type.Optional(HerdrDelivery) });
+/** A follow-up to the agent in a pane. Attachments are absolute paths returned by `/api/herdr/upload`. */
+export const HerdrPrompt = Type.Object({
+  ...PaneRef,
+  text: Type.String({ maxLength: 24_000 }),
+  attachments: Type.Optional(Type.Array(Dir, { maxItems: 8, uniqueItems: true })),
+  delivery: Type.Optional(HerdrDelivery),
+});
 export type HerdrPrompt = Static<typeof HerdrPrompt>;
 
 /** The next messages the owner is likely to send, each exactly as they would type it, most likely first. Empty when suggestions are off or nothing is worth offering. */
@@ -349,7 +354,13 @@ export type HerdrAnswer = Static<typeof HerdrAnswer>;
 
 /** One entry of an agent's own conversation record (not its screen). Tool calls and thinking stay one-liners; the phone folds them. */
 export const HerdrChatItem = Type.Union([
-  Type.Object({ id: Type.String(), kind: Type.Literal("user"), at: nullable(Type.Integer()), text: Type.String(), /** The Host's coding-turn reference when this user record carries a managed prompt, so a long task correlates without reading the whole text. */ codingReference: Type.Optional(Type.String({ maxLength: 160 })) }),
+  Type.Object({
+    id: Type.String(), kind: Type.Literal("user"), at: nullable(Type.Integer()), text: Type.String(),
+    /** Native images in this record; the image bytes are never returned. */
+    imageCount: Type.Optional(Type.Integer({ minimum: 1 })),
+    /** The Host's turn reference when this user record carries a managed prompt. */
+    codingReference: Type.Optional(Type.String({ maxLength: 160 })),
+  }),
   Type.Object({ id: Type.String(), kind: Type.Literal("agent"), at: nullable(Type.Integer()), text: Type.String() }),
   Type.Object({ id: Type.String(), kind: Type.Literal("tool"), at: nullable(Type.Integer()), name: Type.String(), summary: Type.String(), ok: nullable(Type.Boolean()) }),
   Type.Object({ id: Type.String(), kind: Type.Literal("thinking"), at: nullable(Type.Integer()) }),

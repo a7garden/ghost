@@ -1,11 +1,15 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { useRef } from 'react';
 import { describe, expect, it } from 'vitest';
-import type { HerdrPaneView, HerdrWorkspaceView } from '@ghost/contract';
+import type { CodingSetup, HerdrPaneView, HerdrWorkspaceView } from '@ghost/contract';
 import { HerdrPaneBody } from './Herdr';
+import { HostProvider } from '../host/context';
+import { HerdrConversation, isHerdrChatPinned } from './HerdrChat';
+import { useHerdrDraft } from './HerdrComposer';
 import { HerdrDiffText } from './HerdrChanges';
 import { HerdrPaneHeader } from './HerdrPaneHeader';
 import { findHerdrPane, herdrNodeActions, HerdrRoster } from './HerdrRoster';
-import { herdrAgentOptions, workspaceInput } from './HerdrStart';
+import { HerdrShellStart, herdrAgentOptions, preferredHerdrAgent, workspaceInput } from './HerdrStart';
 import { codeRunPane, codeRunReceiptRun, herdrPanePath, parseHerdrPane, parseHerdrSession } from './herdrDisplay';
 import { decodeHerdrFrame, HerdrInputQueue } from './herdrTerminalProtocol';
 
@@ -77,6 +81,8 @@ describe('herdr roster', () => {
     expect(markup).toContain('fix/login');
     expect(markup).toContain('탭 · login');
     expect(markup).toContain('zsh');
+    expect(markup).toContain('셸');
+    expect(markup).not.toContain('/work/tree');
     expect(markup).toContain('입력 필요');
     expect(markup).toContain('href="#/coding?herdr=w1%3ApA" aria-current="page"');
     expect(markup.match(/aria-current=/g)).toHaveLength(1);
@@ -84,18 +90,25 @@ describe('herdr roster', () => {
 });
 
 describe('herdr pane', () => {
-  const body = (status: HerdrPaneView['status'], options: { mode?: 'chat' | 'live'; pending?: boolean; compact?: boolean; agent?: string | null; delivery?: 'steer' | 'queue'; suggestions?: string[]; chat?: boolean } = {}) =>
-    renderToStaticMarkup(<HerdrPaneBody
+  type BodyOptions = { mode?: 'chat' | 'live'; pending?: boolean; compact?: boolean; agent?: string | null; delivery?: 'steer' | 'queue'; suggestions?: string[]; chat?: boolean };
+  function PaneFixture({ status, options }: { status: HerdrPaneView['status']; options: BodyOptions }) {
+    const draft = useHerdrDraft(undefined);
+    const field = useRef<HTMLTextAreaElement>(null);
+    return <HerdrPaneBody
       pane={{ ...pane, status, agent: options.agent === undefined ? pane.agent : options.agent }} pending={options.pending} compact={options.compact ?? false}
       mode={options.mode ?? 'live'} chat={options.chat ?? true} onMode={() => {}} delivery={options.delivery} suggestions={options.suggestions}
-      screen={<HerdrDiffText value={'@@ -0 +1 @@\n+<b>$ bun test</b>'} wrap={false}/>} onPrompt={async () => true} onKey={() => {}}/>);
+      draft={draft} field={field} screen={<HerdrDiffText value={'@@ -0 +1 @@\n+<b>$ bun test</b>'} wrap={false}/>}
+      onPrompt={() => {}} onCommand={() => {}} onKey={() => {}}/>;
+  }
+  const body = (status: HerdrPaneView['status'], options: BodyOptions = {}) => renderToStaticMarkup(<PaneFixture status={status} options={options}/>);
 
   it('escapes diffs as text and keeps the pane context', () => {
     const markup = body('blocked');
     expect(markup).toContain('data-kind="addition">+&lt;b&gt;$ bun test&lt;/b&gt;');
     expect(markup).not.toContain('<b>$ bun test');
     expect(markup).not.toContain('contenteditable');
-    expect(markup).toContain('/work/tree');
+    expect(markup).toContain('title="/work/tree"');
+    expect(markup).not.toContain('>/work/tree<');
     expect(markup).toContain('Claude Code');
   });
 
@@ -115,11 +128,13 @@ describe('herdr pane', () => {
     expect(markup.includes('aria-label="작업 중단"')).toBe(status === 'working');
   });
 
-  it('says how a message sent now reaches an omp that is working, and only then', () => {
-    expect(body('working', { mode: 'chat', agent: 'omp', delivery: 'steer' })).toContain('스티어링');
-    expect(body('working', { mode: 'chat', agent: 'omp', delivery: 'queue' })).toContain('대기열');
-    expect(body('working', { mode: 'chat', agent: 'claude', delivery: 'queue' })).not.toContain('대기열');
-    expect(body('idle', { mode: 'chat', agent: 'omp', delivery: 'queue' })).not.toContain('대기열');
+  it('keeps the send action accessible without displaying a delivery badge or running orbit', () => {
+    const markup = body('working', { mode: 'chat', agent: 'omp', delivery: 'queue', pending: true });
+    expect(markup).toContain('aria-label="대기열로 보내기"');
+    expect(markup).toContain('placeholder="작업 중 — 이어서 지시"');
+    expect(markup).not.toContain('coding-delivery');
+    expect(markup).not.toContain('data-running');
+    expect(markup.match(/<textarea[^>]+>/)?.[0]).not.toContain('disabled=""');
   });
 
   it('offers the conversation model only for omp and Claude', () => {
@@ -133,11 +148,49 @@ describe('herdr pane', () => {
     const markup = body('done', { mode: 'chat', suggestions });
     expect(markup).toContain('aria-label="다음 메시지 제안"');
     expect(markup).toContain('테스트도 돌려줘');
-    expect(body('working', { mode: 'chat', suggestions })).not.toContain('다음 지시 제안');
+    expect(body('working', { mode: 'chat', suggestions })).not.toContain('다음 메시지 제안');
   });
 
   it('has no follow-up field for a plain shell', () => {
     expect(body('idle', { mode: 'live', compact: true, agent: null })).not.toContain('<textarea');
+  });
+
+  it('has icon-only radio choices and keeps terminal tools scoped to the terminal', () => {
+    const terminal = body('idle');
+    expect(terminal).toContain('role="toolbar" aria-label="터미널 도구"');
+    expect(terminal).toContain('title="대화"');
+    expect(terminal).toContain('class="sr-only">터미널<');
+    expect(body('idle', { chat: false })).not.toContain('role="radio"');
+    expect(body('idle', { mode: 'chat' })).not.toContain('role="toolbar"');
+  });
+
+  it('offers two direct starts and an alternate-agent menu in a shell', () => {
+    const setup = { prefs: { agent: 'claude' }, kinds: ['omp', 'claude'] } as CodingSetup;
+    const markup = renderToStaticMarkup(<HostProvider><HerdrShellStart pane={shell.id} setup={setup} onStarted={() => {}}/></HostProvider>);
+    expect(markup).toContain('title="Claude Code"');
+    expect(markup).toContain('>이어서 시작<');
+    expect(markup).toContain('>새로 시작<');
+    expect(markup).toContain('aria-label="시작할 에이전트 선택"');
+    expect(preferredHerdrAgent({ ...setup, kinds: ['omp'] })).toBe('omp');
+  });
+
+  it('shows optimistic text at once and gives a failed send actions', () => {
+    const message = { id: 1, text: '이어서 작업해 주세요', attachments: [], after: undefined, delivery: undefined };
+    const pending = renderToStaticMarkup(<HerdrConversation items={[]} busy={false} since={0} error="" optimistic={[message]}/>);
+    expect(pending).toContain('data-delivery="pending"');
+    expect(pending).toContain('이어서 작업해 주세요');
+    expect(pending).toContain('보내는 중…');
+    const failed = renderToStaticMarkup(<HerdrConversation items={[]} busy={false} since={0} error="" optimistic={[{ ...message, error: 'offline' }]}/>);
+    expect(failed).toContain('data-delivery="failed"');
+    expect(failed).toContain('다시 보내기');
+    expect(failed).toContain('입력창으로');
+  });
+
+  it('only follows a transcript close to the bottom, not a reader looking at older output', () => {
+    const viewport = { scrollHeight: 800, clientHeight: 300 };
+    expect(isHerdrChatPinned({ ...viewport, scrollTop: 495 })).toBe(true);
+    expect(isHerdrChatPinned({ ...viewport, scrollTop: 460 })).toBe(false);
+    expect(isHerdrChatPinned({ ...viewport, scrollTop: 120 })).toBe(false);
   });
 });
 

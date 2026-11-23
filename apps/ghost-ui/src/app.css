@@ -150,7 +150,7 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
   .deck[data-overview] .deck__index button { border-bottom: 0; border-left: 2px solid transparent; }
   .deck[data-overview] .deck__index button[aria-current="true"] { border-left-color: var(--ghost-ink); }
 }
-.deck[data-docked] { gap: 4px; margin-bottom: 10px; }
+.deck[data-docked] { gap: 4px; margin-bottom: var(--chat-dock-gap, 10px); }
 /* Keep evidence and responses separate; exceptionally short windows can scroll the whole request. */
 .deck[data-docked] .decision { max-height: min(65dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }
 .deck[data-docked] .decision__body { min-height: min(72px, 20dvh); overflow-y: auto; overscroll-behavior: contain; }
@@ -300,9 +300,6 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 .browser-pane__body { display: flex; flex: 1; min-height: 0; padding: 12px 16px 16px; }
 .browser-pane__body > .browser-live { flex: 1; }
 .browser-pane__empty { margin: auto; color: var(--ghost-ink3); font-size: var(--text-ui); }
-/* The browser toggle sits beside the thread button in the conversation's corner. */
-.chat-corner { position: absolute; top: 6px; right: 18px; display: inline-flex; align-items: center; gap: 8px; }
-.chat-corner .chat-threads { position: static; }
 .chat-browser[data-live] { color: var(--ghost-signal-ink); }
 @media (max-width: 64rem) {
   .browser-pane { position: absolute; z-index: 5; inset: 0; width: auto; border-left: 0; box-shadow: var(--shadow-overlay); animation-name: thread-slide-in; }
@@ -409,27 +406,22 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 @media (max-width: 34rem) { .feed__meta > span { display: none; } }
 
 /* Conversation -------------------------------------------------------------- */
-/* The Ghost floats at the top center of its conversation; threads sit at the top right. */
-.ghost-conversation__overlay { position: absolute; z-index: 3; top: 10px; left: 0; right: 0; height: 0; pointer-events: none; }
-.ghost-conversation__overlay > * { pointer-events: auto; }
-.ghost-conversation__transcript-frame[data-overlay] .ghost-conversation__transcript-content { padding-top: 72px; }
-.ghost-conversation__transcript-frame[data-overlay]::before { height: 64px; background: linear-gradient(var(--ghost-canvas) 35%, transparent); }
-.chat-float { position: absolute; top: 0; left: 50%; transform: translateX(-50%); }
-.profile-trigger { display: grid; flex: none; place-items: center; padding: 5px; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--ghost-canvas) 80%, transparent); box-shadow: var(--shadow-raised); backdrop-filter: blur(10px); cursor: pointer; transition: transform var(--duration-fast) var(--ease-spring), box-shadow var(--duration-fast) ease; }
-.profile-trigger:hover { transform: scale(1.06); }
-.profile-trigger:active { transform: scale(.95); }
+.chat-tools { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 2px; }
+.chat-tool {
+  display: inline-flex; flex: none; min-width: 34px; height: 34px; align-items: center; justify-content: center;
+  gap: 3px; padding-inline: 6px; border: 0; border-radius: var(--radius-control); color: var(--ghost-ink2);
+  background: none; font: 550 var(--text-caption)/1 var(--font-sans); cursor: pointer;
+}
+.chat-tool:is(:hover, [data-state="open"], [aria-pressed="true"]) { color: var(--ghost-ink); background: var(--ghost-hover); }
+.chat-tool:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
+.chat-tool svg { width: 16px; height: 16px; }
+.chat-tool[data-live] > span { color: var(--ghost-signal-ink); }
 .profile-trigger .dot-avatar { border-radius: 50%; }
 .profile-portrait { padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; outline: none; transition: transform var(--duration-fast) var(--ease-spring); }
 .profile-portrait:hover { transform: scale(1.06) rotate(-3deg); }
 .profile-portrait:active { transform: scale(.95); }
 .profile-portrait:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
 .profile-portrait .dot-avatar { border-radius: 50%; }
-.chat-threads { position: absolute; top: 6px; right: 18px; display: inline-flex; height: 32px; min-width: 32px; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 0; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: color-mix(in srgb, var(--ghost-canvas) 80%, transparent); box-shadow: var(--shadow-btn); backdrop-filter: blur(10px); font: 600 var(--text-caption)/1 var(--font-sans); cursor: pointer; }
-.chat-threads:hover { color: var(--ghost-ink); box-shadow: var(--shadow-raised); }
-.chat-threads svg { width: 15px; height: 15px; }
-.chat-threads[data-live] > span { color: var(--ghost-signal-ink); }
-/* 예약은 스레드 버튼 바로 밑에 같은 꼴로 둔다 — 「이 Ghost 가 앞으로 할 일」이 「하고 있는 일」 옆에 있어야 한다. */
-.chat-agenda { top: 46px; }
 .agenda-note { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; padding: 6px 8px; border-radius: var(--radius-control); color: var(--ghost-ink2); background: var(--ghost-hover); font-size: var(--text-caption); }
 .agenda-note svg { width: 13px; height: 13px; flex: none; }
 .agenda-row { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 4px 6px 8px; border-radius: var(--radius-control); }
@@ -455,13 +447,12 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 /* Live reasoning reads from its newest line: the tail stays in view as it grows. */
 .reasoning[data-live] .reasoning__body { display: flex; max-height: 132px; flex-direction: column-reverse; -webkit-mask: linear-gradient(transparent, #000 36px); mask: linear-gradient(transparent, #000 36px); }
 
-.thread-card { position: relative; padding-left: 22px; animation: rise-in var(--duration-base) var(--ease-enter) both; }
-.thread-card::before { content: ''; position: absolute; top: -10px; left: 8px; width: 10px; height: 34px; border-left: 1.5px solid var(--ghost-line-strong); border-bottom: 1.5px solid var(--ghost-line-strong); border-bottom-left-radius: 10px; }
-.thread-card > button { display: flex; width: 100%; max-width: 520px; min-width: 0; align-items: center; gap: 12px; padding: 10px 14px; border: 0; border-radius: var(--radius-card); color: var(--ghost-ink); background: var(--ghost-surface); box-shadow: var(--shadow-card); text-align: left; font: inherit; cursor: pointer; transition: box-shadow var(--duration-fast) ease, transform var(--duration-fast) var(--ease-spring); }
-.thread-card > button:hover { box-shadow: var(--shadow-raised); transform: translateY(-1px); }
-.thread-card > button:active { transform: scale(.99); }
+.thread-card { position: relative; padding-inline-start: var(--ghost-space-4); }
+.thread-card::before { content: ''; position: absolute; top: -8px; inset-inline-start: 2px; width: 10px; height: 30px; border-inline-start: 1px solid var(--ghost-line-strong); border-bottom: 1px solid var(--ghost-line-strong); border-end-start-radius: var(--radius-chip); }
+.thread-card > button { display: flex; width: 100%; max-width: 520px; min-width: 0; align-items: center; gap: var(--ghost-space-2); padding: 8px 12px; border: 1px solid var(--ghost-line); border-radius: var(--radius-control); color: var(--ghost-ink); background: var(--ghost-surface); text-align: left; font: inherit; cursor: pointer; }
+.thread-card > button:hover { background: var(--ghost-hover); }
 /* A settled thread folds to a quiet line: the branch mark remains, the card itself steps back. */
-.thread-card[data-settled] > button { padding-block: 6px; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: none; box-shadow: none; font-weight: 450; }
+.thread-card[data-settled] > button { padding-block: 6px; border-color: transparent; color: var(--ghost-ink2); background: none; font-weight: 450; }
 .thread-card[data-settled] > button:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
 .thread-card[data-settled]::before { border-color: var(--ghost-line); }
 .thread-card__copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
@@ -476,17 +467,19 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 /* Context menus open from the pointer with a short scale-in. */
 .ghost-context-menu[data-state="open"] { animation: pop-in 130ms var(--ease-enter); }
 .ghost-context-menu[data-state="closed"] { animation: fade-in 90ms ease-in reverse; }
-.chat-stop { display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: var(--radius-pill); color: var(--ghost-ink); background: var(--ghost-hover2); cursor: pointer; }
+.chat-stop { display: grid; place-items: center; border: 0; color: var(--ghost-ink); background: var(--ghost-hover2); cursor: pointer; }
 .chat-stop:hover { background: color-mix(in srgb, var(--ghost-ink) 12%, transparent); }
 .chat-stop svg { width: 12px; height: 12px; fill: currentColor; }
 .chat-error { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 4px 6px 4px 12px; border-radius: var(--radius-card); color: var(--ghost-ink); background: var(--ghost-danger-tint); font-size: var(--text-caption); text-align: left; }
 .chat-error > svg { flex: none; color: var(--ghost-danger-ink); }
 .chat-error > span { min-width: 0; flex: 1; padding-block: 4px; overflow-wrap: anywhere; }
-.chat-empty { display: grid; justify-items: center; gap: 14px; padding: clamp(32px, 14vh, 140px) 0 24px; text-align: center; animation: rise-in var(--duration-slow) var(--ease-enter) both; }
-.chat-empty h2 { margin: 0; color: var(--ghost-ink); font-size: var(--text-headingLg); font-weight: 650; letter-spacing: -.028em; }
-.chat-empty__starters { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 560px; margin-top: 10px; }
-.chat-empty__starters button { max-width: 100%; padding: 8px 14px; border: 0; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: var(--ghost-surface); box-shadow: var(--shadow-btn); font: 500 var(--text-ui)/1.4 var(--font-sans); text-align: left; cursor: pointer; transition: box-shadow var(--duration-fast) ease, color var(--duration-fast) ease; }
-.chat-empty__starters button:hover { color: var(--ghost-ink); box-shadow: var(--shadow-raised); }
+.ghost-conversation__transcript-content:has(.chat-empty:only-child) { display: grid; min-height: 100%; align-content: center; }
+.chat-empty { width: min(100%, 21rem); margin-inline: auto; padding-block: var(--ghost-space-4); }
+.chat-empty h2 { margin: 0 0 var(--ghost-space-4); color: var(--ghost-ink); font-size: var(--text-heading); font-weight: 650; letter-spacing: -.025em; }
+.chat-empty__starters { display: grid; gap: 4px; }
+.chat-empty__starters button { min-height: 36px; padding: 6px 12px; border: 0; border-radius: var(--radius-control); color: var(--ghost-ink2); background: var(--ghost-hover); font: 500 var(--text-ui)/1.4 var(--font-sans); text-align: start; cursor: pointer; }
+.chat-empty__starters button:hover { color: var(--ghost-ink); background: var(--ghost-hover2); }
+.chat-empty__starters button:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
 .chat-loading { display: flex; justify-content: center; gap: 6px; padding: 48px 0; }
 .chat-loading > span:not(.sr-only) { width: 6px; height: 6px; border-radius: 50%; background: var(--ghost-ink3); animation: island-breathe 1.2s ease-in-out infinite; }
 .chat-loading > span:nth-child(2) { animation-delay: .15s; }
@@ -507,7 +500,7 @@ details.transcript-event[open] { background: var(--ghost-hover); }
 .transcript-event__detail { max-height: 280px; margin: 0 10px; padding: 8px 0 10px; overflow: auto; border-top: 1px solid var(--ghost-line); color: var(--ghost-ink3); white-space: pre-wrap; overflow-wrap: anywhere; animation: fade-in var(--duration-base) var(--ease-enter); }
 
 /* A thread opens beside the conversation on wide sheets and over it on narrow ones. */
-.chat-layout { --thread-w: clamp(340px, 42cqi, 440px); position: relative; display: flex; height: 100%; min-height: 0; width: 100%; min-width: 0; container-type: inline-size; }
+.chat-layout { --thread-w: clamp(340px, 42cqi, 440px); --chat-dock-gap: var(--ghost-space-3); position: relative; display: flex; height: 100%; min-height: 0; width: 100%; min-width: 0; container-type: inline-size; }
 .chat-layout > .ghost-conversation { flex: 1; min-width: 0; animation: fade-in var(--duration-base) ease both; }
 /* The panel opens by growing its width, so the conversation eases aside instead of jumping; its content
    keeps its final width and slides in behind the edge. Closing plays the same in reverse. */
