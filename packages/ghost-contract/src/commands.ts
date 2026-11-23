@@ -7,6 +7,7 @@ import { CodingPrefs } from "./coding.ts";
 import {
   ADAPTATION_MAX_CHARS,
   ApprovalPolicy,
+  CallEngine,
   Limits,
   DocRef, DocRefs, ModelSlot, SlotName, Scope,
   MAX_WORK_BUDGET_MINUTES,
@@ -46,6 +47,8 @@ export const Command = Type.Union([
     text: Text(32768),
     attachments: Type.Optional(Type.Array(Type.Union([ArtifactRef, DocRef]), { maxItems: 32 })),
     scopeId: Type.Optional(nullable(Id)),
+    /** The call this message is spoken in; the Host checks that call is live in this conversation. */
+    callId: Type.Optional(Id),
   }),
   command("message.cancel", { conversationId: Id }),
   command("conversation.create", { ghostId: Id, title: Type.Optional(Text(256)) }),
@@ -217,6 +220,15 @@ export const Command = Type.Union([
     design: Type.Optional(nullable(Type.Record(Type.String(), Type.Unknown()))),
   }),
   command("avatar.delete", { avatarId: Id }),
+
+  // Voice calls
+  /** Start a call to a Ghost; without `engine` the owner's default engine is used. One call at a time. */
+  command("call.start", { ghostId: Id, engine: Type.Optional(CallEngine) }),
+  /** The engine connected on this client; connecting → active. Repeating it changes nothing. */
+  command("call.activate", { callId: Id }),
+  /** Hang up. Ending an ended call changes nothing. */
+  command("call.end", { callId: Id }),
+  command("voice.set", { engine: Type.Optional(CallEngine), voice: Type.Optional(Text(64)) }),
 
   // Settings and providers
   command("settings.update", { toolSearchThreshold: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })), defaultSlot: Type.Optional(nullable(SlotName)), defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), nextMessageSuggestions: Type.Optional(Type.Boolean()), suggestionModel: Type.Optional(nullable(ModelRef)), codingDelivery: Type.Optional(Type.Union([Type.Literal("steer"), Type.Literal("queue")])), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy), limits: Type.Optional(Type.Partial(Limits)) }),

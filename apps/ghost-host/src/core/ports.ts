@@ -35,6 +35,8 @@ export interface Submission {
   /** Host provenance of background payloads; never supplied by model arguments. */
   sourceConversationId?: string;
   sourceConversationIds?: string[];
+  /** The live call this owner message is spoken in; the model is told its answer is read aloud. */
+  callId?: string;
   /** Join the running turn instead of queueing a follow-up. */
   steer?: boolean;
 }

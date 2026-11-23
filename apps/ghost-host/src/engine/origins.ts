@@ -12,6 +12,8 @@ export type OriginRecord = {
   sourceConversationIds?: string[];
   /** Exact visible text; project context is only part of the model input. */
   text?: string;
+  /** The call the message was spoken in. */
+  callId?: string;
 };
 
 /**

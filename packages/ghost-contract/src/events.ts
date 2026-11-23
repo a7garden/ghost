@@ -1,6 +1,7 @@
 import { PolicyRule } from "./policy.ts";
 import { McpServer } from "./mcp.ts";
 import { ConfigRevision } from "./entities.ts";
+import { Call } from "./calls.ts";
 import { Type, type Static, type TLiteral, type TSchema } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
 import { Duty } from "./duty.ts";
@@ -58,6 +59,7 @@ export const LedgerEventData = Type.Union([
   upsert("device", "device", Device),
   removed("device.removed"),
   upsert("settings", "settings", Settings),
+  upsert("call", "call", Call),
   upsert("sandbox", "sandbox", Sandbox),
   upsert("activity", "activity", Activity),
   removed("activity.removed"),

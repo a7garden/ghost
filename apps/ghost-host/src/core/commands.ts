@@ -101,7 +101,7 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
   switch (command.type) {
     case "message.send":
       // Pi admission identity is distinct from the API mutation/receipt transaction.
-      await core.sendMessage(command.conversationId, command.text, requestId, command.attachments ?? [], command.scopeId ?? null);
+      await core.sendMessage(command.conversationId, command.text, requestId, command.attachments ?? [], command.scopeId ?? null, command.callId ?? null);
       return {};
     case "message.cancel":
       await core.effects.cancelMessage(command.conversationId, requestId);
@@ -315,6 +315,21 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
   const configuration = configurationCommand(core, command);
   if (configuration !== undefined) return configuration;
   switch (command.type) {
+    case "call.start":
+      return { callId: core.calls.start(command.ghostId, command.engine).id };
+
+    case "call.activate":
+      core.calls.activate(command.callId);
+      return {};
+
+    case "call.end":
+      core.calls.end(command.callId, "hangup");
+      return {};
+
+    case "voice.set":
+      core.calls.setVoice({ ...(command.engine === undefined ? {} : { engine: command.engine }), ...(command.voice === undefined ? {} : { voice: command.voice }) });
+      ledger.emit({ type: "settings", settings: settingsView(core) });
+      return {};
 
     case "conversation.create":
       return { conversationId: core.createDirectConversation(command.ghostId, command.title).id };

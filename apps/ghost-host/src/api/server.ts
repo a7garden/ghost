@@ -504,6 +504,10 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (pathname === "/api/vault" || pathname.startsWith("/api/vault/")) return serveVault(request, url, core, vault);
     if (pathname.startsWith("/api/browser/")) return serveBrowser(request, url, core, browser, () => viaEdge || authenticate(request) !== null);
     if (pathname.startsWith("/api/mail/")) return serveMail(request, url, deps.mail ?? null);
+    if (pathname.startsWith("/api/calls/")) {
+      try { return await core.calls.serve(request, url, access) ?? error("not_found", "not found", 404); }
+      catch (caught) { return failure(caught); }
+    }
     if (pathname.startsWith("/api/memory/")) {
       try {
         return await serveMemory(request, url, core, memory, memoryDreams, access);

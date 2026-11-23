@@ -9,6 +9,7 @@ export * from "./duty.ts";
 export * from "./coding.ts";
 export * from "./coding-run.ts";
 export * from "./goals.ts";
+export * from "./calls.ts";
 export * from "./review.ts";
 export * from "./memory.ts";
 export * from "./policy.ts";

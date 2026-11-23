@@ -20,6 +20,7 @@ import { Adaptations } from "./adaptations.ts";
 import { DutyClock } from "./duty.ts";
 import { Team } from "./team.ts";
 import { Goals } from "./goals.ts";
+import { Calls } from "./calls.ts";
 import type { SourceStore } from "../stores/sources.ts";
 
 export interface CoreDeps {
@@ -61,6 +62,8 @@ export class Core implements EngineEvents {
   readonly team: Team;
   /** Long-term team directions and their milestone lines. */
   readonly goals: Goals;
+  /** Voice calls: lifecycle and limits; engines register themselves. */
+  readonly calls: Calls;
   /** 출근 · 퇴근. 퇴근 중에는 Ghost 가 스스로 새 일을 시작하지 않는다. */
   readonly duty: DutyClock;
   /** Provider quota waits and deferred admissions (R1), and the repeat guard's counters (R8). */
@@ -98,6 +101,7 @@ export class Core implements EngineEvents {
     this.adaptations = new Adaptations(this);
     this.team = new Team(this);
     this.goals = new Goals(this);
+    this.calls = new Calls(this);
     this.duty = new DutyClock(this);
     this.quota = new Quota(this);
     this.repeats = new Repeats();
@@ -190,6 +194,7 @@ export class Core implements EngineEvents {
    */
   async start() {
     this.coding.recover();
+    this.calls.recover();
     this.effects.recoverInterrupted();
     this.effects.returnSelfCheckable();
     await this.quota.start();
@@ -207,6 +212,7 @@ export class Core implements EngineEvents {
   stop() {
     this.unsubscribeLedgerEvents();
     this.coding.stop();
+    this.calls.stop();
     this.quota.stop();
     this.duty.stop();
     this.schedules.stop();
@@ -323,13 +329,14 @@ export class Core implements EngineEvents {
   }
 
   /** Submit an owner message; rejects when the engine refuses it (no model, no credential). */
-  sendMessage(conversationId: string, text: string, requestId: string, attachments: (ArtifactRef | DocRef)[] = [], scopeId: string | null = null): Promise<void> {
+  sendMessage(conversationId: string, text: string, requestId: string, attachments: (ArtifactRef | DocRef)[] = [], scopeId: string | null = null, callId: string | null = null): Promise<void> {
     const conversation = this.ledger.conversation(conversationId);
     if (conversation.kind !== "direct") throw invalid("owner messages go to direct conversations; edit a Work to steer it");
     const ghost = this.ledger.ghost(conversation.ghostId);
     if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);
+    if (callId !== null) this.calls.requireLive(callId, conversationId);
     return this.run(`conversation:${conversationId}`, () =>
-      this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments: attachments.filter((ref): ref is ArtifactRef => "digest" in ref), docAttachments: attachments.filter((ref): ref is DocRef => "kind" in ref), scopeId }),
+      this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments: attachments.filter((ref): ref is ArtifactRef => "digest" in ref), docAttachments: attachments.filter((ref): ref is DocRef => "kind" in ref), scopeId, ...(callId === null ? {} : { callId }) }),
     );
   }
 

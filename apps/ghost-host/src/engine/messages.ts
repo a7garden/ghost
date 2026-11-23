@@ -28,6 +28,7 @@ export interface UserMeta {
   scopeId?: string | null;
   docAttachments?: DocRef[];
   text?: string;
+  callId?: string;
 }
 
 /** The text of a message body, whatever shape it has. */
@@ -101,6 +102,7 @@ export function toMessage(entry: EntryRecord, conversationId: string, userMeta: 
         ...((userMeta?.scopes ?? userMeta?.spaces)?.length ? { scopes: userMeta?.scopes ?? userMeta?.spaces } : {}),
         ...(userMeta?.scopeId !== undefined ? { scopeId: userMeta.scopeId } : {}),
         ...(userMeta?.docAttachments ? { docAttachments: userMeta.docAttachments } : {}),
+        ...(userMeta?.callId ? { callId: userMeta.callId } : {}),
         createdAt: message?.timestamp ?? 0,
       };
     }

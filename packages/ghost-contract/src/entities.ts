@@ -897,6 +897,18 @@ export const Scope = Type.Object({
 });
 export type Scope = Static<typeof Scope>;
 
+/** Which engine carries a call's speech: the OpenAI Live API, or the local Whisper → Ghost → TTS pipeline. */
+export const CallEngine = Type.Union([Type.Literal("realtime"), Type.Literal("local")]);
+export type CallEngine = Static<typeof CallEngine>;
+
+export const VoiceSettings = Type.Object({
+  /** Engine a call starts with. */
+  engine: CallEngine,
+  /** Speaker name for the engine; "default" lets the engine choose. */
+  voice: Type.String({ minLength: 1, maxLength: 64 }),
+});
+export type VoiceSettings = Static<typeof VoiceSettings>;
+
 export const Settings = Type.Object({
   toolSearchThreshold: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })),
   slots: Type.Optional(Type.Record(SlotName, ModelSlot)),
@@ -920,6 +932,8 @@ export const Settings = Type.Object({
   approvals: Type.Optional(ApprovalPolicy),
   /** The Host always fills every bound, from DEFAULT_LIMITS where the owner set none. */
   limits: Type.Optional(Limits),
+  /** Voice call defaults. The Host always fills it. */
+  voice: Type.Optional(VoiceSettings),
 });
 export type Settings = Static<typeof Settings>;
 
@@ -992,6 +1006,8 @@ export const Message = Type.Object({
   scopes: Type.Optional(Type.Array(Type.Object({ id: Id, name: Type.String() }), { maxItems: 8 })),
   scopeId: Type.Optional(nullable(Id)),
   docAttachments: Type.Optional(DocRefs),
+  /** Set on a user message sent during this call; the Host accepts the id only for a live call in this conversation. */
+  callId: Type.Optional(Id),
   createdAt: Timestamp,
 });
 export type Message = Static<typeof Message>;

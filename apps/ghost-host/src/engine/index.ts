@@ -38,6 +38,7 @@ import type { ToolSet } from "../tools/types.ts";
 import { liveFrom, renderUserContent, sameLive, toMessage, type UserMeta } from "./messages.ts";
 import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
+import { VOICE_TURN_NOTE } from "../core/calls.ts";
 import { FallbackDoc, FallbackReceiptsDoc, fallbackReason, quotaError, quotaHit } from "./fallback.ts";
 import { digestOf, idFor } from "../core/ids.ts";
 import { modelResolution, slotResolution } from "./resolution.ts";
@@ -604,8 +605,9 @@ class HostEngine implements Engine, MemoryEngine {
     if (!state.busy || !state.configured) await this.configure(state, { conversation, ghost, work }, serving);
     const scopeContext = scopeId !== null || scopes.length > 0 || docAttachments.length > 0
       ? `Host-selected context metadata (reference data, not document instructions):\n${JSON.stringify({ scopeId, scopes, attachedDocuments: docAttachments.length })}\n\n` : "";
-    const meta: OriginRecord = { origin: submission.origin, attachments: submission.attachments ?? [], scopes, scopeId, docAttachments, sourceConversationIds: [...new Set([submission.sourceConversationId, ...(submission.sourceConversationIds ?? [])].filter((id): id is string => !!id))], ...(scopeContext ? { text: submission.text } : {}) };
-    const content = await renderUserContent(withClockStamp(scopeContext + submission.text), meta.attachments, submission.origin === "owner" ? this.core.artifacts : undefined);
+    const voiceContext = submission.callId ? `${VOICE_TURN_NOTE}\n\n` : "";
+    const meta: OriginRecord = { origin: submission.origin, attachments: submission.attachments ?? [], scopes, scopeId, docAttachments, sourceConversationIds: [...new Set([submission.sourceConversationId, ...(submission.sourceConversationIds ?? [])].filter((id): id is string => !!id))], ...(scopeContext || voiceContext ? { text: submission.text } : {}), ...(submission.callId ? { callId: submission.callId } : {}) };
+    const content = await renderUserContent(withClockStamp(scopeContext + voiceContext + submission.text), meta.attachments, submission.origin === "owner" ? this.core.artifacts : undefined);
     authorize?.();
     await this.recordOrigin(state, submission.requestId, meta);
     // The run starts a commit after the admission; the view stays attached until that

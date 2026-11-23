@@ -6,6 +6,7 @@ import { Type, type Static } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
 import { Duty } from "./duty.ts";
 import { Goal, Milestone } from "./goals.ts";
+import { Call } from "./calls.ts";
 import {
   Adaptation,
   ArtifactRef,
@@ -88,6 +89,8 @@ export const State = Type.Object({
   /** Team goals with every milestone; the Host before goals sends neither. */
   goals: Type.Optional(Type.Array(Goal)),
   milestones: Type.Optional(Type.Array(Milestone)),
+  /** Recent voice calls, newest first; the Host before calls sends none. */
+  calls: Type.Optional(Type.Array(Call)),
 });
 export type State = Static<typeof State>;
 

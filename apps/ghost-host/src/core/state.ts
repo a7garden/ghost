@@ -38,6 +38,7 @@ export function snapshot(core: Core, access: Access): State {
     duty: core.duty.view(),
     goals: core.goals.goals(),
     milestones: core.goals.milestones(),
+    calls: core.calls.list(),
   };
 }
 

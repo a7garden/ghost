@@ -2,7 +2,7 @@ import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { DEFAULT_APPROVAL_POLICY, DEFAULT_LIMITS, DEFAULT_OWNER_LANGUAGE, type ApprovalPolicy, type Limits } from "@ghost/contract";
+import { DEFAULT_APPROVAL_POLICY, DEFAULT_LIMITS, DEFAULT_OWNER_LANGUAGE, DEFAULT_VOICE, type ApprovalPolicy, type Limits, type VoiceSettings } from "@ghost/contract";
 import type {
   ConfigRevision, DocRef, ModelSlot, PolicyRule, McpServer,
   Acceptance,
@@ -1287,6 +1287,7 @@ export class Ledger {
       slots: this.setting<Record<string, ModelSlot>>("slots", {}),
       defaultSlot: this.setting<string | null>("defaultSlot", null),
       toolSearchThreshold: this.setting<number>("toolSearchThreshold", 80),
+      voice: { ...DEFAULT_VOICE, ...this.setting<Partial<VoiceSettings>>("voice", {}) },
     };
   }
 
