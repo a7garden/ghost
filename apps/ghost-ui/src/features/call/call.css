@@ -1,0 +1,108 @@
+@layer components {
+  .chat-call[aria-disabled="true"] { opacity: .56; cursor: default; }
+
+  .voice-call-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: color-mix(in srgb, var(--ghost-page) 58%, transparent);
+  }
+  .voice-call-screen {
+    position: fixed;
+    inset: 50% auto auto 50%;
+    translate: -50% -50%;
+    z-index: 50;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    width: min(100% - 32px, 460px);
+    height: min(100dvh - 32px, 550px);
+    padding: clamp(22px, 4.5dvh, 36px) 26px 24px;
+    border-radius: var(--radius-xl);
+    background: var(--ghost-raised);
+    box-shadow: var(--shadow-overlay);
+    color: var(--ghost-ink);
+  }
+  .voice-call-screen__header { display: grid; justify-items: center; text-align: center; }
+  .voice-call-screen__minimize { position: absolute; inset: 12px 12px auto auto; }
+  .voice-call-screen__name {
+    margin: 8px 0 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    font-size: clamp(21px, 3.2vw, 26px);
+    font-weight: 620;
+    line-height: 1.2;
+  }
+  .voice-call-screen__name:focus { outline: none; }
+  .voice-call-screen__state { margin: 9px 0 0; color: var(--ghost-ink2); text-align: center; overflow-wrap: anywhere; }
+  .voice-call-screen__state[data-kind="timer"], .voice-call-capsule__state[data-kind="timer"] {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .voice-call-screen__state[data-kind="failed"], .voice-call-capsule__state[data-kind="failed"] { color: var(--ghost-danger-ink); }
+  .voice-call-screen__remote { margin: 6px 0 0; color: var(--ghost-ink3); font-size: var(--text-caption); }
+  .voice-call-screen__captions {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px 2px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .voice-call-caption { display: grid; grid-template-columns: minmax(48px, 24%) minmax(0, 1fr); align-items: baseline; gap: 12px; }
+  .voice-call-caption:first-child { margin-top: auto; }
+  .voice-call-caption > span { color: var(--ghost-ink3); font-size: var(--text-caption); text-align: right; overflow-wrap: anywhere; }
+  .voice-call-caption p { min-width: 0; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.55; }
+  .voice-call-screen__actions { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+  .voice-call-screen__actions button { min-height: 44px; min-width: 44px; border-radius: var(--radius-pill); }
+  .voice-call-screen__actions button[aria-pressed="true"] { background: var(--ghost-hover); color: var(--ghost-ink); }
+  .voice-call-screen__actions .voice-call-screen__end { min-width: 56px; }
+
+  .voice-call-capsule {
+    display: flex;
+    flex: none;
+    justify-content: center;
+    padding: 3px max(12px, env(safe-area-inset-right)) 7px max(12px, env(safe-area-inset-left));
+  }
+  .voice-call-capsule button {
+    display: flex;
+    min-width: 0;
+    max-width: min(280px, 100%);
+    min-height: 40px;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 11px 4px 7px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--ghost-raised);
+    box-shadow: var(--shadow-card);
+    color: var(--ghost-ink);
+    cursor: pointer;
+  }
+  .voice-call-capsule button:hover { background: var(--ghost-hover); }
+  .voice-call-capsule button:focus-visible, .voice-call-screen__captions:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
+  .voice-call-capsule button > :is(svg, .presence) { flex: none; }
+  .voice-call-capsule__name, .voice-call-capsule__state { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .voice-call-capsule__name { font-size: var(--text-ui); font-weight: 600; }
+  .voice-call-capsule__state { color: var(--ghost-ink2); font-size: var(--text-caption); }
+  .voice-call-capsule__state[data-kind="timer"] { flex: none; }
+
+  @media (max-width: 55.999rem) {
+    :root:not([data-desktop-shell]) .voice-call-screen {
+      inset: var(--ghost-visible-top, 0px) 0 auto;
+      translate: none;
+      width: 100%;
+      height: var(--ghost-visible-height, 100dvh);
+      border-radius: 0;
+      padding: calc(env(safe-area-inset-top) + 32px) max(22px, env(safe-area-inset-right))
+        max(24px, env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left));
+    }
+    :root:not([data-desktop-shell]) .voice-call-screen__minimize {
+      inset: calc(env(safe-area-inset-top) + 8px) max(10px, env(safe-area-inset-right)) auto auto;
+      min-width: 44px;
+      min-height: 44px;
+    }
+    :root:not([data-desktop-shell]) .voice-call-capsule { background: var(--ghost-canvas); }
+    :root:not([data-desktop-shell]) .voice-call-capsule button { min-height: 44px; }
+  }
+}

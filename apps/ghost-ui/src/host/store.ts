@@ -38,6 +38,12 @@ export function applyEvent(state: State, data: LedgerEventData): State {
       return { ...state, conversations: upsert(state.conversations, data.conversation) };
     case 'conversation.removed':
       return { ...state, conversations: remove(state.conversations, data.id) };
+    case 'call': {
+      const calls = state.calls ?? [];
+      const index = calls.findIndex(call => call.id === data.call.id);
+      const next = index < 0 ? [data.call, ...calls] : calls.map((call, at) => at === index ? data.call : call);
+      return { ...state, calls: next };
+    }
     case 'work':
       return { ...state, works: upsert(state.works, data.work) };
     case 'goal':
@@ -185,13 +191,17 @@ export class HostStore {
   /** Receive live frames of one conversation while subscribed. */
   watchConversation(id: string, listener: LiveListener): () => void {
     let set = this.liveListeners.get(id);
-    if (!set) this.liveListeners.set(id, (set = new Set()));
+    if (!set) {
+      this.liveListeners.set(id, (set = new Set()));
+      this.restart();
+    }
     set.add(listener);
-    this.restart();
     return () => {
       set.delete(listener);
-      if (set.size === 0) this.liveListeners.delete(id);
-      this.restart();
+      if (set.size === 0) {
+        this.liveListeners.delete(id);
+        this.restart();
+      }
     };
   }
 

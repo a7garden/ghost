@@ -36,6 +36,8 @@ import { detectLayout, registerHostBundle } from "./update/storage.ts";
 import { MailService } from "./integrations/mail.ts";
 import { MailWatcher } from "./integrations/mail-watch.ts";
 import { createHostMcpClients, type McpClients } from "./integrations/mcp.ts";
+import { createLiveCallEngine } from "./integrations/calls-live.ts";
+import { createLocalCallEngine, type LocalCallEngine } from "./integrations/calls-local.ts";
 
 export interface App {
   core: Core;
@@ -234,9 +236,13 @@ export async function serve(config: Config) {
   let server: { port: number; stop(): Promise<void> } | null = null;
   let push: { stop(): void } | null = null;
   let hostWatch: HostWatch | null = null;
+  let liveCalls: { stop(): void } | null = null;
+  let localCalls: LocalCallEngine | null = null;
   let updater: Updater | null = null;
   const closeServing = async () => {
     const errors: unknown[] = [];
+    try { liveCalls?.stop(); liveCalls = null; } catch (error) { errors.push(error); }
+    try { localCalls?.stop(); localCalls = null; } catch (error) { errors.push(error); }
     try { push?.stop(); push = null; } catch (error) { errors.push(error); }
     try { await hostWatch?.stop(); hostWatch = null; } catch (error) { errors.push(error); }
     try { await app.core.autonomy.stop(); } catch (error) { errors.push(error); }
@@ -254,6 +260,14 @@ export async function serve(config: Config) {
     const layout = detectLayout();
     if (layout) registerHostBundle(layout).catch((error: unknown) => log("Ghost Host 번들을 시스템에 등록하지 못했습니다.", error));
     if (app.ledger.ghosts().length === 0) app.core.createGhost({ name: "Ghost", persona: "", isDefault: true });
+    app.core.calls.register("realtime", (liveCalls = createLiveCallEngine({ core: app.core })));
+    try {
+      localCalls = createLocalCallEngine({ core: app.core, speechUrl: config.voice?.speechUrl ?? "http://127.0.0.1:62076" });
+      app.core.calls.register("local", localCalls);
+      localCalls.start();
+    } catch (error) {
+      log("로컬 음성 통화 엔진을 시작하지 못했습니다.", error);
+    }
     await app.core.start();
     const catalogChanged = () => app.ledger.tx(() => app.ledger.emit({ type: "settings", settings: settingsView(app.core) }));
     app.core.catalog.start(catalogChanged);

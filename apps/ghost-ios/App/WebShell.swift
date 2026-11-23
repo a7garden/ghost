@@ -377,6 +377,12 @@ extension ShellController: WKUIDelegate {
         }
     }
 
+    /// Microphone for Ghost calls: audio only, only from the paired Host's main frame.
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        let reported = Shell.origin(scheme: origin.protocol, host: origin.host, port: origin.port == 0 ? nil : origin.port)
+        decisionHandler(type == .microphone && frame.isMainFrame && reported == Shell.origin(connection.origin) ? .grant : .deny)
+    }
+
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo) async -> Bool {
         await withCheckedContinuation { continuation in
             let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)

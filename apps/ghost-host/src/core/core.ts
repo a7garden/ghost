@@ -336,7 +336,8 @@ export class Core implements EngineEvents {
     if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);
     if (callId !== null) this.calls.requireLive(callId, conversationId);
     return this.run(`conversation:${conversationId}`, () =>
-      this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments: attachments.filter((ref): ref is ArtifactRef => "digest" in ref), docAttachments: attachments.filter((ref): ref is DocRef => "kind" in ref), scopeId, ...(callId === null ? {} : { callId }) }),
+      // A spoken turn must still belong to a live call when the engine finally admits it, and is never quota-held past the call.
+      this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments: attachments.filter((ref): ref is ArtifactRef => "digest" in ref), docAttachments: attachments.filter((ref): ref is DocRef => "kind" in ref), scopeId, ...(callId === null ? {} : { callId }) }, callId === null ? undefined : () => void this.calls.requireLive(callId, conversationId)),
     );
   }
 

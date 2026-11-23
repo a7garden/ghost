@@ -11,7 +11,7 @@ export const CompactTitleSlot = createContext<HTMLDivElement | null>(null);
  * The window: a quiet sidebar on the page tone, the destination on an inset sheet,
  * and a title bar that carries location, the activity island and command search.
  */
-export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar, fill, commands, paletteOpen, onPaletteOpenChange, section, attentionCount, blockedAgents, navigate, hideDock, children }: {
+export function AppFrame({ desktop, macOSInset, location, island, duty, callTray, sidebar, fill, commands, paletteOpen, onPaletteOpenChange, section, attentionCount, blockedAgents, navigate, hideDock, children }: {
   /** Inside the Tauri window: draw the draggable title bar above everything. */
   desktop: boolean;
   macOSInset: number;
@@ -21,6 +21,7 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar,
   island: ReactNode;
   /** 출근 · 퇴근 원버튼. */
   duty?: ReactNode;
+  callTray?: ReactNode;
   sidebar: ReactNode;
   /** The page owns its height and scrolling (conversations, settings). */
   fill: boolean;
@@ -73,6 +74,7 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar,
             </PopoverContent>
           </Popover> : right}</div>
       </header>}
+    {callTray}
     <div className="shell-body">
       <aside className="shell-sidebar" aria-label="작업실 탐색">{sidebar}</aside>
       <main id="main-content" tabIndex={-1} className="shell-sheet" data-fill={fill || undefined}>
