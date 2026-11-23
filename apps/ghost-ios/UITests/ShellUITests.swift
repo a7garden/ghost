@@ -67,5 +67,7 @@ import XCTest
         let done = app.toolbars.buttons["완료"].exists ? app.toolbars.buttons["완료"] : app.buttons["Done"]
         if done.exists { done.tap() }
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        // The page lays itself back out without a keyboard: the composer returns to the bottom edge.
+        capture("shell-conversation-keyboard-closed", app: app)
     }
 }
