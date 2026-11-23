@@ -14,14 +14,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Work } from "@ghost/contract";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ExecutionEnv, ShellExecOptions } from "@earendil-works/pi-durable/env";
 import type { Config } from "../src/config.ts";
 import { sha256 } from "../src/core/ids.ts";
 import { CONTAINER_IMAGE, containerName, createSandbox } from "../src/sandbox/index.ts";
 import { MemoryArtifacts } from "./support.ts";
 
-const context: Context = { abortSignal: undefined, value: () => undefined, toString: () => "sandbox-test" };
+const context: Context = { abortSignal: undefined, value: () => undefined, toString: () => "sandbox-test" } as unknown as Context;
 
 function localConfig(root: string): Config {
   return {

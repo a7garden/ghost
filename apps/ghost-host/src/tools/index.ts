@@ -1,7 +1,7 @@
 import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
 import { BROWSER_TOOLS, CODE_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, HOST_TOOLS, MAIL_TOOLS, matchesToolPatterns } from "@ghost/contract";
-import type { Extension, ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { Extension, ToolExecutionApi, ToolExecutionResult, ToolPark } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
 import type { Core } from "../core/core.ts";
 import { CLOCK_INSTRUCTIONS } from "../core/clock.ts";
 import { describeWork } from "../core/works.ts";
@@ -163,22 +163,23 @@ function repeatGuard(core: Core, extension: Extension): Extension {
     ...extension,
     tools: extension.tools?.map((tool) => ({
       ...tool,
-      async execute(args: Parameters<typeof tool.execute>[0], api: ToolExecutionApi, context: Context): Promise<ToolExecutionResult> {
+      async execute(args: Parameters<typeof tool.execute>[0], api: ToolExecutionApi, context: Context): Promise<ToolExecutionResult | ToolPark> {
         const result = await tool.execute(args, api, context);
+        if (result.sleep !== undefined || result.wait !== undefined) return result;
         const conversation = core.ledger.conversationByPiId(String(api.conversationId));
-        const message = (result.content ?? []).map((part) => (part.type === "text" ? part.text : "")).join("\n").trim();
+        const message = ((result.output ?? [])).map((part) => (part.type === "text" ? part.text : "")).join("\n").trim();
         if (!conversation || !result.isError || message === "") return result;
         const count = core.repeats.record(conversation.id, tool.name, message);
         if (count === REPEAT_EXPLAIN) {
           return {
             ...result,
-            content: [{ type: "text", text: `${message}\n\n[Host] ${tool.name} refused exactly this way ${count} times: the constraint is real, and the same call will fail the same way again. ${repeatHint(message)}` }],
+            output: [{ type: "text", text: `${message}\n\n[Host] ${tool.name} refused exactly this way ${count} times: the constraint is real, and the same call will fail the same way again. ${repeatHint(message)}` }],
           };
         }
         if (count >= REPEAT_BLOCK) {
           if (conversation.workId) core.works.blockForRepeat(conversation.workId, `${tool.name} kept returning the same refusal (${firstLine(message)})`);
           return {
-            content: [{ type: "text", text: `${message}\n\n[Host] ${tool.name} refused exactly this way ${count} times, so this Work is stopped and its origin has been told. Do not retry the call; end your turn.` }],
+            output: [{ type: "text", text: `${message}\n\n[Host] ${tool.name} refused exactly this way ${count} times, so this Work is stopped and its origin has been told. Do not retry the call; end your turn.` }],
             isError: true,
             ...(conversation.workId ? { control: { terminate: true } } : {}),
           };

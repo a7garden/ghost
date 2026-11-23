@@ -19,7 +19,7 @@ import {
   type Stats,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import {
   ExecutionError,
   FileError,
@@ -37,7 +37,7 @@ import {
   type ShellExecResult,
   type TextLine,
   type TextLineReader,
-  type WatchChange,
+  type FileChange,
   type WatchTarget,
 } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
@@ -617,7 +617,7 @@ export class WorkspaceEnv extends NodeExecutionEnv {
 
   override async watch(
     targets: readonly WatchTarget[],
-    onChange: (change: WatchChange) => void,
+    onChange: (change: FileChange) => void,
     context: Context,
   ): Promise<Result<FileWatcher, FileError>> {
     const mapped: WatchTarget[] = [];

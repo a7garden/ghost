@@ -1,6 +1,7 @@
+import { defineTool } from "./define.ts";
 import { type CodingRun, ContractError, matchToolPattern, matchesToolPatterns, type BuiltinGhostTool, type Conversation, type Ghost, type Work } from "@ghost/contract";
 import { Type } from "typebox";
-import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { CommandError, forbidden, invalid, notFound } from "../core/errors.ts";
 import { NoEffect } from "../core/effects.ts";
@@ -199,7 +200,7 @@ export function requireOrigin(core: Core, scope: Scope, workId: string): Work {
   return work;
 }
 
-const errorText = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }], isError: true });
+const errorText = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }], isError: true });
 
 /** Map a refusal to an error result carrying its message. Unknown errors keep the harness's error path. */
 export function errorResult(error: unknown): ToolExecutionResult {
@@ -272,7 +273,7 @@ export function workDecideTool(core: Core) {
         }
         const next = core.works.decide(work.id, args.action, args.note);
         return {
-          content: [{ type: "text", text: `Work "${next.title}" is ${next.state}.` }],
+          output: [{ type: "text", text: `Work "${next.title}" is ${next.state}.` }],
           ...(next.state === "cancelled" ? { control: { terminate: true } } : {}),
         } satisfies ToolExecutionResult;
       } catch (error) {
@@ -308,7 +309,7 @@ export function askOwnerTool(core: Core) {
         const proposal = args.recommended ? { review: { recommend: "answer", answer: args.recommended, expiresAt: null } } : null;
         const decision = core.decisions.ask(scope.conversation.id, title, detail, options, idFor(scope.conversation.id, api.callId), proposal);
         return {
-          content: [{ type: "text", text: `The owner was asked (${decision.id}). Their answer arrives as a message.` }],
+          output: [{ type: "text", text: `The owner was asked (${decision.id}). Their answer arrives as a message.` }],
         } satisfies ToolExecutionResult;
       } catch (error) {
         return errorResult(error);

@@ -163,9 +163,9 @@ describe("toss_read tool", () => {
     h.ledger.setPiConversationId(ghost.directConversationId, "pi-toss-test");
     const extension = createTossTools(h.core, vault, port);
     const call = async (args: unknown) => {
-      const execute = extension.tools![0]!.execute as (args: unknown, api: ToolExecutionApi, context: unknown) => Promise<{ isError?: boolean; content: { text: string }[] }>;
+      const execute = extension.tools![0]!.execute as (args: unknown, api: ToolExecutionApi, context: unknown) => Promise<{ isError?: boolean; output: { text: string }[] }>;
       const result = await execute(args, { conversationId: "pi-toss-test", callId: "c", taskId: hostTaskId() } as unknown as ToolExecutionApi, {});
-      return { error: result.isError === true, text: result.content.map((part) => part.text).join("\n") };
+      return { error: result.isError === true, text: result.output.map((part) => part.text).join("\n") };
     };
     return { h, vault, ghost, call };
   }

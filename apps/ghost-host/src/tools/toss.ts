@@ -1,5 +1,6 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
-import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { CommandError, forbidden, invalid } from "../core/errors.ts";
 import { TOSS_ORIGIN, tossErrorCode, tossQuery, tossRoute, type TossCredential, type TossPort } from "../integrations/toss.ts";
@@ -15,7 +16,7 @@ Account routes (need account = accountSeq from /api/v1/accounts): /api/v1/holdin
 Other routes: /api/v1/accounts, /api/v1/prices [symbols=005930,AAPL], /api/v1/orderbook [symbol], /api/v1/trades [symbol,count], /api/v1/price-limits [symbol], /api/v1/candles [symbol,interval,count,before,adjusted], /api/v1/stocks [symbols], /api/v1/stocks/all [market,status,securityType,commonShare], /api/v1/stocks/{symbol}/(warnings|investor-trading|program-trades|short-selling|credit-trades|securities-lending), /api/v1/exchange-rate [dateTime,baseCurrency,quoteCurrency], /api/v1/market-calendar/KR|US [date], /api/v1/rankings [type,marketCountry,duration,excludeInvestmentCaution,count], /api/v1/rankings/investor-trading, /api/v1/market-indicators/prices [symbols], /api/v1/market-indicators/{symbol}/(candles|investor-trading), /api/v1/sectors, /api/v1/sectors/rankings, /api/v1/sectors/{sectorId}[/stocks|/etfs].
 query is a URL query string such as "symbols=005930,000660" (lists comma-separated). Paged results return nextCursor; pass it back as cursor.`;
 
-const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
+const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 /** Toss's own words for a refusal, without echoing anything but its error code and message. */
 function failure(status: number, body: string, retryAfter: string | null): CommandError {

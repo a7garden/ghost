@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { constants as fsConstants, createWriteStream, openSync, type WriteStream } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { userInfo } from "node:os";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import {
   ExecutionError,
   StreamDecoder,

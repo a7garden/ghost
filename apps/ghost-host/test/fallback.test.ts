@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
-import { Type, fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Harness, createRegistry, defineExtension, defineTool, type ConversationId } from "@earendil-works/pi-durable";
@@ -59,7 +60,7 @@ async function fixture(fallbacks: ModelRef[] = [backup], missing: string[] = [],
   let toolCalls = 0;
   const extension = defineExtension({ name: "ghost.fallback-test", tools: [defineTool({
     name: "count_effect", description: "Record one external effect.", parameters: Type.Object({}), replay: "unsafe",
-    execute: async () => { toolCalls++; return { content: [{ type: "text", text: "effect recorded" }] }; },
+    execute: async () => { toolCalls++; return { output: [{ type: "text", text: "effect recorded" }] }; },
   })] });
   const logs: string[] = [];
   const engine = await createEngine({

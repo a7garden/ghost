@@ -6,6 +6,7 @@ import { MEMORY_MARKER as MARKER, MemoryConversationDoc } from "./runtime.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const DreamDoc = defineDocFamily<{ piId: number | null; input: string | null }, null>({
+  checkpointWhen: () => false,
   kind: "host.memory-dream", version: 1, scope: "session", family: true,
   initial: () => ({ piId: null, input: null }),
 });

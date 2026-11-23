@@ -3,8 +3,8 @@ import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parse, SkillCatalog, type Conversation, type Ghost, type Work } from "@ghost/contract";
-import type { Context } from "@earendil-works/chord";
-import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { Config } from "../src/config.ts";
 import { CommandError } from "../src/core/errors.ts";
@@ -197,8 +197,8 @@ class TempSandbox implements SandboxEnvFactory {
 const apiOf = (piConversationId: string, callId: string): ToolExecutionApi =>
   ({ conversationId: piConversationId, taskId: `task:${callId}`, callId: callId, env: undefined, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
 
-function contentOf(result: ToolExecutionResult): string {
-  return (result.content ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");
+function contentOf(result: ToolExecutionResult | ToolPark): string {
+  return (result.output ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");
 }
 
 interface Setup {
@@ -227,7 +227,7 @@ function setup(skillsOf: (root: string) => SkillsPort | null, ghostSkills: strin
 }
 
 /** Stub of the invocation context; the tools only read `abortSignal`. */
-const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as Context;
+const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as unknown as Context;
 
 describe("skills in conversation setup", () => {
   test("Ghost skills are quoted attachment data in the Ghost's order", async () => {

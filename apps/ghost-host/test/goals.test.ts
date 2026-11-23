@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { GOAL_ADOPT, reviewOf, type Conversation, type Ghost, type Goal, type GoalProposal } from "@ghost/contract";
-import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
 import { createToolSet } from "../src/tools/index.ts";
 import { Access } from "../src/core/access.ts";
 import { execute } from "../src/core/commands.ts";
 import { harness } from "./support.ts";
 
-const context = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as Context;
-const textOf = (result: ToolExecutionResult) => (result.content ?? []).map((part) => ("text" in part ? part.text : "")).join("");
+const context = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as unknown as Context;
+const textOf = (result: ToolExecutionResult | ToolPark) => (result.output ?? []).map((part) => ("text" in part ? part.text : "")).join("");
 
 function team() {
   const h = harness();

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { CodingRun, HerdrPaneView, HerdrView } from "@ghost/contract";
 import { DEFAULT_RULES } from "../src/core/policy.ts";
@@ -101,7 +101,7 @@ function codingSetup() {
   const call = async (name: string, args: object, callId: string, conversation = "pi-coder", api?: Partial<ToolExecutionApi>) => {
     const out = await tools.find(tool => tool.name === name)!.execute(args as never,
       { conversationId: conversation, taskId: hostTaskId(), callId, output: () => {}, diagnostic: () => {}, ...api } as unknown as ToolExecutionApi, context);
-    const part = out.content?.[0];
+    const part = out.output?.[0];
     return { isError: out.isError === true, text: part?.type === "text" ? part.text : "" };
   };
   return { ...h, ghost, direct, work, run, reads, coding, call };

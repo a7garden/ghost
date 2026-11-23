@@ -1,7 +1,7 @@
 import { afterEach, expect, test, spyOn } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Extension, ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { ActivityConfig, Connection, Scope } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
@@ -206,7 +206,7 @@ test("compiled guide is readable without an external skill installation or per-G
   const ghost = f.core.createGhost({ name: "Reader", persona: "", tools: [], skills: [] });
   f.ledger.setPiConversationId(ghost.directConversationId, "501");
   const result = await call(createSkillsTools(f.core, null), "skill_read", { name: "ghost-guide", path: "SKILL.md" }, "guide");
-  expect(result.isError).toBeFalsy(); expect(JSON.stringify(result.content)).toContain("Organizing work on Ghost");
+  expect(result.isError).toBeFalsy(); expect(JSON.stringify(result.output)).toContain("Organizing work on Ghost");
 });
 
 test("quota wait, repeated failures and owner-overturned verdicts use observed transitions", async () => {

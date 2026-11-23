@@ -8,6 +8,7 @@ import { memoryModels } from "./stream.ts";
 
 export const MEMORY_MARKER = "Host memory evidence consolidation (no tools)";
 export const MemoryConversationDoc = defineDoc<{ runId: string; deadline: number; requests: number }>({
+  checkpointWhen: () => false,
   kind: "host.memory-conversation", version: 1, scope: "conversation", history: "latest", fork: "initial",
   initial: () => ({ runId: "", deadline: 0, requests: 0 }),
 });
@@ -50,15 +51,13 @@ function memoryPhase<P extends GenerationCheckpoint>(handler: GenerationPhase<P>
       stream: { ...settings.stream, maxRetries: 0, deferred: false as const },
     };
     const models = memoryModels(runtime.models, binding.deadline);
-    const bounded = new Proxy(runtime, {
-      get(target, key) {
-        if (key === "settings") return policy;
-        if (key === "models") return models;
-        const member = Reflect.get(target, key, target);
-        return typeof member === "function" ? member.bind(target) : member;
-      },
+    // Pi keys its provider-session bookkeeping on the runtime object itself, so a wrapper (a Proxy) breaks it. The runtime
+    // is one invocation's own object: shadow only its two getters for this memory phase.
+    Object.defineProperties(runtime, {
+      settings: { get: () => policy, configurable: true },
+      models: { get: () => models, configurable: true },
     });
-    await handler(task, bounded, context);
+    await handler(task, runtime, context);
   };
 }
 

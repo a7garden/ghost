@@ -1,5 +1,6 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
-import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { forbidden } from "../core/errors.ts";
 import { errorResult, requireAllowed } from "./shared.ts";
@@ -22,7 +23,7 @@ export function createSubagentTools(core: Core): Extension {
         if (!["direct", "wake", "work"].includes(scope.conversation.kind)) throw forbidden("subagent_run is available only in direct, wake and work conversations");
         if (!core.engine.runSubagent) throw forbidden("the engine does not support subagents");
         const result = await core.engine.runSubagent(scope.conversation.id, args, api, context);
-        return { content: [{ type: "text", text: result }] };
+        return { output: [{ type: "text", text: result }] };
       } catch (error) { return errorResult(error); }
     },
   })] });

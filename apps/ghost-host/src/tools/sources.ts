@@ -1,11 +1,12 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
-import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Work } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
 import { CommandError, invalid } from "../core/errors.ts";
 import { errorResult, requireAllowed, scopeOf } from "./shared.ts";
 
-const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
+const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 export const SOURCE_INSTRUCTIONS = `Sources: every web_read page gets an id like [S-0123456789]. Cite each fact with the id of the page it came from; when wording matters put the exact quote right before the id ("…" [S-…]). source_check verifies a quote against the page the Host stored; source_list shows what this conversation read. Never cite an id you did not get from web_read.`;
 

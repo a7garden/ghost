@@ -3,8 +3,8 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Conversation, Ghost } from "@ghost/contract";
-import type { Context } from "@earendil-works/chord";
-import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark } from "@earendil-works/pi-durable";
 import type { Config } from "../src/config.ts";
 import type { ReachPort, SandboxEnvFactory } from "../src/integrations/ports.ts";
 import { AgentReach, createReach } from "../src/integrations/reach.ts";
@@ -105,7 +105,7 @@ const apiOf = (piConversationId: string): ToolExecutionApi =>
 // Stub of the invocation context; the web tools only read nothing from it.
 const testContext = (): Context => ({ abortSignal: undefined }) as Context;
 
-async function call(setup: Setup, conversation: Conversation, ghost: Ghost, name: string, args: unknown): Promise<ToolExecutionResult> {
+async function call(setup: Setup, conversation: Conversation, ghost: Ghost, name: string, args: unknown): Promise<ToolExecutionResult | ToolPark> {
   for (const extension of setup.tools.extensionsFor(conversation, ghost, null)) {
     const found = extension.tools?.find((candidate) => candidate.name === name);
     if (found) return found.execute(args as never, apiOf("pi-web"), testContext());
@@ -113,8 +113,8 @@ async function call(setup: Setup, conversation: Conversation, ghost: Ghost, name
   throw new Error(`${name} is not visible`);
 }
 
-function contentOf(result: ToolExecutionResult): string {
-  return (result.content ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");
+function contentOf(result: ToolExecutionResult | ToolPark): string {
+  return (result.output ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");
 }
 
 async function argvLines(log: string): Promise<string[][]> {

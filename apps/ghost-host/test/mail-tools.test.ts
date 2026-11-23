@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { Connection } from "@ghost/contract";
 import { Access } from "../src/core/access.ts";

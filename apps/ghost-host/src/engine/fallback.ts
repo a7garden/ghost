@@ -6,6 +6,7 @@ import type { Ghost, ModelRef, Settings } from "@ghost/contract";
 
 /** A restart must not continue the same exhausted generation twice. */
 export const FallbackDoc = defineDoc({
+  checkpointWhen: () => false,
   kind: "ghost.fallback",
   version: 1,
   scope: "conversation",
@@ -16,6 +17,7 @@ export const FallbackDoc = defineDoc({
 
 /** An internal Pi input receipt follows every generation handoff without adding a transcript input. */
 export const FallbackReceiptsDoc = defineDoc<{ byInput: Record<string, { errorId: number; requestId: string; response?: { provider: string; error: string | null; taskId: number } }> }>({
+  checkpointWhen: () => false,
   kind: "ghost.fallback-receipts",
   version: 1,
   scope: "conversation",

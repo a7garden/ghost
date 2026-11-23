@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DESKTOP_TOOLS } from "@ghost/contract";
-import type { Context } from "@earendil-works/chord";
-import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark } from "@earendil-works/pi-durable";
 import { loadConfig } from "../src/config.ts";
 import { GhostControl } from "../src/integrations/desktop.ts";
 import type { DesktopPort, DesktopResult } from "../src/integrations/ports.ts";
@@ -87,11 +87,11 @@ function fixture() {
   h.ledger.tx(() => h.ledger.putGhost({ ...other, tools: [...DESKTOP_TOOLS], hostExecution: true }));
   h.ledger.setPiConversationId(other.directConversationId, "pi-other");
   let seq = 0;
-  const call = async (name: string, args: unknown = {}, pi = "pi-desktop", callId = `call-${++seq}`, abortSignal?: AbortSignal): Promise<ToolExecutionResult> => {
+  const call = async (name: string, args: unknown = {}, pi = "pi-desktop", callId = `call-${++seq}`, abortSignal?: AbortSignal): Promise<ToolExecutionResult | ToolPark> => {
     const tool = extension.tools!.find((t) => t.name === name)!;
     return tool.execute(args as never, { conversationId: pi, callId, taskId: hostTaskId() } as unknown as ToolExecutionApi, { abortSignal } as Context);
   };
-  const said = (result: ToolExecutionResult) => (result.content ?? []).map((part) => part.type === "text" ? part.text : "").join("\n");
+  const said = (result: ToolExecutionResult | ToolPark) => (result.output ?? []).map((part) => part.type === "text" ? part.text : "").join("\n");
   const ownerCall = async (name: string, args: unknown = {}, pi = "pi-desktop", callId = `owner-call-${++seq}`, abortSignal?: AbortSignal) => {
     const proposed = await call(name, args, pi, callId, abortSignal);
     const conversation = h.ledger.conversationByPiId(pi)!;
@@ -144,7 +144,7 @@ describe("PC control tools", () => {
     const f = fixture();
     const screenId = () => /screen_id (\S+):/.exec(f.said(lastScreenshot))![1]!;
     let lastScreenshot = await f.call("desktop_screenshot", { app: "TextEdit" });
-    expect(lastScreenshot.content?.some((part) => part.type === "image")).toBe(true);
+    expect(lastScreenshot.output?.some((part) => part.type === "image")).toBe(true);
     // The 400×300 image of an 800×600 window: image pixels are half a window point.
     expect(f.said(await f.ownerCall("desktop_pointer", { screen_id: screenId(), action: "double_click", x: 10, y: 20, modifiers: "cmd" }))).toBe("Pointer double_click delivered");
     expect(f.calls.filter((c) => c.argv[0] === "click").at(-1)!.args).toMatchObject({ app: "pid:10", background: true, x: 20, y: 40, click_count: 2, key: "super" });

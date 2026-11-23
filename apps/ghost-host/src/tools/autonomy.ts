@@ -1,6 +1,7 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import { AUTONOMOUS_WAKE, QUIET_REPLY } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { PLAN_MAX_MINUTES, PLAN_MIN_MINUTES } from "../core/autonomy.ts";
 import { forbidden, invalid } from "../core/errors.ts";
@@ -63,7 +64,7 @@ export function createAutonomyTools(core: Core): Extension {
           if (!Number.isFinite(at)) throw invalid("at must be an ISO 8601 time");
           const plan = await core.autonomy.plan(scope.ghost, args.ghost_id ?? scope.ghost.id, { at, intent: args.intent, watch: args.watch_scope_ids }, now);
           const who = plan.ghostId === scope.ghost.id ? "You" : core.ledger.ghost(plan.ghostId).name;
-          return { content: [{ type: "text", text: `${who} will look again at ${new Date(plan.nextAt!).toISOString()}${plan.watch.length ? `, earlier if a watched project changes` : ""}.` }] };
+          return { output: [{ type: "text", text: `${who} will look again at ${new Date(plan.nextAt!).toISOString()}${plan.watch.length ? `, earlier if a watched project changes` : ""}.` }] };
         } catch (error) {
           return errorResult(error);
         }

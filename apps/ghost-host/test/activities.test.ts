@@ -6,7 +6,7 @@ import type { CommandRequest } from "@ghost/contract";
 import { Access } from "../src/core/access.ts";
 import { execute } from "../src/core/commands.ts";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { Core } from "../src/core/core.ts";
 import type { ActivitySourceExclusion, ActivitySourcePort } from "../src/integrations/activity-sources.ts";
 import { Ledger } from "../src/ledger/ledger.ts";

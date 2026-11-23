@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
-import { Type, fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall, type FauxProviderHandle, type UserMessage } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
+import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall, type FauxProviderHandle, type UserMessage } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { defineExtension, defineTool, type LiveState } from "@earendil-works/pi-durable";
 import type { Live, Message, MessageRole } from "@ghost/contract";
@@ -30,7 +31,7 @@ const echo = defineTool({
   name: "echo",
   description: "Echo the text back.",
   parameters: Type.Object({ text: Type.String() }),
-  execute: async (args) => ({ content: [{ type: "text", text: `echo:${args.text}` }] }),
+  execute: async (args) => ({ output: [{ type: "text", text: `echo:${args.text}` }] }),
 });
 
 const extension = defineExtension({ name: "ghost.test", tools: [echo] });
@@ -843,7 +844,7 @@ for (const outcome of ["approve", "deny"] as const) {
             conversationId: conversation.id, callId: api.callId, tool: "test_approval",
             input: {}, summary: "approval", title: "Approve test action", detail: "", proposal: {},
           });
-          return { content: [{ type: "text", text: "Waiting on approval" }] };
+          return { output: [{ type: "text", text: "Waiting on approval" }] };
         },
       });
       const ext = defineExtension({ name: "ghost.approval-test", tools: [echo, ask] });

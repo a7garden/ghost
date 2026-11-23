@@ -1,13 +1,14 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import type { CodingRun, HerdrPaneView, Work } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { NoEffect } from "../core/effects.ts";
 import { errorResult, requireAllowed, requireWork } from "./shared.ts";
 import { visibleWorks } from "./direct.ts";
 import type { HerdrPort } from "../integrations/ports.ts";
 
-const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
+const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 /** Guidance for a Ghost holding the coding tools: the Ghost scopes, verifies and integrates; the coding agent, in the owner's herdr, writes the code. */
 export const CODING_INSTRUCTIONS = `Repository code is written by a coding agent running in the owner's herdr, the terminal workspace the owner codes in, not by you. code_agents says whether herdr is ready, which agents are installed, and which agents are live in the session now. For a change in a repository, run code_run in an owner-PC Work with the repository path and a task that carries what the agent lacks: the goal, files to read first, decided interfaces, protected files, observable acceptance and the narrowest check. code_run starts the agent and returns at once: herdr opens a new workspace on a new branch and git worktree, so the owner's checkout stays untouched, and the owner sees the agent working in their herdr and in the app's Coding tab. End your turn after starting; when the agent settles, its report is delivered to this Work's conversation, and while it works you can follow it with code_agents (the roster, or one pane in detail) or work_inspect. Its report is a claim: read the diff and run the project's check yourself, then integrate by the project's own rules (its AGENTS.md says whether to merge and push) and remove the worktree and branch you created once merged. To correct or extend a run, call code_run again with pane set to the run's pane so the same agent keeps its conversation and worktree instead of starting over; a run carries only a few such turns, so give each one a whole task. With pane you may also take over an idle agent pane the owner already started in herdr, when no other Work holds it: herdr did not isolate that pane, so it may be working in the owner's own checkout — name the protected files in the task and check the diff exactly where it worked. An agent waiting at a dialog waits for the owner, not for you: never answer a permission dialog for it. Do not edit repository files with write or edit, and do not write the code yourself when code_run fails; report what blocked it.`;

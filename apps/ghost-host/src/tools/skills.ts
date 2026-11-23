@@ -1,6 +1,7 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import { SkillName, type DocRef } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { forbidden } from "../core/errors.ts";
 import type { SkillsPort } from "../integrations/ports.ts";
@@ -9,7 +10,7 @@ import guide from "../guide/SKILL.md" with { type: "text" };
 
 export const GHOST_GUIDE = guide;
 
-const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
+const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 const MAX_PATH_CHARS = 512;
 

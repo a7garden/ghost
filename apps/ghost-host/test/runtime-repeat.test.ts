@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Conversation, Ghost } from "@ghost/contract";
-import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { Core } from "../src/core/core.ts";
 import type { Ledger } from "../src/ledger/ledger.ts";
@@ -45,14 +45,14 @@ function setup(): Setup {
 const apiOf = (piConversationId: string, callId: string): ToolExecutionApi =>
   ({ conversationId: piConversationId, taskId: `task:${callId}`, callId: callId, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
 
-const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as Context;
+const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as unknown as Context;
 
-async function call(tool: { execute: (args: never, api: ToolExecutionApi, context: Context) => Promise<ToolExecutionResult> }, args: unknown, api: ToolExecutionApi): Promise<ToolExecutionResult> {
+async function call(tool: { execute: (args: never, api: ToolExecutionApi, context: Context) => Promise<ToolExecutionResult | ToolPark> }, args: unknown, api: ToolExecutionApi): Promise<ToolExecutionResult | ToolPark> {
   return tool.execute(args as never, api, testContext());
 }
 
-function contentOf(result: ToolExecutionResult): string {
-  return (result.content ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");
+function contentOf(result: ToolExecutionResult | ToolPark): string {
+  return (result.output ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");
 }
 
 /** A running Work bound to a Pi conversation id the tools will see. */

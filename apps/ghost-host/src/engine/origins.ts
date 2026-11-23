@@ -26,6 +26,7 @@ export type OriginRecord = {
  * it, so a restarted host reads the same origin back.
  */
 export const OriginsDoc = defineDoc<{ byRequest: Record<string, OriginRecord> }>({
+  checkpointWhen: () => false,
   kind: "ghost.origins",
   version: 1,
   scope: "conversation",

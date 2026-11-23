@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Check as checkValue } from "typebox/value";
-import type { Context } from "@earendil-works/chord";
-import type { Extension, ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
+import type { Extension, ToolExecutionApi, ToolExecutionResult, ToolPark, ToolRegistration } from "@earendil-works/pi-durable";
 import type { Check, GhostTool, Work } from "@ghost/contract";
 import { idFor } from "../src/core/ids.ts";
 import { conflict } from "../src/core/errors.ts";
@@ -45,7 +45,7 @@ function tool(extension: Extension, name: string): ToolRegistration {
   if (!found) throw new Error(`missing tool ${name}`);
   return found;
 }
-const content = (result: ToolExecutionResult) => (result.content ?? []).map((block) => block.type === "text" ? block.text : "").join("");
+const content = (result: ToolExecutionResult | ToolPark) => (result.output ?? []).map((block) => block.type === "text" ? block.text : "").join("");
 async function call(s: Harness, work: Work, name: string, args: unknown, callId = name) {
   const conversation = s.ledger.conversation(s.ledger.work(work.id).conversationId!);
   s.ledger.setPiConversationId(conversation.id, `pi-${conversation.id}`);

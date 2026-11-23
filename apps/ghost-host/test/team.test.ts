@@ -3,8 +3,8 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { Conversation, Ghost, Work } from "@ghost/contract";
-import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
 import { execute } from "../src/core/commands.ts";
 import { Access } from "../src/core/access.ts";
 import type { Core } from "../src/core/core.ts";
@@ -16,8 +16,8 @@ import { createToolSet } from "../src/tools/index.ts";
 import { FakeEngine, harness, tempDir } from "./support.ts";
 
 const MINUTE = 60_000;
-const context = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as Context;
-const textOf = (result: ToolExecutionResult) => (result.content ?? []).map((part) => ("text" in part ? part.text : "")).join("");
+const context = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as unknown as Context;
+const textOf = (result: ToolExecutionResult | ToolPark) => (result.output ?? []).map((part) => ("text" in part ? part.text : "")).join("");
 
 const sandbox: SandboxEnvFactory = {
   envFor: async () => {
@@ -38,7 +38,7 @@ interface Fixture {
   mainDirect: Conversation;
   aliceDirect: Conversation;
   bobDirect: Conversation;
-  use: (conversation: Conversation, name: string) => (args: unknown, callId: string) => Promise<ToolExecutionResult>;
+  use: (conversation: Conversation, name: string) => (args: unknown, callId: string) => Promise<ToolExecutionResult | ToolPark>;
 }
 
 const opened: { core: Core; ledger: Ledger }[] = [];

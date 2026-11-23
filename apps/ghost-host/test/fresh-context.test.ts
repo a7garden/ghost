@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Type, fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
+import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
 import { defineExtension, defineTool, GenerationTask, hook, type Extension } from "@earendil-works/pi-durable";
@@ -61,7 +62,7 @@ async function fixture(extra?: (core: Core) => Extension[], factory?: (core: Cor
   const read = defineExtension({ name: "fixture.read", tools: [defineTool({
     name: "host_read", description: "Read fixture evidence", parameters: Type.Object({}), replay: "safe",
     async execute(_args, api) {
-      try { requireAllowed(core, api, "host_read"); reads++; return { content: [{ type: "text", text: "READ_EVIDENCE" }] }; }
+      try { requireAllowed(core, api, "host_read"); reads++; return { output: [{ type: "text", text: "READ_EVIDENCE" }] }; }
       catch (error) { return errorResult(error); }
     },
   })] });
@@ -183,7 +184,7 @@ test("a replayed helper invocation returns its recorded result", async () => {
       const host = core.ledger.conversationByPiId(String(api.conversationId))!;
       const first = await core.engine.runSubagent!(host.id, { task: "Read once", tools: [] }, api, context);
       const second = await core.engine.runSubagent!(host.id, { task: "Read once", tools: [] }, api, context);
-      return { content: [{ type: "text", text: `${first}|${second}` }] };
+      return { output: [{ type: "text", text: `${first}|${second}` }] };
     },
   })] })]);
   try {
@@ -474,7 +475,7 @@ test("wake Work management requires a trusted origin and the exact current scope
     expect(own).toMatchObject({ scopeId: "one", originConversationId: ghost.directConversationId });
     expect(() => h.core.works.createRoot({ ghostId: ghost.id, scopeId: "two", title: "Forbidden scope", brief: "No", originConversationId: wake.id })).toThrow("outside its current scope");
     const result = await list.execute({}, api, BACKGROUND_CONTEXT);
-    const content = JSON.stringify(result.content);
+    const content = JSON.stringify(result.output);
     expect(content).toContain("Visible scoped task");
     expect(content).not.toContain("Other scope hidden task");
   } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
@@ -580,7 +581,7 @@ test("queued scope metadata cannot replace active tool context, including after 
           await interrupted.promise;
         } else { resumed.resolve(); await release.promise; }
         seen.push(core.ledger.setting<{ scopeId: string }>(`context:${host.id}`, { scopeId: "missing" }).scopeId);
-        return { content: [{ type: "text", text: "Read complete" }] };
+        return { output: [{ type: "text", text: "Read complete" }] };
       },
     })] });
     return {
@@ -712,7 +713,7 @@ test("review proof follows the prepared request, not a restored phase agent or s
     name: "fixture.review-model-shift",
     hooks: [hook(GenerationTask, {
       async afterTools(_entry, _results, api) {
-        if (++rounds !== 1) return;
+        if (++rounds !== 1) return undefined;
         const conversation = core.ledger.conversationByPiId(String(api.conversationId))!;
         core.ledger.tx(() => core.ledger.putSetting("slots", { reviewer: slotB }));
         await f.engine.open({ conversation, ghost: core.ledger.ghost(conversation.ghostId), work: null });

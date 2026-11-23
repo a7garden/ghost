@@ -1,5 +1,6 @@
+import { defineTool } from "./define.ts";
 import { ContractError, INTERACTIVE_UI_TOOL, MAX_INTERACTIVE_UI_BYTES, InteractiveUi, parseInteractiveUi } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { forbidden, invalid } from "../core/errors.ts";
 import { errorResult, scopeOf } from "./shared.ts";
@@ -28,7 +29,7 @@ export function createInteractiveTools(core: Core): Extension {
           const scope = scopeOf(core, api);
           if (scope.conversation.kind !== "direct") throw forbidden("present_ui는 소유자와의 직접 대화에서만 사용할 수 있습니다.");
           const ui = parseInteractiveUi(args);
-          return { content: [{ type: "text", text: JSON.stringify(ui) }] };
+          return { output: [{ type: "text", text: JSON.stringify(ui) }] };
         } catch (error) {
           if (error instanceof ContractError) {
             return errorResult(invalid(`UI 형식을 수정한 뒤 present_ui를 다시 호출하세요: ${error.message}\n${DATA_SHAPE_RULES}`));

@@ -1,7 +1,7 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import {
   defineExtension,
-  defineTool,
   type Extension,
 } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
@@ -63,7 +63,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
                 : name === "host_nodes"
                   ? await host.nodes()
                   : await host.diskScan();
-          return { content: [{ type: "text", text: JSON.stringify(result) }] };
+          return { output: [{ type: "text", text: JSON.stringify(result) }] };
         } catch (error) {
           return errorResult(error);
         }
@@ -98,7 +98,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
                   ? await host.list(args.path)
                   : await host.read(args.path, args.offset as number | undefined, args.limit as number | undefined);
             return {
-              content: [{ type: "text", text: JSON.stringify(result) }],
+              output: [{ type: "text", text: JSON.stringify(result) }],
             };
           } catch (error) {
             return errorResult(error);
@@ -124,7 +124,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
         });
         if (codes.length === 0)
           return {
-            content: [{
+            output: [{
               type: "text",
               text: `No verification codes in the last ${withinMinutes} minutes. SMS codes need iPhone Text Message Forwarding enabled for this Mac.`,
             }],
@@ -139,7 +139,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
           const service = entry.service ? ` (${entry.service})` : "";
           return `${entry.code} — ${sender}${service} — ${localIso} — ${entry.excerpt}`;
         });
-        return { content: [{ type: "text", text: lines.join("\n") }] };
+        return { output: [{ type: "text", text: lines.join("\n") }] };
       } catch (error) {
         return errorResult(error);
       }
@@ -164,7 +164,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
         const result = await host.inspect(args, () => policyRead(core, scope.conversation.id, { tool: "host_command_propose", target: { kind: "mac", id: null }, access: "read", reversible: true, external: false, amount: null }, api));
         if (result !== null) {
           return {
-            content: [{ type: "text", text: JSON.stringify(result) }],
+            output: [{ type: "text", text: JSON.stringify(result) }],
           };
         }
         const command = host.validateCommand(args);
@@ -195,7 +195,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
           },
         });
         return {
-          content: [
+          output: [
             {
               type: "text",
               text: core.effects.proposalStatus(effect),

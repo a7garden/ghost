@@ -1,6 +1,7 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import { Command, matchesToolPatterns, parse, type GhostTool } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { configurationCommand, reviseConfiguration } from "../core/configuration.ts";
 import { planGhostConfiguration } from "../core/ghost-configuration.ts";
@@ -10,7 +11,7 @@ import { digestOf, idFor } from "../core/ids.ts";
 import { NoEffect } from "../core/effects.ts";
 import { errorResult, requireAllowed } from "./shared.ts";
 
-const text = (value: string): ToolExecutionResult => ({ content: [{ type: "text", text: value }] });
+const text = (value: string): ToolExecutionResult => ({ output: [{ type: "text", text: value }] });
 const CONFIG_COMMANDS = ["scope.create", "scope.update", "scope.attach", "scope.delete", "slot.set", "slot.delete", "limits.set", "rule.create", "rule.update", "rule.delete", "mcp.create", "mcp.update", "mcp.delete", "config.revert"] as const;
 interface Proposal { command: Command; reason: string; fingerprint: string; ghostId: string; tool: string }
 

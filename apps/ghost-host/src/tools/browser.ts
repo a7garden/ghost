@@ -1,5 +1,6 @@
+import { defineTool } from "./define.ts";
 import { Type, type Static, type TSchema } from "typebox";
-import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Effect, GhostTool } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
 import { CommandError, forbidden, invalid } from "../core/errors.ts";
@@ -20,7 +21,7 @@ const secretFieldLabel: Record<VaultField, string> = {
 };
 const ref = Type.String({ pattern: "^@?e[0-9]+$", maxLength: 32 });
 const bounded = (max = 2048) => Type.String({ minLength: 1, maxLength: max });
-const text = (value: string): ToolExecutionResult => ({ content: [{ type: "text", text: value.length > 48_000 ? `${value.slice(0, 47_980)}\n[truncated]` : value }] });
+const text = (value: string): ToolExecutionResult => ({ output: [{ type: "text", text: value.length > 48_000 ? `${value.slice(0, 47_980)}\n[truncated]` : value }] });
 const sessionOf = (scope: Scope): BrowserSessionRef => ({ ghostId: scope.ghost.id, conversationId: scope.conversation.id });
 interface CardInput { item_id: string; number_ref: string; expiry_ref?: string; expiry_month_ref?: string; expiry_year_ref?: string; cvc_ref?: string; name_ref?: string }
 const CARD_REFS = { number_ref: "card_number", expiry_ref: "card_expiry", expiry_month_ref: "card_expiry_month", expiry_year_ref: "card_expiry_year", cvc_ref: "card_cvc", name_ref: "card_name" } as const;
@@ -371,7 +372,7 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
         } catch (error) {
           result = error instanceof KnownOutcome ? { ...text(error.message), isError: true } : errorResult(error);
         }
-        return notice ? { ...result, content: [{ type: "text", text: notice }, ...(result.content ?? [])] } : result;
+        return notice ? { ...result, output: [{ type: "text", text: notice }, ...((result.output ?? []))] } : result;
       },
     });
   }
@@ -415,7 +416,7 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
     tool("browser_screenshot", Type.Object({ full_page: Type.Optional(Type.Boolean()) }), false, async (a, s) => {
       const data = await command(s, ["screenshot", ...(a.full_page ? ["--full"] : [])]);
       if (!data || typeof data !== "object") throw invalid("Browser returned no screenshot");
-      if ("image" in data && typeof data.image === "string") return { content: [{ type: "image", data: data.image, mimeType: "image/png" }] };
+      if ("image" in data && typeof data.image === "string") return { output: [{ type: "image", data: data.image, mimeType: "image/png" }] };
       if ("path" in data && typeof data.path === "string") return text(`Screenshot saved at ${data.path}`);
       throw invalid("Browser returned no screenshot");
     }),

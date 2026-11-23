@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { createServer, type Server, type TLSSocket } from "node:tls";
 import { rmSync } from "node:fs";
 import type { Connection } from "@ghost/contract";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { ImapFlow } from "imapflow";
 import { SourceConnections } from "../src/integrations/activity-sources.ts";

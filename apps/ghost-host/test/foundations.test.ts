@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { BROWSER_TOOLS, type VaultItem } from "@ghost/contract";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { Core } from "../src/core/core.ts";
 import { verifyChecks } from "../src/core/verify.ts";

@@ -128,7 +128,7 @@ test("an OpenAI-compatible endpoint never expands, even on the official address"
 test("OAuth stays separated from the API-key catalog and live metadata layers over the base", async () => {
   const payload = payloadOf({
     openai: {
-      "gpt-5.3-codex-spark": entry("gpt-5.3-codex-spark", { limit: { context: 272_000, output: 128_000 } }),
+      "gpt-6.2-sol": entry("gpt-6.2-sol", { limit: { context: 272_000, output: 128_000 } }),
       "gpt-api-only": entry("gpt-api-only"),
     },
   });
@@ -136,20 +136,20 @@ test("OAuth stays separated from the API-key catalog and live metadata layers ov
   await catalog.refresh();
   const codex = providerOf({ id: "codex", kind: "openai", models: [{ id: "team-model", name: "Team Model" }] });
   const fallback = catalog.modelsFor(codex, "oauth");
-  expect(fallback.find((model) => model.id === "gpt-5.3-codex-spark")).toMatchObject({ contextWindow: 272_000, maxTokens: 128_000 });
+  expect(fallback.find((model) => model.id === "gpt-6.2-sol")).toMatchObject({ contextWindow: 272_000, maxTokens: 128_000 });
   expect(fallback.some((model) => model.id === "gpt-api-only")).toBe(false);
   expect(fallback.some((model) => model.id === "team-model")).toBe(true);
   expect(catalog.modelsFor(codex, "api_key").some((model) => model.id === "gpt-api-only")).toBe(true);
 
   const live: ModelInfo[] = [
     { id: "gpt-live", name: "Live Only", contextWindow: 100_000 },
-    { id: "gpt-5.3-codex-spark", name: "Codex Live", contextWindow: 400_000, input: ["text"] },
+    { id: "gpt-6.2-sol", name: "Codex Live", contextWindow: 400_000, input: ["text"] },
   ];
   expect(catalog.setOAuthModels("codex", live)).toBe(true);
   expect(catalog.setOAuthModels("codex", live)).toBe(false);
   const updated = catalog.modelsFor(codex, "oauth");
   expect(updated.find((model) => model.id === "gpt-live")).toEqual({ id: "gpt-live", name: "Live Only", contextWindow: 100_000 });
-  expect(updated.find((model) => model.id === "gpt-5.3-codex-spark")).toEqual({ id: "gpt-5.3-codex-spark", name: "Codex Live", contextWindow: 400_000, maxTokens: 128_000, input: ["text"] });
+  expect(updated.find((model) => model.id === "gpt-6.2-sol")).toEqual({ id: "gpt-6.2-sol", name: "Codex Live", contextWindow: 400_000, maxTokens: 128_000, input: ["text"] });
   expect(updated.some((model) => model.id === "gpt-api-only")).toBe(false);
   expect(catalog.presets.find((preset) => preset.id === "openai")?.oauthModels.some((model) => model.id === "gpt-live")).toBe(false);
   expect(catalog.setOAuthModels("OpenAI", [{ id: "x", name: "X" }])).toBe(false);

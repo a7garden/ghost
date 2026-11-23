@@ -1,14 +1,15 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import type { Acceptance, Ghost, Work, WorkDetail } from "@ghost/contract";
 import { ExecutionTarget } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { forbidden, invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
 import { workDetail } from "../core/state.ts";
 import { askOwnerTool, describeCodingRuns, describeWorkLine, errorResult, firstLine, requireAllowed, requireOrigin, workDecideTool, type Scope } from "./shared.ts";
 
-const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
+const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 /** The caller is the current active main Ghost, resolved at execution; a former main loses the role at once. */
 function isCurrentMain(scope: Scope): boolean {

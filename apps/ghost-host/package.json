@@ -13,9 +13,9 @@
     "build": "bun build src/main.ts --compile --outfile dist/ghost"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.1.0",
-    "@earendil-works/pi-ai": "1.1.0",
-    "@earendil-works/pi-durable": "1.1.0",
+    "@earendil-works/chord": "1.6.0",
+    "@earendil-works/pi-ai": "1.6.0",
+    "@earendil-works/pi-durable": "1.6.0",
     "@ghost/contract": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.2",
     "imapflow": "2.11.0",

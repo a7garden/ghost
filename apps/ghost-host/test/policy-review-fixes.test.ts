@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { CAPABILITY_GRANT, type HerdrPaneView, type PolicyRule } from "@ghost/contract";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { Core } from "../src/core/core.ts";
 import type { Ledger } from "../src/ledger/ledger.ts";
@@ -870,7 +870,7 @@ async function codingFixture(options: { installed?: ("omp" | "claude" | "codex")
   const call = async (name: string, args: object, callId: string) => {
     const out = await tools.find((tool) => tool.name === name)!.execute(args as never,
       { conversationId: "scoped-host-pi", taskId: `task:${callId}`, callId, env: s.env, output: () => {}, diagnostic: () => {} } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
-    const part = out.content?.[0];
+    const part = out.output?.[0];
     return { isError: out.isError === true, text: part?.type === "text" ? part.text : "" };
   };
   /** The agent answers: every pane herdr shows goes from working to done. */

@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, spyOn, test } from "bun:test";
-import { Type, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
+import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
@@ -394,7 +395,7 @@ test("queued inputs and a separate scheduled wake are published and indexed with
     h.ledger.putSetting("defaultModel", { provider: "faux", model: "faux-1" });
   });
   h.core.secrets.put("faux", "test-key");
-  const echo = defineExtension({ name: "memory.test", tools: [defineTool({ name: "echo", description: "Echo.", parameters: Type.Object({ text: Type.String() }), execute: async (args) => ({ content: [{ type: "text", text: args.text }] }) })] });
+  const echo = defineExtension({ name: "memory.test", tools: [defineTool({ name: "echo", description: "Echo.", parameters: Type.Object({ text: Type.String() }), execute: async (args) => ({ output: [{ type: "text", text: args.text }] }) })] });
   const logs: string[] = [];
   const engine = await createEngine({
     core: h.core, storagePath: join(f.root, "pi.db"), memory: f.memory, models, log: (message, detail) => logs.push(`${message} ${detail}`),

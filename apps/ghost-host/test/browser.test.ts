@@ -3,7 +3,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSy
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { BROWSER_TOOLS, VaultItem, parse } from "@ghost/contract";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { AgentBrowser, createBrowser } from "../src/integrations/browser.ts";
 import { serveBrowser } from "../src/api/browser.ts";
@@ -464,7 +464,7 @@ obscuraTest("isolated Obscura: CDP discovery and the WebSocket both require the 
       const card = vault.create({ kind: "card", title: "Native card fixture", origin: "https://example.com", card: { number: "4242424242424242", expiry: "12/29", cvc: "679", name: "수용 전용" }, ghostIds: [f.ghost.id] });
       const listed = await call("vault_list", { kind: "contact" });
       expect(listed.isError).toBeFalsy();
-      const metadata = listed.content!.flatMap((entry) => entry.type === "text" ? entry.text.split("\n").map((line) => parse(VaultItem, JSON.parse(line))) : []);
+      const metadata = listed.output!.flatMap((entry) => entry.type === "text" ? entry.text.split("\n").map((line) => parse(VaultItem, JSON.parse(line))) : []);
       const shared = metadata.find((item) => item.id === person.id)!.contact!;
       expect(shared).toEqual(contact);
       expect((await call("browser_open", { url: "https://example.com", engine: "chrome" })).isError).toBeFalsy();
@@ -487,7 +487,7 @@ obscuraTest("isolated Obscura: CDP discovery and the WebSocket both require the 
         const value = shared[key];
         if (typeof value !== "string") throw new Error(`Vault contact lacks ${key}`);
         const filled = await call("browser_fill", { ref: field(refs, labels[key]), text: value });
-        expect(filled.isError, `contact field ${key}: ${JSON.stringify(filled.content)}`).toBeFalsy();
+        expect(filled.isError, `contact field ${key}: ${JSON.stringify(filled.output)}`).toBeFalsy();
         expected[key] = value;
         // Every insertion must leave all other fields (including earlier fills) exact.
         expect(await evaluate(`Object.fromEntries([...document.querySelectorAll('input')].map(e => [e.id,e.value]))`)).toEqual(expected);
@@ -566,7 +566,7 @@ describe("browser tools", () => {
     try {
       for (const [name, args] of [["browser_open", { url: "https://example.com/" }], ["browser_snapshot", { interactive: true, selector: "main" }], ["browser_read", { ref: "@e1" }], ["browser_scroll", { direction: "down" }], ["browser_navigate", { action: "back" }], ["browser_tabs", { action: "list" }], ["browser_tabs", { action: "switch", index: 0 }], ["browser_wait", { text: "ready" }]] as const) expect((await f.call(name, args)).isError).toBeFalsy();
       expect(f.ledger.db.query("SELECT count(*) AS n FROM effects").get()).toEqual({ n: 0 });
-      const screenshot = await f.call("browser_screenshot", { full_page: true }); expect(screenshot.content?.[0]?.type).toBe("image");
+      const screenshot = await f.call("browser_screenshot", { full_page: true }); expect(screenshot.output?.[0]?.type).toBe("image");
       await f.call("browser_snapshot");
       for (const [name, args] of [["browser_click", { ref: "@e1" }], ["browser_fill", { ref: "@e1", text: "hello" }], ["browser_type", { ref: "@e1", text: "there" }], ["browser_press", { key: "Enter" }], ["browser_select", { ref: "@e1", values: ["a", "b"] }], ["browser_check", { ref: "@e1", checked: false }], ["browser_tabs", { action: "new", url: "https://example.com/" }], ["browser_tabs", { action: "close", index: 0 }]] as const) {
         expect((await f.call(name, args)).isError).toBeFalsy();

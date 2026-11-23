@@ -1,6 +1,7 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
-import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import { defineExtension, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
 import type { Core } from "../core/core.ts";
 import { CommandError, conflict, invalid, notFound } from "../core/errors.ts";
 import type { WorkQuestion } from "../ledger/ledger.ts";
@@ -9,7 +10,7 @@ import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import { errorResult, requireReview, scopeOf } from "./shared.ts";
 import { runShell } from "./work.ts";
 import { join } from "node:path";
-const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
+const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 /** Bytes of artifact text returned per read. */
 const READ_WINDOW = 64 * 1024;
@@ -224,7 +225,7 @@ export function createReviewTools(core: Core, sandbox?: Pick<SandboxEnvFactory, 
           at: Date.now(),
         });
         return {
-          content: [{ type: "text", text: `Verdict recorded: the Work "${next.title}" is ${next.state}.` }],
+          output: [{ type: "text", text: `Verdict recorded: the Work "${next.title}" is ${next.state}.` }],
           control: { terminate: true },
         };
       } catch (error) {

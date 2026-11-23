@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ArtifactRef, Conversation, Ghost, UiBlock, Work } from "@ghost/contract";
 import { parseInteractiveUi, readInteractiveUi } from "@ghost/contract";
-import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { ArtifactStore } from "../src/core/ports.ts";
 import type { Core } from "../src/core/core.ts";
@@ -99,14 +99,14 @@ const apiOf = (piConversationId: string, callId: string, env: unknown = undefine
   ({ conversationId: piConversationId, taskId: `task:${callId}`, callId: callId, env, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
 
 // Stub of the invocation context; the tools only read `abortSignal`.
-const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as Context;
+const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as unknown as Context;
 
-async function call(tool: Awaited<ReturnType<typeof toolOf>>, args: unknown, api: ToolExecutionApi): Promise<ToolExecutionResult> {
+async function call(tool: Awaited<ReturnType<typeof toolOf>>, args: unknown, api: ToolExecutionApi): Promise<ToolExecutionResult | ToolPark> {
   return tool.execute(args as never, api, testContext());
 }
 
-function contentOf(result: ToolExecutionResult): string {
-  return (result.content ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");
+function contentOf(result: ToolExecutionResult | ToolPark): string {
+  return (result.output ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");
 }
 
 /** Bind a conversation to the Pi id the tools will see. */
@@ -306,7 +306,7 @@ describe("tools", () => {
     const tool = toolOf(s, s.direct, s.ghost, "work_create");
     const refused = await call(tool, { title: "Own", brief: "Do it", initiative: true, execution: { kind: "host", cwd: "/tmp" } }, apiOf(pi, "call-1"));
     expect(refused.isError).toBe(true);
-    expect(JSON.stringify(refused.content)).toContain("on your own judgment");
+    expect(JSON.stringify(refused.output)).toContain("on your own judgment");
     expect(s.ledger.worksForState().map((work) => work.title)).not.toContain("Own");
     const research = await call(tool, { title: "Research", brief: "Read", initiative: true }, apiOf(pi, "call-2"));
     expect(research.isError).toBeFalsy();
@@ -318,7 +318,7 @@ describe("tools", () => {
     const tool = toolOf(s, s.direct, s.ghost, "work_create");
     const own = await call(tool, { title: "Own", brief: "Read", initiative: true }, apiOf(pi, "call-1"));
     expect(own.isError).toBe(true);
-    expect(JSON.stringify(own.content)).toContain("propose a goal");
+    expect(JSON.stringify(own.output)).toContain("propose a goal");
     const asked = await call(tool, { title: "Asked", brief: "Do it" }, apiOf(pi, "call-2"));
     expect(asked.isError).toBeFalsy();
     expect(s.ledger.worksForState().map((work) => work.title)).toEqual(["Asked"]);

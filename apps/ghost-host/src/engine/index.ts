@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { AttachedReplicatedState, Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, Models, MutableModels } from "@earendil-works/pi-ai";
 import {
@@ -15,7 +15,9 @@ import {
   UserEntry,
   type Conversation as PiConversation,
   type ConversationId,
+  type CommitObservation,
   type ConversationView,
+  type ConversationWatch,
   type EntryId,
   type HarnessSettings,
   type EntryRecord,
@@ -87,8 +89,7 @@ interface ConversationState {
   aborted: boolean;
   live: Live;
   listeners: Set<(event: LiveEvent) => void>;
-  view?: AttachedReplicatedState<ConversationView>;
-  stopView?: () => void;
+  view?: ConversationWatch;
   /** Serializes the mapping of committed entries into messages. */
   dispatch: Promise<void>;
   /** Origins of the inputs this process submitted, by request id. */
@@ -144,7 +145,7 @@ class HostEngine implements Engine, MemoryEngine {
   /** Listeners that arrived before the conversation was opened. */
   private readonly pendingListeners = new Map<string, Set<(event: LiveEvent) => void>>();
   private readonly unsubscribeLedger: () => void;
-  private readonly unsubscribeCommits: () => void;
+  private readonly commits: CommitObservation;
   private readonly memory?: MemoryStore;
   private readonly memoryCatchups = new Map<string, Promise<void>>();
   private readonly memoryReady = new Set<string>();
@@ -233,6 +234,7 @@ class HostEngine implements Engine, MemoryEngine {
         afterTools: async (_assistant, _results, api) => {
           const state = this.byPiId.get(api.conversationId);
           if (state && this.core.ledger.conversation(state.hostId).kind === "direct") await this.compactDirect(state);
+          return undefined;
         },
       }), hook(ToolTask, {
         beforeTool: async (call, api) => {
@@ -264,7 +266,7 @@ class HostEngine implements Engine, MemoryEngine {
       if (event.data.type === "settings") this.rebuildModels();
     });
     try {
-      this.unsubscribeCommits = this.harness.subscribeCommits((publication) => {
+      this.commits = this.harness.observeCommits({ end: () => {}, advance: (publication) => {
         // Pi lists a commit's entries before the submissions it placed. Learning a placement
         // first lets a queued input's message carry its origin when published and indexed.
         for (const change of publication.changes) {
@@ -277,7 +279,7 @@ class HostEngine implements Engine, MemoryEngine {
           const state = this.byPiId.get(change.value.conversationId);
           if (state) this.enqueue(state, () => this.publishEntry(state, change.value));
         }
-      });
+      } });
     } catch (error) {
       this.unsubscribeLedger();
       throw error;
@@ -920,13 +922,11 @@ class HostEngine implements Engine, MemoryEngine {
     await Promise.allSettled(this.core.ledger.conversations().filter((host) => host.kind === "subagent").map(async (host) => (await this.stateFor(host.id))?.pi.abort(ctx)));
     await Promise.allSettled([...this.memoryCatchups.values(), this.memoryRepair, this.metricCatchup, ...this.toolLoads.values()]);
     this.unsubscribeLedger();
-    this.unsubscribeCommits();
+    this.commits.detach();
     await Promise.allSettled([...this.states.values()].map((state) => state.dispatch));
     for (const state of this.states.values()) {
-      state.stopView?.();
-      state.view?.dispose();
+      void state.view?.stop();
       state.view = undefined;
-      state.stopView = undefined;
     }
     this.states.clear();
     this.byPiId.clear();
@@ -1004,18 +1004,18 @@ class HostEngine implements Engine, MemoryEngine {
   /** Watch one conversation's committed state. Cheap: one view per conversation. */
   private async attachView(state: ConversationState): Promise<void> {
     if (state.view) return;
-    const view = await state.pi.viewState(ctx);
+    const view = await state.pi.watch(ctx);
     state.view = view;
-    state.stopView = view.subscribe((value) => this.onView(state, value));
+    view.start(async (call) => {
+      if (call.kind === "value") this.onView(state, call.value);
+    });
     this.onView(state, view.value);
   }
 
   /** Drop the view of a conversation that is idle and nobody watches. */
   private detachView(state: ConversationState): void {
     if (state.listeners.size > 0 || state.busy) return;
-    state.stopView?.();
-    state.stopView = undefined;
-    state.view?.dispose();
+    void state.view?.stop();
     state.view = undefined;
   }
 
@@ -1140,7 +1140,7 @@ class HostEngine implements Engine, MemoryEngine {
       const receipt = await tx.createSubmission({ type: "input", conversationId: state.piId, requestId, status: "placed", entry: input.id });
       receipts.byInput[String(input.id)] = { errorId: tail.id, requestId };
       const taskId = await tx.createTask(GenerationTask, {}, { conversationId: state.piId, ownership: { kind: "conversation" } });
-      live.run = { taskId, inputs: [receipt.id] };
+      live.run = { taskId, inputs: [receipt.id], turns: 0 };
       return { from: { provider: message.provider, model: message.model }, next, reason };
     }, ctx);
     if (!switched) return false;
@@ -1529,9 +1529,9 @@ export async function createEngine(deps: EngineDeps): Promise<Engine & MemoryEng
         },
         // Harness.open reports an internal close failure here if its own startup
         // fails. Do not mistake its original rejection for successful cleanup.
-        onReport: (error) => {
-          if (opening) startupReports.push(error);
-          else log("engine: harness report", error);
+        onReport: (report) => {
+          if (opening) startupReports.push(report.error);
+          else log("engine: harness report", report.error);
         },
         env: async ({ conversationId }) => {
           const host = core.ledger.conversationByPiId(String(conversationId));

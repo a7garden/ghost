@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Type, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import type { ToolSet } from "../src/tools/types.ts";
@@ -375,7 +376,7 @@ test("quota recovery charges the actual successor provider after the owner chang
     execute: async () => {
       started.resolve();
       await release.promise;
-      return { content: [{ type: "text", text: "Owner model change completed." }] };
+      return { output: [{ type: "text", text: "Owner model change completed." }] };
     },
   })] });
   const f = await fixture(gate);

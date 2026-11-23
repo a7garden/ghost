@@ -1,5 +1,6 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
-import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension } from "@earendil-works/pi-durable";
 import { SecureFormRequest, VaultItemKind, validate } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
 import { idFor } from "../core/ids.ts";
@@ -20,7 +21,7 @@ export function createVaultTools(core: Core, vault: Vault): Extension {
           try {
             const scope = requireAllowed(core, api, "vault_list");
             const items = vault.listFor(scope.ghost.id, { ...args, origin: args.origin === undefined ? undefined : normalizeOrigin(args.origin) });
-            return { content: [{ type: "text", text: items.length ? items.map((item) => JSON.stringify(item)).join("\n") : "No granted vault items." }] };
+            return { output: [{ type: "text", text: items.length ? items.map((item) => JSON.stringify(item)).join("\n") : "No granted vault items." }] };
           } catch (error) { return errorResult(error); }
         },
       }),
@@ -33,7 +34,7 @@ export function createVaultTools(core: Core, vault: Vault): Extension {
             const secureForm = { kind: args.kind, origin: args.origin === undefined ? null : normalizeOrigin(args.origin), title: args.title ?? null, reason: args.reason };
             if (!validate(SecureFormRequest, secureForm)) throw invalid("invalid secure form request");
             const decision = core.decisions.ask(scope.conversation.id, args.title ?? `Provide ${args.kind}`, args.reason, [], idFor(scope.conversation.id, api.callId), { secureForm });
-            return { content: [{ type: "text", text: `Secure form requested (${decision.id}). The owner answers in the vault, not chat.` }] };
+            return { output: [{ type: "text", text: `Secure form requested (${decision.id}). The owner answers in the vault, not chat.` }] };
           } catch (error) { return errorResult(error); }
         },
       }),
@@ -48,7 +49,7 @@ export function createVaultTools(core: Core, vault: Vault): Extension {
               const item = vault.generateLogin(scope.ghost.id, { ...args, origin: normalizeOrigin(args.origin) }, idFor(scope.conversation.id, api.callId));
               return JSON.stringify(item);
             });
-            return { content: [{ type: "text", text: saved }] };
+            return { output: [{ type: "text", text: saved }] };
           } catch (error) { return errorResult(error); }
         },
       }),

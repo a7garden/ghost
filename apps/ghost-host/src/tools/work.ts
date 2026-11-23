@@ -1,9 +1,10 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import { Check, DocRefs, SlotName, type Work } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
-import { createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
+import { defineExtension, defineTool as defineDurableTool, type Extension, type ToolExecutionApi, type ToolExecutionResult, type ToolPark } from "@earendil-works/pi-durable";
+import { createEditTool, createReadTool, createWriteTool, type EditToolDetails, type ReadToolDetails } from "@earendil-works/pi-durable/tools";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, readSync, realpathSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -20,7 +21,7 @@ import { policyRead, type ObservedEffect, type PolicyReceipt } from "../core/pol
 import { isReadOnlyHostCommand } from "../integrations/host.ts";
 import { parseReadShell, runReadShell } from "./read-shell.ts";
 
-const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
+const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 /** Tail of each output stream kept in the recorded ShellResult. */
 const SHELL_STDOUT_TAIL = 8_000;
@@ -343,20 +344,20 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory, host: Ho
   const baseRead = createReadTool();
 
   // `read` comes from the harness; its only host rule is the allow-list guard, applied before any file is touched.
-  const read = defineTool({
+  const read = defineDurableTool({
     ...baseRead,
     replay: "safe",
     async execute(args, api, context) {
       try {
         requireAllowed(core, api, "read");
       } catch (error) {
-        return errorResult(error);
+        return errorResult(error) as ToolExecutionResult<ReadToolDetails>;
       }
       return baseRead.execute(args, api, context);
     },
   });
 
-  const writeTool = defineTool({
+  const writeTool = defineDurableTool({
     ...write,
     replay: "unsafe",
     async execute(args, api, context) {
@@ -364,7 +365,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory, host: Ho
         const scope = requireWork(requireAllowed(core, api, "write"));
         const cwd = scope.work.execution?.kind === "host" ? await executionRoot(scope.work, sandbox, api, context) : null;
         const target = cwd === null ? null : scopeWriteTarget(core, scope.work, cwd, args.path);
-        let fresh: ToolExecutionResult | null = null;
+        let fresh: ToolExecutionResult | ToolPark | null = null;
         const recorded = await core.effects.run(
           { conversationId: scope.conversation.id, callId: api.callId, tool: "write", input: args, summary: `write ${args.path}`, ...(target ? { classification: scopeWrite(target) } : {}) },
           async () => {
@@ -377,14 +378,14 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory, host: Ho
             return `Wrote ${Buffer.byteLength(args.content)} bytes to ${args.path}.`;
           },
         );
-        return fresh ?? { content: [{ type: "text", text: recorded }] };
+        return fresh ?? { output: [{ type: "text", text: recorded }] };
       } catch (error) {
         return errorResult(error);
       }
     },
   });
 
-  const editTool = defineTool({
+  const editTool = defineDurableTool({
     ...edit,
     replay: "unsafe",
     async execute(args, api, context) {
@@ -392,7 +393,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory, host: Ho
         const scope = requireWork(requireAllowed(core, api, "edit"));
         const cwd = scope.work.execution?.kind === "host" ? await executionRoot(scope.work, sandbox, api, context) : null;
         const target = cwd === null ? null : scopeWriteTarget(core, scope.work, cwd, args.path);
-        let fresh: ToolExecutionResult | null = null;
+        let fresh: ToolExecutionResult | ToolPark | null = null;
         const recorded = await core.effects.run(
           { conversationId: scope.conversation.id, callId: api.callId, tool: "edit", input: args, summary: `edit ${args.path}`, ...(target ? { classification: scopeWrite(target) } : {}) },
           async () => {
@@ -405,9 +406,9 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory, host: Ho
             return `Edited ${args.path} (${args.edits.length} block(s)).`;
           },
         );
-        return fresh ?? { content: [{ type: "text", text: recorded }] };
+        return (fresh ?? { output: [{ type: "text", text: recorded }] }) as ToolExecutionResult<EditToolDetails>;
       } catch (error) {
-        return errorResult(error);
+        return errorResult(error) as ToolExecutionResult<EditToolDetails>;
       }
     },
   });
@@ -661,7 +662,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory, host: Ho
         });
         const work = core.works.complete(scope.work.id, { summary: args.summary, artifacts, ...(scope.work.activityId && args.no_change ? { noChange: true } : {}) });
         return {
-          content: [{ type: "text", text: `Work "${work.title}" claimed complete; it is ${work.state} until verification settles it.` }],
+          output: [{ type: "text", text: `Work "${work.title}" claimed complete; it is ${work.state} until verification settles it.` }],
           control: { terminate: true },
         };
       } catch (error) {

@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { fauxAssistantMessage, fauxProvider, fauxText, type FauxResponseFactory } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
-import type { ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark, ToolRegistration } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
 import type { Conversation, Ghost, Work } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
 import { deleteGhost, updateGhost } from "../src/core/commands.ts";
@@ -143,7 +143,7 @@ describe("delegate rules", () => {
 const apiOf = (piConversationId: string, callId: string): ToolExecutionApi =>
   ({ conversationId: piConversationId, taskId: `task:${callId}`, callId: callId, env: undefined, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
 const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as unknown as Context;
-const contentOf = (result: ToolExecutionResult): string => (result.content ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");
+const contentOf = (result: ToolExecutionResult | ToolPark): string => (result.output ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");
 const asPi = (s: Setup, conversation: Conversation, piId: string) => {
   s.ledger.setPiConversationId(conversation.id, piId);
   return piId;
@@ -155,7 +155,7 @@ function toolOf(s: Setup, conversation: Conversation, ghost: Ghost, name: string
   }
   throw new Error(`${name} is not visible to a ${conversation.kind} conversation`);
 }
-async function call(tool: ToolRegistration, args: unknown, api: ToolExecutionApi): Promise<ToolExecutionResult> {
+async function call(tool: ToolRegistration, args: unknown, api: ToolExecutionApi): Promise<ToolExecutionResult | ToolPark> {
   return tool.execute(args as never, api, testContext());
 }
 /** A root Work created through the tool, with its work conversation running. */

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
 import { MemoryStore } from "../src/stores/memory.ts";
 import { createMemoryTools } from "../src/tools/memory.ts";
 import { harness, tempDir } from "./support.ts";
@@ -20,7 +20,7 @@ function fixture() {
   };
   return { ...h, memory, ghost, invoke };
 }
-const body = (result: ToolExecutionResult) => (result.content ?? []).filter(p => p.type === "text").map(p => p.text).join("");
+const body = (result: ToolExecutionResult | ToolPark) => (result.output ?? []).filter(p => p.type === "text").map(p => p.text).join("");
 
 test("a replayed replacement returns the original result without replacing twice, and conflicts on changed arguments", async () => {
   const f = fixture();

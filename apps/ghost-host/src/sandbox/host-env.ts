@@ -4,13 +4,13 @@ import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, real
 import { homedir, constants as osConstants } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import type { ExecutionTarget } from "@ghost/contract";
 import {
   ExecutionError, FileError, StreamDecoder, err, ok, toError,
   type BinaryReader, type DirReader, type FileInfo, type FileWatcher, type Result,
-  type ShellExecOptions, type ShellExecResult, type TextLineReader, type WatchChange, type WatchTarget,
+  type ShellExecOptions, type ShellExecResult, type TextLineReader, type FileChange, type WatchTarget,
 } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { ensureTempRoot, killTree, WorkspaceEnv } from "./workspace-env.ts";
@@ -287,7 +287,7 @@ export class HostExecutionEnv extends NodeExecutionEnv {
   }
 
 
-  override watch(targets: readonly WatchTarget[], onChange: (change: WatchChange) => void, context: Context): Promise<Result<FileWatcher, FileError>> {
+  override watch(targets: readonly WatchTarget[], onChange: (change: FileChange) => void, context: Context): Promise<Result<FileWatcher, FileError>> {
     const watched = this.boundary === null ? [...targets] : targets.map((target) => {
       const within = this.within(target.path, "read");
       return within instanceof FileError ? null : { ...target, path: within === null ? target.path : within.host };
@@ -303,15 +303,15 @@ export class HostExecutionEnv extends NodeExecutionEnv {
         if (permission.ok) onChange(change);
         else {
           revoked = true;
-          void watcher?.close(BACKGROUND_CONTEXT);
-          onChange({ error: permission.error });
+          void watcher?.stop(BACKGROUND_CONTEXT);
+          onChange({ kind: "failed", error: permission.error });
         }
       }, context);
       if (!opened.ok) return opened;
       watcher = opened.value;
       const current = this.authorize(stamp);
       if (!current.ok || revoked) {
-        await watcher.close(BACKGROUND_CONTEXT);
+        await watcher.stop(BACKGROUND_CONTEXT);
         return err(current.ok ? new FileError("permission_denied", "PC watch authority revoked") : current.error);
       }
       return opened;

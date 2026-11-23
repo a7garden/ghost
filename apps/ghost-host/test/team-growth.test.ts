@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { CAPABILITY_GRANT, reviewOf, type CapabilityRequest, type Conversation, type Ghost } from "@ghost/contract";
-import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
 import { createToolSet } from "../src/tools/index.ts";
 import { harness } from "./support.ts";
 
 const MINUTE = 60_000;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
-const context = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as Context;
-const textOf = (result: ToolExecutionResult) => (result.content ?? []).map((part) => ("text" in part ? part.text : "")).join("");
+const context = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as unknown as Context;
+const textOf = (result: ToolExecutionResult | ToolPark) => (result.output ?? []).map((part) => ("text" in part ? part.text : "")).join("");
 
 /** A main Ghost and a teammate, each with a direct conversation bound to a Pi id the tools resolve. */
 function team() {

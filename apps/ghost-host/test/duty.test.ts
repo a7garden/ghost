@@ -108,7 +108,7 @@ test("off duty, a Ghost cannot start new Work on its own, but owner-requested Wo
   core.duty.switch(false);
   const refused = await workCreate.execute({ title: "Self-started", brief: "B", initiative: true } as never, api("c1"), context);
   expect(refused.isError).toBe(true);
-  expect(JSON.stringify(refused.content)).toContain("off duty");
+  expect(JSON.stringify(refused.output)).toContain("off duty");
   const asked = await workCreate.execute({ title: "Owner asked", brief: "B" } as never, api("c2"), context);
   expect(asked.isError).toBeFalsy();
   expect(ledger.worksForState().map((work) => work.title)).toEqual(["Owner asked"]);

@@ -1,6 +1,7 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import { ApiConnectionConfig, ConnectionConfig, ConnectionIconUrl, GitConnectionConfig, MailConnectionConfig, parse, validate, type Connection, type GhostTool } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { CommandError, forbidden, invalid } from "../core/errors.ts";
 import { NoEffect } from "../core/effects.ts";
@@ -16,7 +17,7 @@ import { NotFound } from "../ledger/ledger.ts";
 
 export const CONNECTION_INSTRUCTIONS = "connection_list shows service metadata and granted API endpoints, never credentials. connection_request reads a granted API account with a base-relative path (users/me or /users/me); writes require owner approval and are never replayed. connection_register proposes API, GitHub/Gitea or mail setup using a granted vault item or browser credential field; never copy a key into tool arguments or chat. After generating a key, do not snapshot or screenshot the secret: register using a unique CSS selector for its input/textarea, or a previously known ref. Keep the issuer page open at credential_origin until approval. Host captures and redacts the credential without returning it to you. Use browser_handoff for login/SSO/2FA and vault_request if the issuer cannot expose its key in an input field. Verify API access with a read after registration; never claim authentication was checked just because registration succeeded.";
 const DAY = 86_400_000;
-const text = (value: string): ToolExecutionResult => ({ content: [{ type: "text", text: value.slice(0, 48_000) }] });
+const text = (value: string): ToolExecutionResult => ({ output: [{ type: "text", text: value.slice(0, 48_000) }] });
 const sessionOf = (scope: Scope): BrowserSessionRef => ({ ghostId: scope.ghost.id, conversationId: scope.conversation.id });
 type SecretReference = { source: "vault"; item_id: string; field: "value" | "password" }
   | { source: "browser"; ref?: string; selector?: string; credential_origin: string };

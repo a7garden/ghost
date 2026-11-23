@@ -189,7 +189,7 @@ ${htmlBody}`;
           {} as never,
         );
         expect(result.isError).toBeFalsy();
-        const text = result.content?.map(block => block.type === "text" ? block.text : "").join("");
+        const text = result.output?.map(block => block.type === "text" ? block.text : "").join("");
         expect(text).toEndWith(`\n\n${body}`);
         expect(readFileSync(join(path, locator), "utf8")).toBe(source);
       }

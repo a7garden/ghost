@@ -1,6 +1,7 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import { ADAPTATION_MAX_CHARS, Command, DESKTOP_TOOLS, DocRefs, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, parse, type Ghost } from "@ghost/contract";
-import { AssistantEntry, defineExtension, defineTool, type EntryId, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { AssistantEntry, defineExtension, type EntryId, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
 import { fallbackListFor } from "../engine/fallback.ts";
 import type { Core } from "../core/core.ts";
@@ -12,7 +13,7 @@ import { planGhostConfiguration } from "../core/ghost-configuration.ts";
 import { reviseConfiguration } from "../core/configuration.ts";
 import { NoEffect } from "../core/effects.ts";
 
-const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
+const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 /**
  * The target's full configuration, structured so the caller can inspect and edit it faithfully.

@@ -1,6 +1,7 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import { GHOST_TOOLS, matchToolPattern, matchesToolPatterns, parse, type Conversation, type Ghost, type Work, type McpServer } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { digestOf } from "../core/ids.ts";
 import { forbidden, invalid } from "../core/errors.ts";
@@ -13,7 +14,7 @@ import { errorResult, requireAllowed, scopeOf, workAllowsTool } from "./shared.t
 export const namespaceSegment = (value: string): string => encodeURIComponent(value).replace(/\./g, "%2E").replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 export const mcpToolName = (serverId: string, tool: string): string => `mcp.${namespaceSegment(serverId)}.${namespaceSegment(tool)}`;
 export const connectionToolName = (id: string): string => `conn.${namespaceSegment(id)}`;
-const text = (value: string): ToolExecutionResult => ({ content: [{ type: "text", text: value.length > 48_000 ? `${value.slice(0, 47_960)}\n[content truncated]` : value }] });
+const text = (value: string): ToolExecutionResult => ({ output: [{ type: "text", text: value.length > 48_000 ? `${value.slice(0, 47_960)}\n[content truncated]` : value }] });
 const BUILTINS: Readonly<Record<string, true>> = Object.fromEntries(GHOST_TOOLS.map(name => [name, true]));
 const CORE_TOOLS: Readonly<Record<string, true>> = Object.fromEntries(["tool_search", "complete", "ask_owner", "ask_parent", "ask_peer", "answer_question", "work_create", "work_list", "work_inspect", "work_update", "work_cancel", "delegate", "subagent_run", "skill_read", "decision_settle", "work_status", "work_decide", "self_adapt", "capability_request", "plan_next", "verdict"].map(name => [name, true]));
 interface McpInput { serverId: string; tool: string; args: Record<string, unknown>; authority: string }

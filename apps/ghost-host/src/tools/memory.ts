@@ -1,12 +1,13 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
-import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { forbidden, invalid, notFound } from "../core/errors.ts";
 import type { MemoryStore } from "../stores/memory.ts";
 import { errorResult, scopeOf } from "./shared.ts";
 import type { MemoryEngine } from "../memory/types.ts";
 
-const text = (value: unknown): ToolExecutionResult => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
+const text = (value: unknown): ToolExecutionResult => ({ output: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
 const MAX_BYTES = 32_768;
 
 /** Memory is an intrinsic Host service. Conversation and activity boundaries still apply. */

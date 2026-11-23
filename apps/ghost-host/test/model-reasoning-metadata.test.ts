@@ -159,7 +159,7 @@ test("reasoning declarations leave OpenAI, Codex, and ZAI off requests unchanged
       expect(runtime.compat).toBeUndefined();
       const payload = await requestPayload(provider, info.id, "off");
       if (transport === "zai") expect(payload.thinking).toEqual({ type: "disabled" });
-      else expect(payload.reasoning).toEqual({ effort: "none" });
+      else expect(payload.reasoning).toMatchObject({ effort: "none" });
     }
   } finally {
     await catalog.close();

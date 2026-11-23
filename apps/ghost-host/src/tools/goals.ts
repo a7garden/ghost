@@ -1,12 +1,13 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import { GOAL_SIGNAL_MAX, GOAL_TEXT_MAX, GOAL_TITLE_MAX, type Goal, type Milestone, type Ghost } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { idFor } from "../core/ids.ts";
 import { errorResult, requireAllowed } from "./shared.ts";
 import { forbidden } from "../core/errors.ts";
 
-const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
+const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 function requireGoalScope(core: Core, ghost: Ghost, scopeId: string | null | undefined) {
   if (ghost.isDefault) return;

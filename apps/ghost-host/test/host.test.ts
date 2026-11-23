@@ -247,9 +247,9 @@ describe("guarded Mac host", () => {
       const ghost = h.core.createGhost({ name: "Reader", persona: "", tools: ["host_read"] });
       h.ledger.setPiConversationId(ghost.directConversationId, "paged-read");
       const tool = createHostTools(h.core, f.host).tools!.find((tool) => tool.name === "host_read")!;
-      const invoke = tool.execute as unknown as (args: { path: string; offset?: number; limit?: number }, api: ToolExecutionApi) => Promise<{ content: { text: string }[] }>;
+      const invoke = tool.execute as unknown as (args: { path: string; offset?: number; limit?: number }, api: ToolExecutionApi) => Promise<{ output: { text: string }[] }>;
       const result = await invoke({ path, offset: 2, limit: 1 }, { conversationId: "paged-read", callId: "page", taskId: hostTaskId() } as unknown as ToolExecutionApi);
-      expect(JSON.parse(result.content[0]!.text)).toMatchObject({ text: "two\n", startLine: 2, endLine: 2, totalLines: 3, nextOffset: 3 });
+      expect(JSON.parse(result.output[0]!.text)).toMatchObject({ text: "two\n", startLine: 2, endLine: 2, totalLines: 3, nextOffset: 3 });
     } finally {
       h.ledger.close();
       rmSync(f.home, { recursive: true, force: true });

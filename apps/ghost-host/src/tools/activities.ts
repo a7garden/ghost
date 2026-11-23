@@ -1,13 +1,14 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import { ActivityConfig } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { forbidden, invalid } from "../core/errors.ts";
 import { errorResult, requireAllowed, requireWork, scopeOf } from "./shared.ts";
 import { idFor } from "../core/ids.ts";
 import { reviseConfiguration } from "../core/configuration.ts";
 
-const text = (summary: string): ToolExecutionResult => ({ content: [{ type: "text", text: summary }] });
+const text = (summary: string): ToolExecutionResult => ({ output: [{ type: "text", text: summary }] });
 
 /** Narrow account-bound tools: model input never selects credentials or a write target. */
 export function activityTools(core: Core): Extension {

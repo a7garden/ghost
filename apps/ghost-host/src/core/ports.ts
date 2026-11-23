@@ -12,7 +12,7 @@ import type {
 } from "@ghost/contract";
 import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 import type { MemoryEngine } from "../memory/types.ts";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 
 /** What the engine needs to run one conversation. Built by core from ledger rows. */

@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { budgetSpent, MAX_DEFERRED_INPUTS } from "../src/core/budget.ts";
 import { Core } from "../src/core/core.ts";
 import type { Submission, SubmissionRecovery } from "../src/core/ports.ts";

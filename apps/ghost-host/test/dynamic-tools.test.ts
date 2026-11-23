@@ -4,8 +4,8 @@ import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { GhostToolList, validate, matchesToolPatterns, type McpServer } from "@ghost/contract";
-import type { ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark, ToolRegistration } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
 import { createToolSet } from "../src/tools/index.ts";
 import { mcpToolName } from "../src/tools/dynamic.ts";
 import { requireAllowed } from "../src/tools/shared.ts";
@@ -22,8 +22,8 @@ import { connect } from "node:net";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
-const context = { abortSignal: undefined, value: () => undefined, toString: () => "test" } as Context;
-const content = (result: ToolExecutionResult) => (result.content ?? []).map(part => part.type === "text" ? part.text : "").join("\n");
+const context = { abortSignal: undefined, value: () => undefined, toString: () => "test" } as unknown as Context;
+const content = (result: ToolExecutionResult | ToolPark) => (result.output ?? []).map(part => part.type === "text" ? part.text : "").join("\n");
 const api = (callId: string, conversationId = 1) => ({ conversationId, taskId: hostTaskId(), callId, output() {}, diagnostic() {} }) as unknown as ToolExecutionApi;
 
 function setup(connectGate?: Promise<void>) {

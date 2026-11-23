@@ -1,12 +1,13 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
 import { ADAPTATION_MAX_CHARS, CAPABILITY_DECLINE, CAPABILITY_GRANT, GhostToolList, HOST_TOOLS, type CapabilityRequest, type GhostTool } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { forbidden, invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
 import { errorResult, scopeOf, type Scope } from "./shared.ts";
 
-const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
+const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 /**
  * 2026-11-10 owner decision: a Ghost shared from elsewhere meets an environment that differs a little. It does not

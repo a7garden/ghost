@@ -1,5 +1,6 @@
+import { defineTool } from "./define.ts";
 import { Type } from "typebox";
-import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
@@ -7,7 +8,7 @@ import type { DocumentsPort, PageMeta } from "../integrations/ports.ts";
 import { errorResult, firstLine, requireAllowed } from "./shared.ts";
 import { markPolicyRead, policyRead } from "../core/policy-context.ts";
 
-const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
+const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 /** Characters of a page body shown per read. */
 const READ_WINDOW = 16_384;

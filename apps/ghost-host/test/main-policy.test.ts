@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Core } from "../src/core/core.ts";
 import type { Ledger } from "../src/ledger/ledger.ts";
 import { createMainTools } from "../src/tools/main.ts";
