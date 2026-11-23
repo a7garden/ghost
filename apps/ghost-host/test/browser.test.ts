@@ -781,7 +781,7 @@ describe("browser tools", () => {
       expect((await f.call("browser_press", { key: "Enter" })).isError).toBe(true);
       expect(commands(f.root).some((argv) => argv[0] === "click" || argv[0] === "press")).toBe(false);
     } finally { await f.browser.shutdown(); }
-  }, 15_000); // 54 fake-browser spawns plus one real DNS lookup: 4.3–5.8s measured, over the 5s default.
+  }, 30_000); // 54 fake-browser spawns plus one real DNS lookup: 4.3–5.8s on a quiet Mac, 14.6s when process spawns are slow (measured 2026-11-24).
   test("approved proposals re-read role/name and refused approved fills are denied, not unknown", async () => {
     const f = fixture();
     try {
