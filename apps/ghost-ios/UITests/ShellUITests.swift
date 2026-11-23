@@ -63,9 +63,11 @@ import XCTest
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         composer.typeText("모바일에서 보내는 메시지")
         capture("shell-conversation-keyboard", app: app)
-        // The system accessory bar's Done closes the keyboard.
-        let done = app.toolbars.buttons["완료"].exists ? app.toolbars.buttons["완료"] : app.buttons["Done"]
-        if done.exists { done.tap() }
+        // No accessory bar over the keyboard; dragging the conversation down closes it.
+        XCTAssertFalse(app.toolbars.firstMatch.exists)
+        let webView = app.webViews.firstMatch
+        webView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+            .press(forDuration: 0.05, thenDragTo: webView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
         // The page lays itself back out without a keyboard: the composer returns to the bottom edge.
         capture("shell-conversation-keyboard-closed", app: app)

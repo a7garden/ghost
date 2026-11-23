@@ -24,6 +24,14 @@ export function takesText(node: unknown): boolean {
   return node.isContentEditable;
 }
 
+/** A downward drag this long, mostly vertical, is the owner pulling the keyboard away. */
+export function dragClosesKeyboard(dx: number, dy: number): boolean {
+  return dy > 24 && dy > 1.5 * Math.abs(dx);
+}
+
+/** Where a drag leaves the keyboard alone: it scrolls or selects something of its own. */
+const OWN_DRAG = '.ghost-composer, .composer-suggest, .composer-plus__menu, .xterm, .cm-editor, textarea, input, [contenteditable="true"]';
+
 /** WKWebView keeps the layout viewport behind the keyboard; size the shared frame to the visible one. */
 export function useVisibleViewport() {
   useEffect(() => {
@@ -49,12 +57,29 @@ export function useVisibleViewport() {
     window.addEventListener('resize', update);
     document.addEventListener('focusin', focus);
     document.addEventListener('focusout', focus);
+    // Pulling the page down while the keyboard is up closes it, as in Messages.
+    let drag: { x: number; y: number } | null = null;
+    const touchStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      const own = event.target instanceof Element && event.target.closest(OWN_DRAG);
+      drag = root.dataset.keyboard === 'open' && event.touches.length === 1 && touch && !own ? { x: touch.clientX, y: touch.clientY } : null;
+    };
+    const touchMove = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!drag || !touch || !dragClosesKeyboard(touch.clientX - drag.x, touch.clientY - drag.y)) return;
+      drag = null;
+      if (takesText(document.activeElement)) (document.activeElement as HTMLElement).blur();
+    };
+    document.addEventListener('touchstart', touchStart, { passive: true });
+    document.addEventListener('touchmove', touchMove, { passive: true });
     return () => {
       viewport.removeEventListener('resize', update);
       viewport.removeEventListener('scroll', update);
       window.removeEventListener('resize', update);
       document.removeEventListener('focusin', focus);
       document.removeEventListener('focusout', focus);
+      document.removeEventListener('touchstart', touchStart);
+      document.removeEventListener('touchmove', touchMove);
       root.style.removeProperty('--ghost-visible-height');
       root.style.removeProperty('--ghost-visible-top');
       delete root.dataset.keyboard;

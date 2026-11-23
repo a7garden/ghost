@@ -53,8 +53,10 @@ live in `apps/ghost-ui`; this app owns only what a web page cannot.
 - Bridge requests are honored only from the paired origin's main frame; the request set
   is closed (see `Sources/GhostMobileCore/Shell.swift` and `apps/ghost-ui/src/host/shell.ts`).
 - The page draws under the status bar and home indicator and handles safe areas and the
-  keyboard itself. The native background and status bar follow the page's resolved theme
-  so nothing flashes.
+  keyboard itself: the shell shrinks the web view with the keyboard and the page reads that as
+  keyboard-open (a focused text field in a shorter viewport). The system's ^ v ✓ accessory bar
+  is removed (`PageWebView`); a downward drag outside the composer closes the keyboard. The
+  native background and status bar follow the page's resolved theme so nothing flashes.
 - Downloads go to the share sheet. `<input type=file>` uses the system photo, camera and
   files picker.
 - Edge swipe goes back through the page's history.

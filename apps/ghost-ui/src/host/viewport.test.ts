@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { keyboardOpen } from './viewport';
+import { dragClosesKeyboard, keyboardOpen } from './viewport';
 
 describe('soft keyboard detection', () => {
   it('sees Safari, where only the visual viewport shrinks', () => {
@@ -13,5 +13,17 @@ describe('soft keyboard detection', () => {
     expect(keyboardOpen(478, 478, 874, false)).toBe(false);
     expect(keyboardOpen(780, 780, 874, true)).toBe(false);
     expect(keyboardOpen(874, 874, 874, true)).toBe(false);
+  });
+});
+
+describe('pulling the keyboard away', () => {
+  it('closes it for a long, mostly vertical drag down', () => {
+    expect(dragClosesKeyboard(4, 40)).toBe(true);
+    expect(dragClosesKeyboard(-20, 60)).toBe(true);
+  });
+  it('leaves it for a tap, a drag up or a sideways swipe', () => {
+    expect(dragClosesKeyboard(0, 12)).toBe(false);
+    expect(dragClosesKeyboard(0, -80)).toBe(false);
+    expect(dragClosesKeyboard(70, 40)).toBe(false);
   });
 });

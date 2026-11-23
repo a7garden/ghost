@@ -167,7 +167,7 @@ private struct ShellWebView: UIViewRepresentable {
         configuration.userContentController.addUserScript(WKUserScript(
             source: Shell.bootstrapScript(connection: connection, version: version),
             injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = PageWebView(frame: .zero, configuration: configuration)
         super.init()
         configuration.userContentController.addScriptMessageHandler(WeakBridge(self), contentWorld: .page, name: Shell.handlerName)
         webView.navigationDelegate = self
@@ -412,6 +412,12 @@ extension ShellController: WKDownloadDelegate {
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         downloads.removeValue(forKey: ObjectIdentifier(download))
     }
+}
+
+/// The page closes its own keyboard (drag the conversation down), so the system's ^ v ✓ bar above the
+/// keyboard only costs the composer 90pt of its room.
+private final class PageWebView: WKWebView {
+    override var inputAccessoryView: UIView? { nil }
 }
 
 /// Breaks the retain cycle between the content controller and the shell controller.
