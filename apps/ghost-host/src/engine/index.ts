@@ -62,6 +62,11 @@ const ctx = BACKGROUND_CONTEXT;
 const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
 const ORIGIN_REPAIR = "history-origins-after-placement-order";
 const DECISION_READ_TOOLS: Readonly<Record<string, true>> = { work_list: true, work_inspect: true, evidence_read: true, artifact_read: true, effect_list: true };
+/** Reasoning levels above this are not worth the silence on a phone call. */
+const VOICE_THINKING = "low";
+function voiceModel(model: ModelRef): ModelRef {
+  return model.thinking === "medium" || model.thinking === "high" ? { ...model, thinking: VOICE_THINKING } : model;
+}
 
 type ReviewRequestProof = {
   generationTaskId: string;
@@ -604,7 +609,8 @@ class HostEngine implements Engine, MemoryEngine {
       serving = next;
     }
     // A new turn always starts at the primary, not the previous turn's serving model.
-    if (!state.busy || !state.configured) await this.configure(state, { conversation, ghost, work }, serving);
+    // A spoken turn is heard, not read: its reasoning is capped so the first words are not held behind a long think.
+    if (!state.busy || !state.configured) await this.configure(state, { conversation, ghost, work }, submission.callId ? voiceModel(serving) : serving);
     const scopeContext = scopeId !== null || scopes.length > 0 || docAttachments.length > 0
       ? `Host-selected context metadata (reference data, not document instructions):\n${JSON.stringify({ scopeId, scopes, attachedDocuments: docAttachments.length })}\n\n` : "";
     const voiceContext = submission.callId ? `${voiceTurnNote(this.core.calls.find(submission.callId)?.engine)}\n\n` : "";
@@ -730,6 +736,16 @@ class HostEngine implements Engine, MemoryEngine {
       serving: null,
       hit: hit && message ? { provider: message.provider, ...hit } : null,
     };
+  }
+
+  /**
+   * Do a call's slow first-turn work while the phone is still ringing: load the conversation and, if its context is
+   * over the limit, compact it. Otherwise the summarization lands in the middle of the owner's first sentence.
+   */
+  async prepare(conversationId: string): Promise<void> {
+    const state = await this.stateFor(conversationId);
+    if (!state || state.busy || this.core.ledger.conversation(conversationId).kind !== "direct") return;
+    await this.compactDirect(state);
   }
 
   async answer(conversationId: string, requestId: string, signal: AbortSignal): Promise<string | null> {
