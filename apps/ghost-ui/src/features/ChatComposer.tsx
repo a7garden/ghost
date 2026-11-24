@@ -4,7 +4,7 @@ import type { DocRef, Ghost } from '@ghost/contract';
 import { Composer } from '../ui';
 import { ComposerPlus, type PlusAction } from '../components/composer/ComposerPlus';
 import { ComposerSuggest, type Suggestion } from '../components/composer/ComposerSuggest';
-import { NextSuggestions } from '../components/composer/NextSuggestions';
+import { NextSuggestions, useNextPick } from '../components/composer/NextSuggestions';
 import { AttachmentTray, useAttachments, type PendingAttachment } from '../components/composer/attachments';
 import { DotAvatar } from '../components/DotAvatar';
 import { ModelPicker } from '../pets/ModelPicker';
@@ -167,14 +167,10 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   const current = Math.min(active, suggestions.length - 1);
   const offered = mode === 'talk' && !draft && !running && !open && conversationId ? nextMessages : [];
   const takeNext = (text: string) => { setDraft(text); focus(); };
+  const next = useNextPick(offered, takeNext);
   const steer = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     projects.onKeyDown(event);
-    if (event.defaultPrevented) return;
-    if (event.key === 'Tab' && !event.shiftKey && !event.nativeEvent.isComposing && offered.length) {
-      event.preventDefault();
-      takeNext(offered[0]!);
-      return;
-    }
+    if (event.defaultPrevented || next.onKeyDown(event)) return;
     if (!open || event.nativeEvent.isComposing) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -205,7 +201,8 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
           {mode === 'work' && handedTo && <span className="composer-mode__to"><DotAvatar profileId={handedTo.id} tone={toneFor(handedTo.id)} size={15}/>{handedTo.name}</span>}
           <button type="button" className="composer-mode__close" aria-label="일반 메시지로" onClick={() => switchMode('talk')}><X size={11} aria-hidden="true"/></button>
         </span>
-      </div> : offered.length > 0 ? <NextSuggestions items={offered} onPick={takeNext}/> : undefined}
+      </div> : undefined}
+      ghost={offered.length > 0 ? <NextSuggestions items={offered} active={next.active} onCycle={() => next.cycle(1)} onPick={takeNext}/> : undefined}
       tray={<>{projects.chips}<DocAttachmentTray refs={returnedDocs} scopes={state?.scopes} onRemove={ref => { if (recoveredMessage) setRecoveredMessage({ ...recoveredMessage, attachments: returnedRefs.filter(item => messageAttachmentKey(item) !== messageAttachmentKey(ref)) }); }}/><AttachmentTray items={[...returnedItems, ...attachments.items]} onRemove={removeFile}/></>}
       extension={mode === 'work' ? <div className="composer-fields">
         <label className="composer-field"><span>완료 기준</span>

@@ -282,6 +282,11 @@
   transition: box-shadow var(--duration-base) ease;
 }
 .ghost-composer__surface:focus-within { box-shadow: 0 0 0 1px var(--ghost-line-strong), 0 1px 2px rgba(16, 18, 24, .04), 0 16px 40px -18px rgba(16, 18, 24, .24); }
+/* The field wraps the textarea so ghost lines can share its cell; without ghost lines it is the plain column the textarea always had. */
+.ghost-composer__field { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+.ghost-composer__field[data-ghost] { display: grid; }
+.ghost-composer__field[data-ghost] > * { grid-area: 1 / 1; min-width: 0; }
+.ghost-composer__field[data-ghost] > .ghost-composer__textarea { align-self: stretch; height: auto !important; }
 .ghost-composer__textarea {
   box-sizing: border-box; min-height: 28px; max-height: 240px; height: auto; resize: none; overflow-y: auto;
   padding: var(--composer-text-padding, 4px 0); border: 0; border-radius: 0; background: transparent; box-shadow: none;
@@ -365,7 +370,7 @@
 .chat-layout .ghost-conversation__dock > .ghost-conversation__column > .ghost-conversation__footer { flex: none; }
 .chat-layout .ghost-conversation__dock .ghost-composer { display: flex; min-height: 0; flex-direction: column; }
 .chat-layout .ghost-conversation__dock .ghost-composer__surface { min-height: 0; }
-.chat-layout .ghost-conversation__dock .ghost-composer__surface > :not(.ghost-composer__textarea, .composer-fields) { flex-shrink: 0; }
+.chat-layout .ghost-conversation__dock .ghost-composer__surface > :not(.ghost-composer__field, .composer-fields) { flex-shrink: 0; }
 .chat-layout .ghost-conversation__dock .composer-fields { min-height: 0; overflow-y: auto; }
 .ghost-conversation__dock::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px; background: linear-gradient(transparent, var(--ghost-canvas)); pointer-events: none; }
 .ghost-conversation__footer { color: var(--ghost-ink2); font-size: var(--text-caption); line-height: 1.4; text-align: center; }

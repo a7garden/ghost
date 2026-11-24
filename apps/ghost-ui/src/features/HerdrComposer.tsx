@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { Paperclip, Slash, Square } from 'lucide-react';
 import type { HerdrDelivery, HerdrSlashCommand, HerdrUpload } from '@ghost/contract';
 import { Composer, InlineError } from '../ui';
-import { NextSuggestions } from '../components/composer/NextSuggestions';
+import { NextSuggestions, useNextPick } from '../components/composer/NextSuggestions';
 import { AttachmentTray, type PendingAttachment } from '../components/composer/attachments';
 import { ComposerSuggest, type Suggestion } from '../components/composer/ComposerSuggest';
 import { HerdrModelChip, type ModelChoice } from './HerdrModel';
@@ -114,6 +114,7 @@ export function HerdrComposer({ agent, working, pending, delivery, draft, field,
     draft.setDraft(text);
     requestAnimationFrame(() => field.current?.focus({ preventScroll: true }));
   };
+  const next = useNextPick(offered, pick);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState('');
   const menuId = useId();
@@ -151,15 +152,13 @@ export function HerdrComposer({ agent, working, pending, delivery, draft, field,
         }
         return;
       }
-      if (event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && offered.length) {
-        event.preventDefault();
-        pick(offered[0]!);
-      } else if (event.key === 'Enter' && event.altKey && queueable) {
+      if (next.onKeyDown(event)) return;
+      if (event.key === 'Enter' && event.altKey && queueable) {
         event.preventDefault();
         send(other);
       }
     }}
-    header={offered.length > 0 ? <NextSuggestions items={offered} onPick={pick}/> : undefined}
+    ghost={offered.length > 0 ? <NextSuggestions items={offered} active={next.active} onCycle={() => next.cycle(1)} onPick={pick}/> : undefined}
     tray={<>
       <AttachmentTray items={draft.items} onRemove={draft.remove}/>
       {overLimit && <InlineError>파일은 {MAX_FILES}개까지 보낼 수 있습니다.</InlineError>}

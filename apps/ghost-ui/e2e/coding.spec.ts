@@ -200,7 +200,7 @@ for (const { name, width, height, touch } of sizes) {
         await fold.click();
         await expect(conversation.getByText('bun test src/auth/login.test.ts', { exact: true })).toBeVisible();
         await fold.click();
-        await expect(nextMessages(page).getByRole('button')).toHaveCount(suggested.length);
+        await expect(nextMessages(page).locator('[data-active]')).toHaveText(suggested[0]!);
         await captureCoding(page, `chat-done-${theme}-${name}.png`);
         await page.getByRole('radio', { name: '터미널', exact: true }).click();
         await expect(terminal(page)).toContainText('3 pass');
@@ -537,8 +537,8 @@ for (const { name, width, height, touch } of sizes) {
       } }, 'light');
       expect(new URL((await requested).url()).searchParams.get('pane')).toBe(pane);
       const rows = nextMessages(page);
-      await expect(rows.getByRole('listitem')).toHaveCount(2);
-      await expect(rows.getByRole('button', { name: suggested[0], exact: true })).toContainText('Tab');
+      await expect(rows.locator('[data-active]')).toHaveText(suggested[0]!);
+      await expect(page.getByRole('button', { name: `제안 넣기: ${suggested[0]}`, exact: true })).toContainText('Tab');
       const field = followUp(page);
       await expect(field).toHaveValue('');
       await field.press('Tab');
@@ -546,7 +546,8 @@ for (const { name, width, height, touch } of sizes) {
       await expect(field).toBeFocused();
       await expect(rows).toHaveCount(0);
       await field.fill('');
-      await rows.getByRole('button', { name: suggested[1], exact: true }).click();
+      await page.getByRole('button', { name: '다른 제안', exact: true }).click();
+      await page.getByRole('button', { name: `제안 넣기: ${suggested[1]}`, exact: true }).click();
       await expect(field).toHaveValue(suggested[1]!);
       await expect(field).toBeFocused();
       expect(prompts).toEqual([]);

@@ -42,6 +42,8 @@ export interface ComposerProps {
   inputAria?: Pick<React.AriaAttributes, "aria-expanded" | "aria-controls" | "aria-activedescendant" | "aria-autocomplete"> & { role?: "combobox" }
   /** Floats just above the composer: suggestions for what is being typed. */
   above?: React.ReactNode
+  /** Unsent lines written into the empty field itself; they replace the placeholder while shown. */
+  ghost?: React.ReactNode
   inputRef?: React.Ref<HTMLTextAreaElement>
   describedBy?: string
   className?: string
@@ -72,6 +74,7 @@ export function Composer({
   onSelect,
   inputAria,
   above,
+  ghost,
   inputRef,
   describedBy,
   className,
@@ -100,7 +103,7 @@ export function Composer({
     textarea.scrollTop = scrollTop
   }, [])
 
-  React.useLayoutEffect(resize, [resize, value, placeholder])
+  React.useLayoutEffect(resize, [resize, value, placeholder, ghost !== undefined])
 
   React.useEffect(() => {
     const textarea = textareaRef.current
@@ -144,31 +147,34 @@ export function Composer({
       <div className="ghost-composer__surface">
         {header}
         {tray}
-        <textarea
-          ref={setInputRef}
-          id={resolvedInputId}
-          value={value}
-          onChange={(event) => onValueChange(event.target.value)}
-          onSelect={onSelect}
-          onKeyDown={(event) => {
-            onKeyDown?.(event)
-            if (event.defaultPrevented) return
-            if (event.key === "Enter" && !matchMedia("(pointer: coarse)").matches && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
-              event.preventDefault()
-              submit()
-            }
-          }}
-          onPaste={onFiles ? (event) => {
-            const files = Array.from(event.clipboardData.files)
-            if (files.length) { event.preventDefault(); onFiles(files) }
-          } : undefined}
-          placeholder={placeholder}
-          rows={1}
-          disabled={disabled || (pending && !keepInputEnabledWhilePending)}
-          aria-describedby={describedBy}
-          {...inputAria}
-          className="ghost-composer__textarea"
-        />
+        <div className="ghost-composer__field" data-ghost={ghost ? "" : undefined}>
+          <textarea
+            ref={setInputRef}
+            id={resolvedInputId}
+            value={value}
+            onChange={(event) => onValueChange(event.target.value)}
+            onSelect={onSelect}
+            onKeyDown={(event) => {
+              onKeyDown?.(event)
+              if (event.defaultPrevented) return
+              if (event.key === "Enter" && !matchMedia("(pointer: coarse)").matches && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+                event.preventDefault()
+                submit()
+              }
+            }}
+            onPaste={onFiles ? (event) => {
+              const files = Array.from(event.clipboardData.files)
+              if (files.length) { event.preventDefault(); onFiles(files) }
+            } : undefined}
+            placeholder={ghost ? "" : placeholder}
+            rows={1}
+            disabled={disabled || (pending && !keepInputEnabledWhilePending)}
+            aria-describedby={describedBy}
+            {...inputAria}
+            className="ghost-composer__textarea"
+          />
+          {ghost}
+        </div>
         {extension}
         <div className="ghost-composer__footer">
           {leading}

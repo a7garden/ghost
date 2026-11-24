@@ -39,24 +39,43 @@
 .composer-plus__icon svg { width: 15px; height: 15px; }
 @keyframes plus-unfold { from { opacity: 0; transform: translateY(14px) scale(.7); filter: blur(3px); } to { opacity: 1; transform: none; filter: none; } }
 
-/* The next message the owner is likely to send: quiet rows above the empty field, the first one reachable with Tab. */
-.next-suggest { display: grid; margin: 0; padding: 0; list-style: none; animation: rise-in var(--duration-base) var(--ease-enter) both; }
-.next-suggest li { min-width: 0; border-bottom: 1px solid var(--ghost-line); }
-.next-suggest button {
-  display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 32px; padding: 4px 6px; border: 0; border-radius: var(--radius-chip);
-  background: none; color: var(--ghost-ink2); font: inherit; font-size: var(--text-ui); line-height: 1.4; text-align: start; cursor: pointer;
+/* The next message the owner is likely to send: one unsent ghost line inside the empty field, in the field's own type. It passes taps
+   through to the field; Tab, → or the trailing control takes it, ↑ ↓ or the counter show another. All candidates share one cell, so
+   the field keeps its height while they swap. */
+.next-ghost {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: var(--composer-text-padding, 4px 0); pointer-events: none;
+  font: var(--text-bodyLg)/1.5 var(--font-sans); animation: fade-in var(--duration-base) ease both;
 }
-.next-suggest button:hover, .next-suggest button:focus-visible { background: var(--ghost-hover); color: var(--ghost-ink); }
-.next-suggest button:focus-visible { outline-offset: -2px; }
-.next-suggest span { flex: 1; min-width: 0; overflow-wrap: anywhere; word-break: keep-all; }
-.next-suggest kbd {
-  flex: none; align-self: center; margin-inline-start: auto; padding: 1px 6px; border-radius: 6px; background: var(--ghost-inset); color: var(--ghost-ink3);
-  font: 550 var(--text-micro)/1.5 var(--font-mono, ui-monospace, monospace);
+.next-ghost ul { display: grid; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.next-ghost li {
+  grid-area: 1 / 1; min-width: 0; color: var(--ghost-ink3); opacity: 0; visibility: hidden; transform: translateY(5px);
+  transition: opacity var(--duration-fast) ease, transform var(--duration-fast) var(--ease-enter), visibility 0s var(--duration-fast);
 }
+.next-ghost li[data-active] { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+.next-ghost li span {
+  display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow-wrap: anywhere; word-break: keep-all;
+}
+.next-ghost__keys { display: flex; align-items: center; gap: 2px; color: var(--ghost-ink3); }
+.next-ghost__keys button {
+  display: grid; min-width: 24px; height: 24px; place-items: center; padding: 0 6px; border: 0; border-radius: var(--radius-chip);
+  background: none; color: inherit; cursor: pointer; pointer-events: auto;
+}
+.next-ghost__keys button:hover { background: var(--ghost-hover); color: var(--ghost-ink); }
+.next-ghost__keys button:focus-visible { outline-offset: -2px; }
+.next-ghost__more { font: 500 var(--text-micro)/1 var(--font-sans); font-variant-numeric: tabular-nums; }
+.next-ghost__take { padding: 0; }
+.next-ghost__take svg { width: 15px; height: 15px; }
+.next-ghost kbd {
+  padding: 0 6px; border-radius: 6px; background: var(--ghost-inset); color: var(--ghost-ink3);
+  font: 550 var(--text-micro)/18px var(--font-mono, ui-monospace, monospace);
+}
+@media (pointer: fine) { .next-ghost__take svg { display: none; } }
 @media (pointer: coarse) {
-  .next-suggest { margin-block-end: -4px; }
-  .next-suggest kbd { display: none; }
+  .next-ghost__keys { gap: 0; margin-block-start: -10px; }
+  .next-ghost__keys button { min-width: 44px; height: 44px; }
+  .next-ghost kbd { display: none; }
 }
+@media (prefers-reduced-motion: reduce) { .next-ghost li { transform: none; } }
 
 /* Attachments: thumbnails and file cards above the text. ---------------------- */
 .attachment-tray { display: flex; flex-wrap: wrap; gap: 6px; max-height: 132px; overflow: auto; overscroll-behavior: contain; margin: 0; padding: 2px; list-style: none; }
