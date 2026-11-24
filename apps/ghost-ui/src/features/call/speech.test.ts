@@ -57,3 +57,17 @@ describe('sentence playback', () => {
     expect(failed).not.toHaveBeenCalled();
   });
 });
+
+describe('opening sentence', () => {
+  it('is spoken as soon as it ends, without waiting for the token after it', () => {
+    expect(speechSentences('네, 확인해 볼게요.', 0, false).sentences).toEqual(['네, 확인해 볼게요.']);
+    expect(speechSentences('찾아볼게요?', 0, false).sentences).toEqual(['찾아볼게요?']);
+  });
+
+  it('keeps waiting when a period may be a decimal point, and skips a late closing quote', () => {
+    expect(speechSentences('버전은 2.', 0, false)).toEqual({ sentences: [], offset: 0 });
+    const spoken = speechSentences('"좋아요."', 0, false);
+    expect(spoken.sentences).toEqual(['"좋아요."']);
+    expect(speechSentences('좋아요.”', 5, true).sentences).toEqual([]);
+  });
+});
