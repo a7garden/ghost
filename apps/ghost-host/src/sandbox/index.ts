@@ -204,16 +204,22 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     cwd: string;
     writeRoots: string[];
     readRoots: string[];
-    git: { objects: string; refs: string[] } | null;
+    git: { objects: string; refs: string[]; admin: string } | null;
   } => {
     if (work.execution?.kind === "workspace" && work.execution.worktree === false)
       return { cwd, writeRoots: [], readRoots: [cwd], git: null };
     const { path: repo, admin, common } = verifiedWorktree(config.root, work, cwd);
     return {
       cwd: repo,
-      writeRoots: [repo, admin],
+      // The admin directory is not a write root: only the files git itself rewrites are
+      // writable, and each one is granted by name through the policy's git.admin boundary.
+      writeRoots: [repo],
       readRoots: [common],
-      git: { objects: join(common, "objects"), refs: [join(common, "refs/heads", worktreeBranch(work.id))] },
+      git: {
+        objects: join(common, "objects"),
+        refs: [join(common, "refs/heads", worktreeBranch(work.id))],
+        admin,
+      },
     };
   };
 
@@ -237,7 +243,7 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     const realWorkspace = join(realpathSync(config.root), "sandboxes", work.ghostId, work.id, "workspace");
     const writeRoots = [realWorkspace];
     const roots = [...readRoots()];
-    let git: { objects: string; refs: string[] } | null = null;
+    let git: { objects: string; refs: string[]; admin: string } | null = null;
     let cwd = realWorkspace;
     const target = work.execution;
     if (target?.kind === "workspace" && target.cwd !== undefined) {

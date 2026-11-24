@@ -8,6 +8,7 @@ import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { Work } from "@ghost/contract";
 import type { Config } from "../src/config.ts";
 import { createSandbox, type SandboxService } from "../src/sandbox/index.ts";
+import { verifiedWorktree } from "../src/sandbox/worktree.ts";
 import { MemoryArtifacts } from "./support.ts";
 
 /** Real macOS Seatbelt tests: everything here proves the kernel boundary, not just our checks. */
@@ -157,6 +158,101 @@ describe.skipIf(!darwin)("workspace execution boundary", () => {
     expect(readFileSync(join(repo, "README"), "utf8")).toBe("one\n");
     const branch = Bun.spawnSync(["git", "-C", repo, "log", "-1", "--format=%s", `ghost/${work.id}`], { stdout: "pipe" });
     expect(branch.stdout.toString().trim()).toBe("work");
+  });
+
+  test("the workspace Work writes only its own git files in the worktree's admin directory", async () => {
+    const f = fixture();
+    const owner = join(f.projects, "repo");
+    mkdirSync(owner, { recursive: true });
+    const git = (args: string[]) => Bun.spawnSync(["git", "-C", owner, ...args], { stdout: "pipe", stderr: "pipe" });
+    git(["init", "-q"]);
+    writeFileSync(join(owner, "README"), "one\n");
+    git(["add", "."]);
+    git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"]);
+    const ownerHead = Bun.spawnSync(["git", "-C", owner, "rev-parse", "HEAD"], { stdout: "pipe" }).stdout.toString().trim();
+    const work = f.work({ kind: "workspace", cwd: owner });
+    const env = await f.sandbox.envFor(work);
+    cleanups.push(() => env.cleanup(BACKGROUND_CONTEXT));
+    const common = join(owner, ".git");
+    const admin = join(common, "worktrees", work.id);
+    // The Work's own per-worktree config file, so there is something to tamper with.
+    writeFileSync(join(admin, "config.worktree"), "[core]\n\tautocrlf = false\n");
+    // The files git itself rewrites are writable.
+    for (const name of ["ORIG_HEAD", "COMMIT_EDITMSG"]) {
+      const path = join(admin, name);
+      const written = await shell(env, `printf written > '${path}'`);
+      expect({ name, exitCode: written.exitCode }).toEqual({ name, exitCode: 0 });
+      expect(readFileSync(path, "utf8")).toBe("written");
+    }
+    // HEAD is writable, but the Work only ever writes its own branch back into it.
+    const head = join(admin, "HEAD");
+    const headContent = readFileSync(head, "utf8");
+    expect(headContent).toBe(`ref: refs/heads/ghost/${work.id}\n`);
+    const headWritten = await shell(env, `printf 'ref: refs/heads/ghost/${work.id}\\n' > '${head}'`);
+    expect(headWritten.exitCode).toBe(0);
+    expect(readFileSync(head, "utf8")).toBe(headContent);
+    // The index is the Work's own file: it may be rewritten, and the original bytes restored.
+    const index = join(admin, "index");
+    const originalIndex = readFileSync(index);
+    const saved = await shell(env, `cat '${index}' > index.save`);
+    expect(saved.exitCode).toBe(0);
+    const forged = await shell(env, `printf forged > '${index}'`);
+    expect(forged.exitCode).toBe(0);
+    expect(readFileSync(index, "utf8")).toBe("forged");
+    const restored = await shell(env, `cat index.save > '${index}'`);
+    expect(restored.exitCode).toBe(0);
+    expect(readFileSync(index).equals(originalIndex)).toBe(true);
+    // The identity files are not. A rewritten commondir or gitdir would point the Host's own
+    // git calls at a repository the Work chooses, and config.worktree is read as configuration.
+    for (const name of ["commondir", "gitdir", "config.worktree"]) {
+      const path = join(admin, name);
+      const before = readFileSync(path);
+      const overwrite = await shell(env, `printf forged > '${path}'`);
+      const remove = await shell(env, `rm -f '${path}'`);
+      const rename = await shell(env, `printf forged > forged && mv forged '${path}'`);
+      for (const [label, result] of [["overwrite", overwrite], ["remove", remove], ["rename", rename]] as const) {
+        expect({ name, label, exitCode: result.exitCode === 0 }).toEqual({ name, label, exitCode: false });
+        expect(result.stderr).toContain("Operation not permitted");
+        expect(result.stderr).toContain("sandbox:");
+      }
+      expect(existsSync(path)).toBe(true);
+      expect(readFileSync(path).equals(before)).toBe(true);
+    }
+    // The Host still observes the real repository, not one the Work pointed it at.
+    const verified = verifiedWorktree(f.state, work, owner);
+    expect(verified.common).toBe(common);
+    expect(verified.admin).toBe(admin);
+    const again = await f.sandbox.envFor(work);
+    cleanups.push(() => again.cleanup(BACKGROUND_CONTEXT));
+    expect(Bun.spawnSync(["git", "-C", owner, "rev-parse", "HEAD"], { stdout: "pipe" }).stdout.toString().trim()).toBe(ownerHead);
+  });
+
+  test("the workspace Work still commits on its own branch with only whitelisted admin writes", async () => {
+    const f = fixture();
+    const owner = join(f.projects, "repo");
+    mkdirSync(owner, { recursive: true });
+    const git = (args: string[]) => Bun.spawnSync(["git", "-C", owner, ...args], { stdout: "pipe", stderr: "pipe" });
+    git(["init", "-q"]);
+    writeFileSync(join(owner, "README"), "one\n");
+    git(["add", "."]);
+    git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"]);
+    const work = f.work({ kind: "workspace", cwd: owner });
+    const env = await f.sandbox.envFor(work);
+    cleanups.push(() => env.cleanup(BACKGROUND_CONTEXT));
+    const admin = join(owner, ".git", "worktrees", work.id);
+    const indexBefore = readFileSync(join(admin, "index"));
+    const commondirBefore = readFileSync(join(admin, "commondir"), "utf8");
+    const gitdirBefore = readFileSync(join(admin, "gitdir"), "utf8");
+    const committed = await shell(env, "printf two > README && git add README && git -c user.email=g@ghost -c user.name=Ghost commit -qm work && git rev-parse --abbrev-ref HEAD");
+    expect(committed.exitCode).toBe(0);
+    expect(committed.stdout.trim()).toBe(`ghost/${work.id}`);
+    // The owner's checkout never saw the edit; the branch carries it.
+    expect(readFileSync(join(owner, "README"), "utf8")).toBe("one\n");
+    expect(Bun.spawnSync(["git", "-C", owner, "log", "-1", "--format=%s", `ghost/${work.id}`], { stdout: "pipe" }).stdout.toString().trim()).toBe("work");
+    // The commit really rewrote the Work's own index, and the identity files stayed untouched.
+    expect(readFileSync(join(admin, "index")).equals(indexBefore)).toBe(false);
+    expect(readFileSync(join(admin, "commondir"), "utf8")).toBe(commondirBefore);
+    expect(readFileSync(join(admin, "gitdir"), "utf8")).toBe(gitdirBefore);
   });
 
   test("the reviewer reads the reviewed workspace and cannot write to it", async () => {
