@@ -25,45 +25,19 @@ import {
   type StreamFrame,
   type PageSummary,
   type PageView,
-  type CodingSetup,
-  type HerdrChanges,
-  type HerdrDiff,
-  type HerdrFrame,
-  type HerdrOutput,
-  type HerdrUpload,
   type NextMessageSuggestions,
   type OmpInfo,
-  type HerdrPaneView,
-  type HerdrView,
-  CodingStart,
   CodingSessionCreate,
   CodingThinking,
   CodingPrompt,
   CodingDialogAnswer,
   type CodingEvent,
-  HerdrAgentStart,
-  HerdrAnswer,
-  HerdrClose,
-  HerdrControlCommand,
-  HerdrControlRelease,
-  HerdrInput,
-  HerdrIntegrationInstall,
-  HerdrPrompt,
-  HerdrRename,
-  HerdrSplit,
-  HerdrTabCreate,
-  HerdrWorkspaceCreate,
   type SkillCatalog,
   parse,
 } from "@ghost/contract";
 import type { Config } from "../config.ts";
-import { ClaudeModelCatalog } from "../integrations/claude-models.ts";
-import type { BrowserPort, DocumentsPort, HerdrPort, SkillsPort } from "../integrations/ports.ts";
-import { HerdrControlRefusal } from "../integrations/herdr-control.ts";
-import { mergeFrames } from "../integrations/herdr.ts";
-import { HERDR_PANE } from "../integrations/herdr-state.ts";
+import type { BrowserPort, DocumentsPort, SkillsPort } from "../integrations/ports.ts";
 import type { OmpInfoProvider } from "../integrations/omp.ts";
-import { checkUploads, saveUpload, UPLOAD_MAX_BYTES } from "../integrations/uploads.ts";
 import { listFolders } from "./folders.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
@@ -104,8 +78,6 @@ const HTTP_STATUS: Record<ErrorCode, number> = { invalid: 400, forbidden: 403, n
 const DIGEST = /^[0-9a-f]{64}$/;
 const AFTER = /^\d+$/;
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
-// An integer outside the live menu is a conflict, not a malformed answer.
-const HerdrAnswerPayload = Type.Object({ ...HerdrAnswer.properties, index: Type.Integer() });
 const MEDIA_TYPE = /^[!#$%&'*+.^_`|~0-9a-z-]+\/[!#$%&'*+.^_`|~0-9a-z-]+(?:\s*;\s*[!#$%&'*+.^_`|~0-9a-z-]+=(?:[!#$%&'*+.^_`|~0-9a-z-]+|"[^"\\\r\n]*"))*$/i;
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -156,14 +128,13 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; herdr?: HerdrPort | null; terminals?: Terminals | null; workbench?: Workbench | null; omp?: OmpInfoProvider | null; claudeModels?: ClaudeModelCatalog; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null; quotas?: ProviderQuotas }): { port: number; stop(): Promise<void> } {
-  const { core, config, ownerToken, documents, skills, herdr = null, omp = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; terminals?: Terminals | null; workbench?: Workbench | null; omp?: OmpInfoProvider | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null; quotas?: ProviderQuotas }): { port: number; stop(): Promise<void> } {
+  const { core, config, ownerToken, documents, skills, omp = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
   const quotas = deps.quotas ?? new ProviderQuotas({ providers: () => core.ledger.providers(), secrets: core.secrets });
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
   const oauth = new OAuthLogins(core);
-  const suggestions = new Suggestions(core, herdr);
-  const claudeModels = deps.claudeModels ?? new ClaudeModelCatalog();
+  const suggestions = new Suggestions(core);
 
   const server = Bun.serve<TerminalSocket>({
     hostname: config.host,
@@ -520,10 +491,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     const viaIdentity = !viaEdge && bearerAccess === null && tailnetOwner;
     const access = viaEdge || viaIdentity ? new Access({ kind: "owner" }) : bearerAccess;
     if (access === null) return error("forbidden", "missing or invalid bearer token", 401);
-    const controlRoute = pathname === "/api/herdr/control" || pathname.startsWith("/api/herdr/control/");
     const fetchSite = request.headers.get("sec-fetch-site");
-    if (controlRoute && (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site"))) return error("forbidden", "다른 사이트에서는 터미널을 조작할 수 없습니다.", 403);
-    const controlPrincipal = access.principal.kind === "owner" ? "owner" : `device:${access.principal.deviceId}`;
     if (terminalsRoute) {
       if (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site")) return error("forbidden", "다른 사이트에서는 터미널을 조작할 수 없습니다.", 403);
       const expectedOrigin = viaEdge ? `https://${host}` : tailnet !== null && host === tailnet.host ? tailnet.config.origin : terminalPublicOrigin?.host === host ? terminalPublicOrigin.origin : url.origin;
@@ -779,258 +747,11 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       }
     }
 
-    // Coding is the owner's herdr. What must be set up for it, the agents in the session in use, one pane's terminal text, and the few things
-    // the owner does from the app: start an agent in a new workspace, send it a prompt or keys, install herdr's hook for an agent.
-    if (pathname === "/api/coding" && request.method === "GET") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        return json(await herdr.setup() satisfies CodingSetup);
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    if (pathname === "/api/coding/integrations" && request.method === "POST") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        const body: unknown = await request.json().catch(() => { throw invalid("malformed JSON body"); });
-        await herdr.installIntegration(parse(HerdrIntegrationInstall, body).agent);
-        return json(await herdr.setup() satisfies CodingSetup);
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    if (pathname === "/api/herdr" && request.method === "GET") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        // The owner's view carries each pane's coding run and the 맡긴 일 it belongs to, matched by exact terminal identity.
-        return json(core.coding.decorate(await herdr.overview()) satisfies HerdrView);
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    if (pathname === "/api/herdr/output" && request.method === "GET") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        const lines = url.searchParams.get("lines");
-        return json(await herdr.output(url.searchParams.get("pane") ?? "", { ansi: url.searchParams.get("format") === "ansi", ...(lines === null ? {} : { lines: Number(lines) }) }) satisfies HerdrOutput);
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    if ((pathname === "/api/herdr/ask" || pathname === "/api/herdr/chat" || pathname === "/api/herdr/commands") && request.method === "GET") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        const pane = url.searchParams.get("pane") ?? "";
-        if (pathname === "/api/herdr/ask") return json(await herdr.ask(pane));
-        if (pathname === "/api/herdr/commands") return json(await herdr.commands(pane));
-        return json(await herdr.chat(pane, url.searchParams.get("after")));
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    if (pathname === "/api/herdr/claude-models" && request.method === "GET") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        return json(await claudeModels.list());
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    if (pathname === "/api/herdr/suggestions" && request.method === "GET") {
-      try {
-        const pane = url.searchParams.get("pane") ?? "";
-        if (!HERDR_PANE.test(pane)) throw invalid("not a herdr pane id");
-        return json(await suggestions.coding(pane, request.signal) satisfies NextMessageSuggestions);
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    if (pathname === "/api/herdr/changes" && request.method === "GET") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        return json(await herdr.changes(url.searchParams.get("pane") ?? "") satisfies HerdrChanges);
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    if (pathname === "/api/herdr/diff" && request.method === "GET") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        return json(await herdr.diff(url.searchParams.get("pane") ?? "", url.searchParams.get("path") ?? "") satisfies HerdrDiff);
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
     // What omp offers for starting a session in a directory: its models and that directory's recent conversations.
     if (pathname === "/api/coding/omp" && request.method === "GET") {
       try {
         if (!omp) throw new CommandError("unavailable", "omp is not available on this Host");
         return json(await omp.info(url.searchParams.get("cwd") ?? "") satisfies OmpInfo);
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    // A file from the app (a phone screenshot) saved on the Mac for an agent to read by path; the body is the file's bytes.
-    if (pathname === "/api/herdr/upload" && request.method === "POST") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        if (Number(request.headers.get("content-length") ?? 0) > UPLOAD_MAX_BYTES) throw invalid("the file is larger than 10 MB");
-        return json(saveUpload(config.root, url.searchParams.get("name") ?? "file", new Uint8Array(await request.arrayBuffer())) satisfies HerdrUpload);
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    if (pathname === "/api/herdr/control" && request.method === "GET") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        const cols = Number(url.searchParams.get("cols") ?? 80), rows = Number(url.searchParams.get("rows") ?? 24);
-        const client = url.searchParams.get("client");
-        if (!Number.isFinite(cols) || !Number.isFinite(rows)) throw invalid("크기가 올바르지 않습니다.");
-        if (client !== null && !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(client)) throw invalid("연결 ID가 올바르지 않습니다.");
-        const control = await herdr.control({
-          pane: url.searchParams.get("pane") ?? "", client: client?.toLowerCase() ?? null,
-          cols: Math.min(300, Math.max(20, Math.round(cols))), rows: Math.min(120, Math.max(5, Math.round(rows))),
-          fit: url.searchParams.get("fit") === "1", takeover: url.searchParams.get("takeover") === "1",
-        }, controlPrincipal, request.signal);
-        const encoder = new TextEncoder();
-        let cleanup = control.disconnect;
-        const stream = new ReadableStream<Uint8Array>({
-          start(controller) {
-            let pending: HerdrFrame | null = null;
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            let done = false;
-            const send = (event: string, data: unknown) => {
-              if (done) return;
-              if ((controller.desiredSize ?? 0) <= 0) { close(); return; }
-              try { controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); }
-              catch { close(); }
-            };
-            const flush = () => {
-              clearTimeout(timer);
-              timer = undefined;
-              if (pending) { send("frame", pending); pending = null; }
-            };
-            const close = () => {
-              if (done) return;
-              done = true;
-              clearTimeout(timer);
-              clearInterval(keepalive);
-              request.signal.removeEventListener("abort", close);
-              control.disconnect();
-              try { controller.close(); } catch { /* Already cancelled. */ }
-            };
-            const keepalive = setInterval(() => {
-              if ((controller.desiredSize ?? 0) <= 0) { close(); return; }
-              try { controller.enqueue(encoder.encode(": keepalive\n\n")); } catch { close(); }
-            }, 15_000);
-            cleanup = close;
-            request.signal.addEventListener("abort", close, { once: true });
-            if (request.signal.aborted) { close(); return; }
-            send("lease", control.lease);
-            control.listen((frame) => {
-              pending = mergeFrames(pending, frame);
-              timer ??= setTimeout(flush, 40);
-            }, (event) => {
-              if (done) return;
-              flush();
-              send("end", event);
-              close();
-            });
-          },
-          cancel() { cleanup(); },
-        }, { highWaterMark: 1024 * 1024, size: (chunk) => chunk?.byteLength ?? 0 });
-        return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-store" } });
-      } catch (caught) {
-        return caught instanceof HerdrControlRefusal ? json({ ok: false, error: { code: caught.code, message: caught.message } }, 409) : failure(caught);
-      }
-    }
-    // The owner's herdr, from the app: the live terminal of a pane and its keyboard, and creating, renaming and closing workspaces, tabs, panes and agents.
-    if (pathname === "/api/herdr/terminal" && request.method === "GET") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        const cols = Number(url.searchParams.get("cols") ?? 80), rows = Number(url.searchParams.get("rows") ?? 24);
-        if (!Number.isFinite(cols) || !Number.isFinite(rows)) throw invalid("cols and rows must be numbers");
-        const abort = new AbortController();
-        request.signal.addEventListener("abort", () => abort.abort(), { once: true });
-        const frames = await herdr.terminal(url.searchParams.get("pane") ?? "", cols, rows, abort.signal);
-        const encoder = new TextEncoder();
-        let keepalive: ReturnType<typeof setInterval> | undefined;
-        const stream = new ReadableStream<Uint8Array>({
-          async start(controller) {
-            const send = (event: string, data: unknown) => { try { controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); } catch { /* the viewer is gone */ } };
-            keepalive = setInterval(() => { try { controller.enqueue(encoder.encode(": keepalive\n\n")); } catch { /* the viewer is gone */ } }, 15_000);
-            // Output that arrives within 40 ms goes out as one frame: a busy agent redraws many times a second and a phone does not need every step.
-            let pending: HerdrFrame | null = null;
-            let flushTimer: ReturnType<typeof setTimeout> | undefined;
-            const flush = () => { flushTimer = undefined; if (pending !== null) { send("frame", pending); pending = null; } };
-            try {
-              for await (const frame of frames) {
-                pending = mergeFrames(pending, frame);
-                flushTimer ??= setTimeout(flush, 40);
-              }
-              clearTimeout(flushTimer);
-              flush();
-              send("end", {});
-            } catch (caught) {
-              clearTimeout(flushTimer);
-              flush();
-              send("error", { message: caught instanceof Error ? caught.message : "the terminal stopped" });
-            } finally {
-              clearTimeout(flushTimer);
-              clearInterval(keepalive);
-              try { controller.close(); } catch { /* already closed */ }
-            }
-          },
-          cancel() {
-            clearInterval(keepalive);
-            abort.abort();
-            void frames.return(undefined);
-          },
-        });
-        return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-store" } });
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    if (pathname.startsWith("/api/herdr/") && request.method === "POST") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        const body: unknown = await request.json().catch(() => { throw invalid("malformed JSON body"); });
-        switch (pathname) {
-          case "/api/herdr/start":
-            return json((await herdr.start(parse(CodingStart, body))).pane satisfies HerdrPaneView);
-          case "/api/herdr/workspaces":
-            return json(await herdr.createWorkspace(parse(HerdrWorkspaceCreate, body)) satisfies HerdrPaneView);
-          case "/api/herdr/tabs":
-            return json(await herdr.createTab(parse(HerdrTabCreate, body)) satisfies HerdrPaneView);
-          case "/api/herdr/split":
-            return json(await herdr.split(parse(HerdrSplit, body)) satisfies HerdrPaneView);
-          case "/api/herdr/agents":
-            return json(await herdr.startAgent(parse(HerdrAgentStart, body)) satisfies HerdrPaneView);
-          case "/api/herdr/prompt": {
-            const prompt = parse(HerdrPrompt, body);
-            if (!prompt.text.trim() && !prompt.attachments?.length) throw invalid("메시지나 첨부 파일을 입력해 주세요.");
-            if (prompt.attachments) checkUploads(config.root, prompt.attachments);
-            return json((await herdr.prompt(prompt.pane, prompt.text, undefined, undefined, prompt.delivery, prompt.attachments)).pane satisfies HerdrPaneView);
-          }
-          case "/api/herdr/answer":
-            return json(await herdr.answer(parse(HerdrAnswerPayload, body)) satisfies HerdrPaneView);
-          case "/api/herdr/input":
-            await herdr.input(parse(HerdrInput, body));
-            return json({ ok: true });
-          case "/api/herdr/control/send":
-            await herdr.controlSend(parse(HerdrControlCommand, body), controlPrincipal);
-            return json({ ok: true });
-          case "/api/herdr/control/release":
-            await herdr.controlRelease(parse(HerdrControlRelease, body), controlPrincipal);
-            return json({ ok: true });
-          case "/api/herdr/rename":
-            await herdr.rename(parse(HerdrRename, body));
-            return json({ ok: true });
-          case "/api/herdr/close":
-            await herdr.close(parse(HerdrClose, body));
-            return json({ ok: true });
-        }
       } catch (caught) {
         return failure(caught);
       }

@@ -1,6 +1,4 @@
-import type { CodingAgentId, CodingSetup, CodingStart, Decision, ExecutionTarget, HerdrAgentStart, HerdrAnswer, HerdrAsk, HerdrChanges, HerdrChat, HerdrClose, HerdrCommands, HerdrControlCommand, HerdrControlRelease, HerdrDiff, HerdrFrame, HerdrInput, HerdrOutput, HerdrPaneView, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrView, HerdrWorkspaceCreate, Scope, VaultItem, Work } from "@ghost/contract";
-import type { HerdrDelivery } from "@ghost/contract";
-import type { HerdrControlRequest, HerdrControlStream } from "./herdr-control.ts";
+import type { Decision, ExecutionTarget, Scope, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 export type { McpPort, McpTool, McpCallResult } from "./mcp.ts";
 
@@ -298,61 +296,4 @@ export interface DesktopPort {
   /** A PNG window image as a JPEG no larger than `maxEdge` pixels on its long side, for model input. */
   image(png: Uint8Array, maxEdge: number): Promise<{ data: string; mimeType: "image/jpeg"; width: number; height: number }>;
   shutdown(): Promise<void>;
-}
-
-/** What starting or prompting an agent in herdr came to: the pane, where it works, and whether the agent settled when the caller waited. */
-export interface HerdrRun {
-  pane: HerdrPaneView;
-  /** The directory the agent works in: the worktree herdr made, or the directory itself. */
-  checkout: string;
-  branch: string | null;
-  /** The commit the branch was cut from; null when the Host did not cut it. */
-  base: string | null;
-  /** `unwaited`: the caller did not wait; `timeout` and `stalled`: the agent did not settle in time or never began. */
-  settled: "settled" | "timeout" | "stalled" | "unwaited";
-}
-
-/** How long a caller waits for an agent to settle, and how it stops waiting. */
-export interface HerdrWait {
-  timeoutMs: number;
-  signal?: AbortSignal;
-}
-
-/**
- * Coding through the owner's herdr: the agents in the session in use, their terminals, starting an agent in a new
- * workspace, prompting and keying one, and what must be set up for that. Implemented in src/integrations/herdr.ts.
- */
-export interface HerdrPort {
-  /** The session coding uses. */
-  readonly session: string;
-  /** The session as herdr's sidebar shows it: workspaces, tabs, panes. */
-  overview(session?: string): Promise<HerdrView>;
-  /** The end of a pane's terminal as text; with colours and a longer history for the history view. */
-  output(pane: string, options?: { ansi?: boolean; lines?: number; session?: string }): Promise<HerdrOutput>;
-  ask(pane: string, session?: string): Promise<HerdrAsk | null>;
-  answer(input: HerdrAnswer): Promise<HerdrPaneView>;
-  chat(pane: string, after: string | null, session?: string): Promise<HerdrChat>;
-  commands(pane: string, session?: string): Promise<HerdrCommands>;
-  control(request: HerdrControlRequest, principal: string, signal: AbortSignal): Promise<HerdrControlStream>;
-  controlSend(command: HerdrControlCommand, principal: string): Promise<void>;
-  controlRelease(lease: HerdrControlRelease, principal: string): Promise<void>;
-  /** What the agent in a pane changed, read from git in its directory. */
-  changes(pane: string, session?: string): Promise<HerdrChanges>;
-  diff(pane: string, path: string, session?: string): Promise<HerdrDiff>;
-  setup(): Promise<CodingSetup>;
-  installIntegration(agent: CodingAgentId): Promise<void>;
-  /** Persist the opened handle before the first agent launch or prompt. Omitted wait returns after admission, not completion. */
-  start(input: CodingStart, wait?: HerdrWait, opened?: (prepared: HerdrRun) => void, guard?: { session: string; authorize: (stage?: "open" | "launch" | "prompt", pane?: HerdrPaneView) => void }): Promise<HerdrRun>;
-  prompt(pane: string, text: string, wait?: HerdrWait, guard?: { session: string; terminalId: string; agent: string; authorize: (pane?: HerdrPaneView) => void }, delivery?: HerdrDelivery, uploads?: readonly string[]): Promise<HerdrRun>;
-  /** Interrupt only the same terminal in its recorded session; never close the pane or delete its worktree. */
-  interrupt?(session: string, pane: string, terminalId: string, guard?: { agent: string; authorize: (pane?: HerdrPaneView) => void }): Promise<void>;
-  createWorkspace(input: HerdrWorkspaceCreate): Promise<HerdrPaneView>;
-  createTab(input: HerdrTabCreate): Promise<HerdrPaneView>;
-  split(input: HerdrSplit): Promise<HerdrPaneView>;
-  startAgent(input: HerdrAgentStart): Promise<HerdrPaneView>;
-  rename(input: HerdrRename): Promise<void>;
-  close(input: HerdrClose): Promise<void>;
-  input(input: HerdrInput): Promise<void>;
-  /** A pane's live terminal rendered for a viewer of cols x rows, without resizing the pane. */
-  terminal(pane: string, cols: number, rows: number, signal: AbortSignal): Promise<AsyncGenerator<HerdrFrame>>;
 }

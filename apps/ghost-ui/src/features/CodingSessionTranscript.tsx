@@ -4,7 +4,7 @@ import type { CodingImage, CodingItem, CodingSession, CodingToolStatus } from '@
 import { StateGlyph, type GlyphState } from '../components/agent/StateGlyph';
 import { MessageBody } from '../components/MessageBody';
 import { CodingSessionPreview } from './CodingSessionPreview';
-import { HerdrDiffText } from './HerdrChanges';
+import { DiffText } from './DiffText';
 
 const states: Record<CodingSession['state'], [GlyphState, string]> = {
   idle: ['queued', '대기'], working: ['running', '작업 중'], waiting: ['attention', '응답 필요'],
@@ -43,7 +43,7 @@ const ToolRow = memo(function ToolRow({ id, item }: { id: string; item: ToolItem
   const summary = item.summary || item.tool;
   return <div data-kind="trail" className="embedded-tool">
     {diff || output ? <Step summary={<code title={summary}>{summary}</code>} status={item.status}>
-      {diff && <HerdrDiffText value={diff} wrap={false}/>}
+      {diff && <DiffText value={diff}/>}
       {output && <pre className="embedded-tool-output" tabIndex={0} aria-label="도구 출력">{output}</pre>}
     </Step> : <div className="embedded-step-static"><Braces size={15} aria-hidden="true"/><code title={summary}>{summary}</code>
       <StateGlyph size={14} state={toolGlyph[item.status]} label accessibleLabel={toolLabels[item.status]}/>

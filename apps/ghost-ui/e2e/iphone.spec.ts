@@ -1,9 +1,11 @@
+import { tmpdir } from 'node:os';
 import { expect, test } from '@playwright/test';
 import type { Notification, State } from '@ghost/contract';
 import { openScreen, screenshot, type Screen } from './visual';
 import { mockBrowserLiveStream, mockIPhone, mockRichConversation, releaseBrowserFrame, showTranscriptElement } from './iphone-fixtures';
 import { readRunState } from './run-state';
-import { mockCodingApi, visualCodingIds } from './mocks';
+import { mockCodingSessions, sampleSession } from './coding-session-mock';
+import { mockWorkbench } from './workbench-mock';
 
 const screens: Screen[] = [
   { name: 'home', route: () => '/', waits: () => ['진행 중', '최근 끝난 일'] },
@@ -59,24 +61,22 @@ test('opens the main Ghost from the mobile dock and another Ghost from the works
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
 
-test('opens an exited pane from a coding notification and falls back to the roster for a missing pane', async ({ page }) => {
-  const session = 'default';
-  const pane = visualCodingIds.finished;
-  const present = `coding:${session}:${pane}:exit:1`;
-  const missing = `coding:${session}:w99:p99:exit:2`;
-  await openScreen(page, { name: 'coding exit notification', route: () => '/', waits: () => ['최근 끝난 일'], prepare: async page => {
+test('opens an embedded coding session when the owner taps its native notification', async ({ page }) => {
+  const id = `session:${sampleSession.id}:turn:1:waiting`;
+  await openScreen(page, { name: 'coding session notification', route: () => '/', waits: () => ['최근 끝난 일'], prepare: async page => {
     await mockIPhone(page);
-    await mockCodingApi(page, { rich: true, finishedAgent: null });
+    const coding = await mockCodingSessions(page);
+    await coding.patch({ repo: tmpdir(), cwd: tmpdir() });
+    await mockWorkbench(page, coding.creates);
     await page.route('**/api/state', async route => {
       const response = await route.fetch();
       const state: State = await response.json();
       const seed = readRunState();
-      const notifications = [present, missing].map((id, index): Notification => ({
+      const notification: Notification = {
         id, kind: 'message', ghostId: seed.defaultGhostId, conversationId: seed.conversationA, workId: null, decisionId: null,
-        title: '에이전트가 종료됐어요', body: index === 0 ? '로그인 실패 시 안내 문구 고치기' : '닫힌 패널',
-        createdAt: seed.fixedNow - 30_000, readAt: null,
-      }));
-      await route.fulfill({ response, json: { ...state, notifications } });
+        title: '코딩 세션에 입력이 필요합니다', body: sampleSession.title, createdAt: seed.fixedNow - 30_000, readAt: null,
+      };
+      await route.fulfill({ response, json: { ...state, notifications: [notification] } });
     });
     await page.route('**/api/commands', route => {
       const command = route.request().postDataJSON()?.command;
@@ -84,21 +84,14 @@ test('opens an exited pane from a coding notification and falls back to the rost
       return route.fulfill({ json: { ok: true, result: {} } });
     });
   } }, 'light');
-  async function tapNotification(notificationId: string) {
-    const read = page.waitForRequest(request => new URL(request.url()).pathname === '/api/commands' &&
-      request.postDataJSON()?.command?.type === 'notification.read');
-    await page.evaluate(notificationId => {
-      window.dispatchEvent(new CustomEvent('ghost-shell', { detail: { type: 'notification.open', notificationId } }));
-    }, notificationId);
-    expect((await read).postDataJSON().command.notificationIds).toEqual([notificationId]);
-  }
-  await tapNotification(present);
-  await expect(page).toHaveURL(url => url.hash === `#/coding?herdr=${encodeURIComponent(pane)}&herdrSession=${session}`);
-  await expect(page.getByRole('button', { name: '이어서 시작', exact: true })).toBeEnabled();
-  await tapNotification(missing);
-  await expect(page).toHaveURL(/#\/coding$/);
-  await expect(page.getByRole('region', { name: '코딩 세션', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '이어서 시작', exact: true })).toHaveCount(0);
+  const read = page.waitForRequest(request => new URL(request.url()).pathname === '/api/commands' &&
+    request.postDataJSON()?.command?.type === 'notification.read');
+  await page.evaluate(notificationId => {
+    window.dispatchEvent(new CustomEvent('ghost-shell', { detail: { type: 'notification.open', notificationId } }));
+  }, id);
+  expect((await read).postDataJSON().command.notificationIds).toEqual([id]);
+  await expect(page).toHaveURL(url => url.hash === `#/coding?session=${sampleSession.id}`);
+  await expect(page.getByRole('region', { name: `패널: ${sampleSession.title}`, exact: true })).toHaveAttribute('data-focused', 'true');
 });
 
 test('keeps the long chat draft and its actions within the keyboard viewport', async ({ page }) => {

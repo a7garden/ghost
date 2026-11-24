@@ -1,7 +1,5 @@
 import { QUIET_REPLY, type NextMessageSuggestions } from "@ghost/contract";
-import type { HerdrPort } from "../integrations/ports.ts";
 import type { Core } from "./core.ts";
-import { notFound } from "./errors.ts";
 import type { Engine } from "./ports.ts";
 
 const MAX_CACHED = 64;
@@ -17,28 +15,11 @@ export class Suggestions {
   private readonly flights = new Map<string, Flight>();
   private closing = false;
 
-  constructor(private readonly core: Core, private readonly herdr: HerdrPort | null) {}
+  constructor(private readonly core: Core) {}
 
   private enabled(): boolean {
     const settings = this.core.ledger.settings();
     return !this.closing && settings.nextMessageSuggestions !== false && Boolean(settings.suggestionModel ?? settings.defaultModel) && this.core.engine.suggest !== undefined;
-  }
-
-  async coding(id: string, signal: AbortSignal): Promise<NextMessageSuggestions> {
-    const herdr = this.herdr;
-    if (!herdr || signal.aborted || !this.enabled()) return EMPTY;
-    const session = herdr.session;
-    const view = await herdr.overview(session);
-    if (!view.available || view.note !== null || signal.aborted) return EMPTY;
-    const pane = view.workspaces.flatMap(workspace => workspace.tabs.flatMap(tab => tab.panes)).find(pane => pane.id === id);
-    if (!pane) throw notFound(`herdr pane ${id}`);
-    if ((pane.agent !== "omp" && pane.agent !== "claude") || pane.status === "working" || pane.status === "blocked") return EMPTY;
-    const chat = await herdr.chat(id, null, session);
-    if (!chat.source) return EMPTY;
-    const messages = chat.items.filter(item => item.kind === "user" || item.kind === "agent");
-    const anchor = messages.at(-1);
-    if (anchor?.kind !== "agent" || !anchor.text.trim()) return EMPTY;
-    return this.forAnchor(JSON.stringify(["herdr", session, id, pane.terminalId, pane.agentSessionId, anchor.id]), messages.slice(-16).map(({ kind, text }) => ({ role: kind === "user" ? "user" : "assistant", text })), signal);
   }
 
   async direct(id: string, signal: AbortSignal): Promise<NextMessageSuggestions> {

@@ -27,7 +27,7 @@ async function jsonBody(request: Request): Promise<unknown> {
   catch { throw invalid("JSON 요청 본문이 올바르지 않습니다."); }
 }
 
-/** Runs after the same bearer/paired-device/Access auth as herdr; it isn't a Ghost tool. */
+/** Runs after bearer, paired-device or edge authentication; it is not a Ghost tool. */
 export async function serveTerminals(request: Request, url: URL, server: Bun.Server<TerminalSocket>, service: Terminals | null, origin: string): Promise<Response | undefined> {
   if (!service) throw new CommandError("unavailable", "터미널을 사용할 수 없습니다.");
   const requestOrigin = request.headers.get("origin");

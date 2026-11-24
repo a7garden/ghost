@@ -6,8 +6,9 @@ export const CodingRun = Type.Object({
   id: Id,
   workId: Id,
   session: Type.String(),
-  pane: nullable(Type.String()),
-  terminalId: nullable(Type.String()),
+  /** Populated only by older terminal-backed runs. */
+  pane: Type.Optional(nullable(Type.String())),
+  terminalId: Type.Optional(nullable(Type.String())),
   agent: nullable(Type.String()),
   checkout: nullable(Type.String()),
   branch: nullable(Type.String()),
@@ -22,7 +23,7 @@ export const CodingRun = Type.Object({
   updatedAt: Timestamp,
   seenWorking: Type.Boolean(),
   prompt: Type.String({ maxLength: 24_000 }),
-  cursor: nullable(Type.String()),
+  cursor: Type.Optional(nullable(Type.String())),
   /** JSON: the untrusted agent claim and separately the Host's observations. Neither accepts the Work. */
   report: nullable(Type.String({ maxLength: 14_000 })),
   stopPending: Type.Boolean(),

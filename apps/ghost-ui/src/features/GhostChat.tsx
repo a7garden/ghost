@@ -143,7 +143,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   const busy = Boolean(currentConversation?.busy);
   const running = busy || Boolean(live?.running);
   const lastMessage = lastReply(page.messages, message => message.role === 'user' || message.role === 'assistant');
-  const nextMessages = useNextSuggestions(conversationId ? { kind: 'conversation', id: conversationId } : null, lastMessage?.id ?? null,
+  const nextMessages = useNextSuggestions(conversationId, lastMessage?.id ?? null,
     !running && lastMessage?.role === 'assistant' && outbox.rows.length === 0);
   const names = new Map(state.ghosts.map(item => [item.id, item.name]));
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));

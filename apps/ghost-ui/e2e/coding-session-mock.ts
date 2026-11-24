@@ -3,7 +3,7 @@ import type { CodingDialog, CodingDialogAnswer, CodingEvent, CodingItem, CodingP
 
 const at = Date.UTC(2026, 10, 23, 3);
 export const sampleSession: CodingSession = {
-  id: 'embedded-login', title: '로그인 화면 다듬기', state: 'working', cwd: '/test/worktrees/ghost-login', repo: '/test/repos/ghost',
+  id: 'coding-embedded-login', title: '로그인 화면 다듬기', state: 'working', cwd: '/test/worktrees/ghost-login', repo: '/test/repos/ghost',
   branch: 'ghost/login-layout', base: 'base', model: { provider: 'sample', model: 'atlas' }, thinking: 'medium', workId: null, turn: 1,
   pendingDialog: null, usage: { input: 0, output: 0, cost: 0 }, createdAt: at, updatedAt: at,
 };

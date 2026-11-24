@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openScreen, screenshot, type Theme } from './visual';
 import { mockConversationActivity, mockIPhone, mockMessageNotification, mockRichConversation, showTranscriptElement } from './iphone-fixtures';
-import { mockCodingApi, mockStateDecisions, mockVaultApi, visualHandoffDecisionId, visualSecureDecisionId } from './mocks';
+import { mockStateDecisions, mockVaultApi, visualHandoffDecisionId, visualSecureDecisionId } from './mocks';
 import type { Decision, MemoryView, ProviderQuota, State } from '@ghost/contract';
 import { readRunState } from './run-state';
 
@@ -122,7 +122,6 @@ for (const theme of ['light', 'dark'] as const) {
             ] } satisfies ProviderQuota;
             await page.route('**/api/providers/quota*', route => route.fulfill({ json: info.project.name === 'desktop' ? [quota] : [] }));
           }
-          if (tab === 'coding') await mockCodingApi(page);
           if (tab === 'team') {
             const { defaultGhostId, fixedNow } = readRunState();
             await page.route(`**/api/memory/${defaultGhostId}`, route => route.fulfill({ json: {
@@ -137,12 +136,7 @@ for (const theme of ['light', 'dark'] as const) {
           await expect(page.getByRole('meter', { name: '5시간 사용량' })).toHaveAttribute('aria-valuenow', '14');
           await expect(page.getByRole('meter', { name: '주간 사용량' })).toHaveAttribute('aria-valuenow', '60');
         }
-        if (tab === 'coding') {
-          await expect(page.getByRole('combobox', { name: 'herdr 세션' })).toHaveText('기본 세션');
-          const delivery = page.getByRole('radiogroup', { name: '지시를 보내는 방식' });
-          await expect(delivery.getByRole('radio', { name: '스티어링' })).toBeChecked();
-          await expect(delivery.getByRole('radio', { name: '대기열' })).toBeEnabled();
-        }
+        if (tab === 'coding') await expect(page.getByRole('heading', { name: '내장 코딩 기본값' })).toBeVisible();
         await capture(page, `settings-${tab}`, theme, info.project.name);
         if (tab === 'devices') {
           const conversation = page.getByRole('group', { name: '받을 알림' }).getByRole('button', { name: '대화', exact: true });
@@ -153,23 +147,6 @@ for (const theme of ['light', 'dark'] as const) {
           await expect(conversation).toHaveAttribute('aria-pressed', 'false');
           await conversation.click();
           await expect(conversation).toHaveAttribute('aria-pressed', 'true');
-        }
-        if (tab === 'coding') {
-          const agent = page.getByRole('combobox', { name: '기본 에이전트' });
-          const session = page.getByRole('combobox', { name: 'herdr 세션' });
-          await expect(agent).toHaveText('Claude Code');
-          const saved = () => page.waitForRequest(request => request.url().endsWith('/api/commands') && request.postDataJSON()?.command?.type === 'coding.set');
-          const pickAgent = saved();
-          await agent.click();
-          await page.getByRole('option', { name: 'omp', exact: true }).click();
-          expect((await pickAgent).postDataJSON().command).toMatchObject({ session: null, agent: 'omp' });
-          await expect(agent).toHaveText('omp');
-          const pickSession = saved();
-          await session.click();
-          await page.getByRole('option', { name: 'studio', exact: true }).click();
-          expect((await pickSession).postDataJSON().command).toMatchObject({ session: 'studio', agent: 'omp' });
-          await expect(session).toHaveText('studio');
-          await expect(page.getByText('herdr 서버 · studio')).toBeVisible();
         }
         if (tab === 'models' && info.project.name === 'iphone') {
           const options = await page.getByRole('radiogroup', { name: '생각 수준' }).getByRole('radio').evaluateAll(elements =>

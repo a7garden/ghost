@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { HerdrPaneView, HerdrView, Notification, State } from '@ghost/contract';
+import type { Notification, State } from '@ghost/contract';
 import { notificationRoute } from './notificationRoute';
 const state = { decisions: [{ id: 'decision/1', state: 'pending' }], conversations: [{ id: 'chat/1', ghostId: 'ghost/1' }] } as State;
 const notification = { decisionId: 'decision/1', workId: 'work/1', conversationId: 'chat/1' } as Notification;
@@ -17,34 +17,12 @@ it('opens a proactive message in its actual direct conversation', () => {
     .toBe('/ghosts/ghost%2F1?conversation=chat%2F1');
 });
 
-it('opens a coding notification only when the current herdr session matches', () => {
-  const coding = { ...notification, id: 'coding:studio:w1:p1:blocked:123', decisionId: null, workId: null };
-  expect(notificationRoute(coding, state, 'studio')).toBe('/coding?herdr=w1%3Ap1');
-  expect(notificationRoute(coding, state, 'default')).toBeNull();
-  expect(notificationRoute(coding, state, null)).toBeNull();
-  expect(notificationRoute(coding, state)).toBe('/ghosts/ghost%2F1?conversation=chat%2F1');
+it('keeps an old pane notification readable with no coding destination', () => {
+  const item = { ...notification, id: 'coding:studio:w1:p1:exit:123', decisionId: null, workId: null, conversationId: null };
+  expect(notificationRoute(item, state)).toBeNull();
 });
 
-it.each(['blocked', 'done', 'exit'])('opens a native %s tap only if the pane still exists in the active herdr session', kind => {
-  const coding = { ...notification, id: `coding:studio:w1:p1:${kind}:123` };
-  const pane = { id: 'w1:p1', agent: null } as HerdrPaneView;
-  const roster: HerdrView = { available: true, session: 'studio', note: null, workspaces: [{
-    id: 'w1', label: 'Studio', status: 'unknown', worktree: null,
-    tabs: [{ id: 'w1:t1', label: 'Shell', status: 'unknown', panes: [pane] }],
-  }] };
-  expect(notificationRoute(coding, state, roster)).toBe('/coding?herdr=w1%3Ap1&herdrSession=studio');
-  expect(notificationRoute(coding, state, { ...roster, workspaces: [] })).toBe('/coding');
-  expect(notificationRoute(coding, state, { ...roster, session: 'default' })).toBe('/coding');
-  expect(notificationRoute(coding, state, { ...roster, available: false })).toBe('/coding');
-});
-
-it('accepts an exit notification in the web inbox and still rejects a foreign session', () => {
-  const coding = { ...notification, id: 'coding:studio:w1:p1:exit:123' };
-  expect(notificationRoute(coding, state, 'studio')).toBe('/coding?herdr=w1%3Ap1');
-  expect(notificationRoute(coding, state, 'other')).toBeNull();
-});
-
-it('opens an owner terminal notification in the workbench without a herdr lookup', () => {
+it('opens an owner terminal notification in the workbench', () => {
   const id = '78396e40-f7fb-4208-9f60-2b543fa28e21';
   expect(notificationRoute({ ...notification, id: `coding:terminal:${id}:1`, decisionId: null, workId: null }, state))
     .toBe(`/coding?terminal=${id}`);
@@ -53,5 +31,4 @@ it('opens an owner terminal notification in the workbench without a herdr lookup
 it('opens embedded session attention directly instead of opening the assigned Work', () => {
   const item = { ...notification, id: 'session:coding-52ab:turn:2:waiting', decisionId: null };
   expect(notificationRoute(item, state)).toBe('/coding?session=coding-52ab');
-  expect(notificationRoute(item, state, 'studio')).toBe('/coding?session=coding-52ab');
 });

@@ -8,7 +8,7 @@ import { HostError } from '../host/client';
 import { useHost } from '../host/context';
 import { Button, InlineError, Input, Popover, PopoverContent, PopoverTrigger } from '../ui';
 import { isMac, shortcut } from '../ui/keys';
-import { StartSession } from './CodingSessionRoster';
+import { StartSession } from './CodingSessionStart';
 import { codingError } from './CodingSessionModel';
 import { WorkbenchAgentStart } from './WorkbenchAgentStart';
 import { useWorkbenchAttention, type Attention } from './WorkbenchAttention';
@@ -17,6 +17,7 @@ import { WorkbenchChanges } from './WorkbenchChanges';
 import { paneView } from './WorkbenchPane';
 import { resolveSessionLink } from './workbenchSessionLink';
 import './Workbench.css';
+import './CodingSession.css';
 
 type Resource = { kind: 'space'; item: Space } | { kind: 'tab'; item: Tab };
 type Dialog =
@@ -261,7 +262,6 @@ export function Workbench({ scopes, compact, terminalId, sessionId, navigate }: 
   </nav>;
   const sideLinks = <nav className="workbench-links" aria-label="코딩 메뉴">
     <a href="#/coding/orchestration" onClick={event => { event.preventDefault(); navigate('/coding/orchestration'); }}>오케스트레이션</a>
-    <a href="#/coding?view=herdr" onClick={event => { event.preventDefault(); navigate('/coding?view=herdr'); }}>herdr</a>
   </nav>;
 
   let sheet: ReactNode;
@@ -319,7 +319,7 @@ export function Workbench({ scopes, compact, terminalId, sessionId, navigate }: 
   } else if (dialog?.type === 'start') {
     const target = dialog;
     const roots = [...new Set([space?.root, ...scopes.flatMap(scope => scope.paths)].filter((path): path is string => Boolean(path)))];
-    sheet = <StartSession directories={roots} allowDirect onClose={dismiss} onCreated={session => {
+    sheet = <StartSession directories={roots} onClose={dismiss} onCreated={session => {
       dismiss();
       showFailure(addPane(target, { kind: 'session', sessionId: session.id }));
     }}/>;

@@ -30,14 +30,9 @@ import { Goals } from './features/goals/Goals';
 import { WorkDetail } from './features/WorkDetail';
 import { InboxView } from './features/Inbox';
 import { HostView } from './features/HostView';
-import { CodingSettings } from './features/CodingSetup';
 import { PiConfigSettings } from './features/PiConfig';
-import { CodingPage } from './features/Coding';
+import { Workbench } from './features/Workbench';
 import { Orchestration, orchestrationPath } from './features/Orchestration';
-import { startsCodingEntry } from './features/CodingModel';
-import { embeddedSessionPath } from './features/CodingSessionModel';
-import { herdrPanePath } from './features/herdrDisplay';
-import { useHerdrAttention } from './features/herdrAttention';
 import { GhostSettings } from './features/GhostSettings';
 import { MobilePairing } from './features/MobilePairing';
 import { VaultView } from './features/VaultView';
@@ -56,7 +51,7 @@ import { initializeDesktopCompanion, isDesktopShell } from './host/desktop';
 import DesktopAvatarSettings from './features/DesktopAvatarSettings';
 import { onShellEvent, ready, shell, shellCall, type ShellEvent } from './host/shell';
 import { useVisibleViewport } from './host/viewport';
-import { codingNotificationAddress, notificationRoute } from './features/notificationRoute';
+import { notificationRoute } from './features/notificationRoute';
 import { useCompact } from './ui/adaptive';
 import { SlotSettings } from './features/SlotSettings';
 import { LimitSettings } from './features/LimitSettings';
@@ -92,7 +87,6 @@ function Shell() {
   useVisibleViewport();
   const compact = useCompact();
   const [route, setRoute] = useState(currentRoute);
-  const [codingEntry, setCodingEntry] = useState({ id: 0, restore: true });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [desktopError, setDesktopError] = useState('');
   // The shell owns whether the desktop Ghost is shown; mirror it into the shared preference once.
@@ -102,14 +96,7 @@ function Shell() {
   // The main region owns scrolling; a new destination starts at its top.
   const resetScroll = () => { document.getElementById('main-content')?.scrollTo(0, 0); };
   useEffect(() => {
-    const change = (event: HashChangeEvent) => {
-      const next = currentRoute();
-      const previous = new URL(event.oldURL).hash.slice(1) || '/';
-      if (new URL(event.newURL).hash === location.hash && startsCodingEntry(previous, next)) {
-        setCodingEntry(entry => ({ id: entry.id + 1, restore: true }));
-      }
-      setRoute(next);
-    };
+    const change = () => setRoute(currentRoute());
     window.addEventListener('hashchange', change);
     return () => window.removeEventListener('hashchange', change);
   }, []);
@@ -135,10 +122,9 @@ function Shell() {
     history.replaceState(history.state, '', `#${next}`);
     setRoute(next);
   };
-  const navigate = (path: string, codingRosterOnly = false) => {
+  const navigate = (path: string) => {
     const next = path === '/conversations' ? mainChatPath ?? path : path;
     const from = currentRoute();
-    if (codingRosterOnly || startsCodingEntry(from, next)) setCodingEntry(entry => ({ id: entry.id + 1, restore: !codingRosterOnly }));
     resetScroll();
     if (from !== next) historyNav.push(`#${next}`);
     setRoute(next);
@@ -149,8 +135,6 @@ function Shell() {
   useEffect(() => {
     if (!shell) return;
     const queued = new Set<string>();
-    const active = new AbortController();
-    let lastTap = 0;
     const drain = () => {
       const current = store.get().state;
       if (!current) return;
@@ -159,18 +143,8 @@ function Shell() {
         if (!item) continue;
         queued.delete(id);
         if (!item.readAt) void client.send({ type: 'notification.read', notificationIds: [id] }).catch(() => {});
-        const tap = ++lastTap;
-        if (codingNotificationAddress(id)) {
-          const from = currentRoute();
-          void client.herdr(active.signal).catch(() => null).then(view => {
-            if (active.signal.aborted || tap !== lastTap || currentRoute() !== from) return;
-            const destination = view ? notificationRoute(item, current, view) ?? '/coding' : '/coding';
-            navigateRef.current(destination, destination === '/coding');
-          });
-        } else {
-          const destination = notificationRoute(item, current);
-          if (destination) navigateRef.current(destination);
-        }
+        const destination = notificationRoute(item, current);
+        if (destination) navigateRef.current(destination);
       }
     };
     // Coming back keeps the screen: the stream reopens from the current seq.
@@ -180,7 +154,7 @@ function Shell() {
     };
     const unsubscribe = onShellEvent(event => shellEvents.current(event));
     const unsubscribeStore = store.subscribe(drain);
-    return () => { active.abort(); unsubscribe(); unsubscribeStore(); };
+    return () => { unsubscribe(); unsubscribeStore(); };
   }, [store, client]);
   // The shell lifts its loading view on `ready`: send it after the first frame that draws real
   // content (the cached or fresh snapshot) or the failure to get any. The timer covers a
@@ -205,8 +179,6 @@ function Shell() {
   const params = new URLSearchParams(query);
   const section = path.split('/')[1]?.split('?')[0] || 'home';
   const orchestrationOpen = path === orchestrationPath;
-  const legacyCoding = section === 'coding' && (params.get('view') === 'herdr' || params.has('herdr') || params.get('new') === '1');
-  const codingAttention = useHerdrAttention(Boolean(state) && connection === 'live', legacyCoding);
   useEffect(() => {
     if (section === 'workspace' && !compact) {
       history.replaceState(history.state, '', '#/');
@@ -233,14 +205,8 @@ function Shell() {
 
   const selectedScope = section === 'scopes' && path.split('/')[2] ? decodeURIComponent(path.split('/')[2]!) : undefined;
   const embeddedSessionId = section === 'coding' ? params.get('session') : null;
-  const codingDetail = section === 'coding' && (embeddedSessionId !== null || params.get('new') === '1' || params.has('herdr'));
+  const codingDetail = embeddedSessionId !== null;
   const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail' || section === 'coding';
-  const closeCodingForm = (next: string) => {
-    // A start can finish after the owner leaves the form, without pulling them back.
-    if (currentRoute() !== route) return;
-    history.replaceState(history.state, '', `#${next}`);
-    setRoute(next);
-  };
 
   const go = (target: string) => () => navigate(target);
   const ghostName = (id: string) => ghosts.find(ghost => ghost.id === id)?.name ?? 'Ghost';
@@ -260,7 +226,6 @@ function Shell() {
     { id: 'new-work', label: '일 맡기기', group: '실행', onSelect: go('/work?new=1') },
     { id: 'new-ghost', label: '새 Ghost', group: '실행', onSelect: go('/settings?tab=team&new=1') },
     { id: 'new-space', label: '새 프로젝트', group: '실행', onSelect: go('/scopes?new=1') },
-    { id: 'new-herdr-space', label: '새 스페이스', group: '실행', onSelect: go('/coding?new=1') },
     { id: 'home', label: routeLabels.home, group: '이동', onSelect: go('/') },
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },
@@ -306,7 +271,7 @@ function Shell() {
     { id: 'history', label: '구성 기록', icon: RefreshCw, content: <ConfigHistory/> },
     { id: 'metrics', label: '계측', icon: Server, content: <ScopeMetrics/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
-    { id: 'coding', label: '코딩', icon: SquareTerminal, content: <><PiConfigSettings/><CodingSettings/></> },
+    { id: 'coding', label: '코딩', icon: SquareTerminal, content: <PiConfigSettings/> },
     { id: 'voice', label: '음성', icon: Mic, content: <VoiceSettings/> },
     { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
@@ -320,7 +285,7 @@ function Shell() {
 
   const runtimeDown = Boolean(state && !state.runtime.ready);
   const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null}
-    selectedScope={params.has('new') ? undefined : selectedScope} attentionCount={attentionCount} blockedAgents={codingAttention.count}
+    selectedScope={params.has('new') ? undefined : selectedScope} attentionCount={attentionCount}
     status={status} navigate={navigate} openGhost={switchGhost}/>;
 
   return <div className="ghost-root">
@@ -328,7 +293,7 @@ function Shell() {
       <AvatarProvider animate={preferences.animate}>
         <CallProvider ghosts={ghosts} engine={state?.settings.voice?.engine} connection={connection}>{callTray =>
         <AppFrame desktop={desktopShell} macOSInset={desktopMac ? 80 : 0}
-          section={section} attentionCount={attentionCount} blockedAgents={codingAttention.count} navigate={navigate}
+          section={section} attentionCount={attentionCount} navigate={navigate}
           hideDock={orchestrationOpen || codingDetail || section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
           location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
             compactBack={section === 'settings' && params.has('tab') ? '/settings'
@@ -336,7 +301,7 @@ function Shell() {
               : section === 'workspace' ? '/conversations'
               : section === 'goals' || section === 'mail' ? '/workspace'
               : section === 'work' && path.split('/')[2] ? '/work'
-              : codingDetail ? (embeddedSessionId === null || params.get('view') === 'herdr' ? '/coding?view=herdr' : '/coding')
+              : codingDetail ? '/coding'
               : section === 'scopes' && selectedScope ? '/workspace' : undefined}
             onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
@@ -353,25 +318,14 @@ function Shell() {
           <UpdatePrompt monitor={update} navigate={navigate}/>
           {runtimeDown && state && section !== 'home' && section !== 'coding' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={status.state !== 'offline'}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
-            {section === 'home' && <Overview state={state} navigate={navigate} codingSession={codingAttention.session}/>}
+            {section === 'home' && <Overview state={state} navigate={navigate}/>}
             {section === 'conversations' && !mainChatPath && <Conversations ghosts={ghosts} openGhost={switchGhost} openWorkspace={() => navigate('/workspace')}/>}
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
-            {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')} codingSession={codingAttention.session}/>}
+            {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
             {orchestrationOpen && <Orchestration/>}
-            {section === 'coding' && !orchestrationOpen && <CodingPage key={codingEntry.id} restoreLastPane={codingEntry.restore}
-              legacy={legacyCoding} terminalId={params.get('terminal')} navigate={navigate}
-              scopes={state.scopes} herdrPane={params.get('herdr')} herdrSession={params.get('herdrSession')} creating={params.get('new') === '1'} compact={compact}
-              embeddedSessionId={embeddedSessionId} onOpenEmbedded={id => {
-                if (currentRoute() === route) navigate(`${embeddedSessionPath(id)}${params.get('view') === 'herdr' ? '&view=herdr' : ''}`);
-              }}
-              onRoster={codingAttention.reportRoster}
-              onRestore={id => closeCodingForm(herdrPanePath(id))}
-              onCancel={() => closeCodingForm(embeddedSessionId === null || params.get('view') === 'herdr' ? '/coding?view=herdr' : '/coding')} onOpen={id => {
-                if (currentRoute() !== route) return;
-                if (params.get('new') === '1') closeCodingForm(herdrPanePath(id));
-                else navigate(herdrPanePath(id));
-              }}/>}
+            {section === 'coding' && !orchestrationOpen && <Workbench scopes={state.scopes} compact={compact}
+              terminalId={params.get('terminal')} sessionId={embeddedSessionId} navigate={navigate}/>}
             {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>

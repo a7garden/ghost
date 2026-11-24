@@ -7,7 +7,7 @@ import { CLOCK_INSTRUCTIONS } from "../core/clock.ts";
 import { describeWork } from "../core/works.ts";
 import { firstLine } from "./shared.ts";
 import { modelInputOf } from "../engine/models.ts";
-import type { DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort, DesktopPort, HerdrPort } from "../integrations/ports.ts";
+import type { DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort, DesktopPort } from "../integrations/ports.ts";
 import type { TossPort } from "../integrations/toss.ts";
 import type { MemoryStore } from "../stores/memory.ts";
 import type { MemoryEngine } from "../memory/types.ts";
@@ -198,8 +198,6 @@ export function createToolSet(deps: {
   memoryEngine?: () => Partial<MemoryEngine> | null;
   documents: DocumentsPort | null;
   host?: HostPort | null;
-  /** The owner's herdr, if installed alongside embedded coding. */
-  herdr?: HerdrPort | null;
   skills: SkillsPort | null;
   /** Read-only web research (ghost.web); null leaves the tools out. */
   reach?: ReachPort | null;
@@ -232,7 +230,7 @@ export function createToolSet(deps: {
   const memory = deps.memory === null ? null : createMemoryTools(deps.core, deps.memory, deps.memoryEngine);
   const documents = deps.documents === null ? null : harden(createDocumentsTools(deps.core, deps.documents));
   const host = deps.host ? harden(createHostTools(deps.core, deps.host)) : null;
-  const coding = deps.herdr || deps.core.codingSessions ? harden(createCodingTools(deps.core, deps.herdr ?? null)) : null;
+  const coding = deps.core.codingSessions ? harden(createCodingTools(deps.core)) : null;
   const skills = harden(createSkillsTools(deps.core, deps.skills));
   const web = deps.reach ? harden(createWebTools(deps.core, deps.reach)) : null;
   // Citation tools come with web_read; the engine hides them from a Ghost without it, never from a reviewer.

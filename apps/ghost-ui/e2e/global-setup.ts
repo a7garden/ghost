@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,8 +38,6 @@ async function startSeededHost(tempRoot: string, name: RunHost, mockPort: number
   const hostRoot = join(root, 'host');
   const scopePath = join(root, 'projects');
   mkdirSync(hostRoot, { recursive: true });
-  // The UI polls for Coding attention globally. Tests that need herdr mock it instead of reading the owner's session.
-  writeFileSync(join(hostRoot, 'config.json'), JSON.stringify({ coding: false }));
   mkdirSync(scopePath);
   const host = spawn('bun', ['../ghost-host/src/main.ts', 'serve'], {
     cwd: join(dirname(fileURLToPath(import.meta.url)), '..'),

@@ -5,8 +5,8 @@ import { Modal } from '../components/Modal';
 import { useHost } from '../host/context';
 import { Button, InlineError } from '../ui';
 import { codingError } from './CodingSessionModel';
-import { HerdrDiffText } from './HerdrChanges';
-import { changeStatus } from './herdrChangesDisplay';
+import { DiffText } from './DiffText';
+import { changeStatus } from './codingChangesDisplay';
 
 export function WorkbenchChanges({ spaceId, onClose }: { spaceId: string; onClose(): void }) {
   const { client } = useHost();
@@ -48,14 +48,14 @@ export function WorkbenchChanges({ spaceId, onClose }: { spaceId: string; onClos
         <span>{changes.branch && <><code>{changes.branch}</code> · </>}{changes.files.length ? `${changes.files.length}개 파일` : '변경된 파일 없음'}</span>
         <Button type="button" size="icon" variant="ghost" aria-label="변경 새로고침" onClick={refresh}><RefreshCw aria-hidden="true"/></Button>
       </div>
-      {changes.files.length > 0 && <ul className="herdr-changed-files max-h-[30dvh] overflow-y-auto" aria-label="변경된 파일">
+      {changes.files.length > 0 && <ul className="coding-changed-files max-h-[30dvh] overflow-y-auto" aria-label="변경된 파일">
         {changes.files.map(entry => {
           const status = changeStatus[entry.status];
           return <li key={entry.path}><button type="button" aria-current={entry.path === path || undefined}
             onClick={() => { if (selected !== entry.path) { setFile(undefined); select(entry.path); } }}>
-            <span className="herdr-file-status" data-tone={status.tone} title={status.label} aria-label={status.label}>{status.mark}</span>
+            <span className="coding-file-status" data-tone={status.tone} title={status.label} aria-label={status.label}>{status.mark}</span>
             <code>{entry.path}</code>
-            <span className="herdr-file-counts">{entry.additions !== null && <span data-kind="addition">+{entry.additions}</span>}
+            <span className="coding-file-counts">{entry.additions !== null && <span data-kind="addition">+{entry.additions}</span>}
               {entry.deletions !== null && <span data-kind="deletion">−{entry.deletions}</span>}</span>
             <ChevronRight size={14} aria-hidden="true"/>
           </button></li>;
@@ -69,11 +69,11 @@ export function WorkbenchChanges({ spaceId, onClose }: { spaceId: string; onClos
           : detail.diff && <>
             {detail.diff.staged && <section aria-label="스테이징된 변경">
               <h4 className="embedded-muted">스테이징된 변경</h4>
-              <HerdrDiffText value={detail.diff.staged} wrap={false}/>
+              <DiffText value={detail.diff.staged}/>
             </section>}
             {detail.diff.unstaged && <section aria-label="작업 폴더 변경">
               <h4 className="embedded-muted">작업 폴더 변경</h4>
-              <HerdrDiffText value={detail.diff.unstaged} wrap={false}/>
+              <DiffText value={detail.diff.unstaged}/>
             </section>}
             {!detail.diff.staged && !detail.diff.unstaged && !detail.diff.truncated && <p className="embedded-muted">표시할 파일 차이가 없습니다.</p>}
             {detail.diff.truncated && <p className="embedded-muted">파일 차이가 커서 모두 표시할 수 없습니다.</p>}

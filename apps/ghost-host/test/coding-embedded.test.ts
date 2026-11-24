@@ -129,7 +129,7 @@ function setup(path = ":memory:", sessions = new Sessions(), engine = new Engine
     h.ledger.close();
   };
   cleanups.push(shutdown);
-  const tools = createCodingTools(h.core, null).tools!;
+  const tools = createCodingTools(h.core).tools!;
   async function call(conversationId: string, name: "code_run" | "code_agents", args: object, callId: string = crypto.randomUUID()) {
     const piId = h.ledger.piConversationId(conversationId) ?? `pi-${conversationId}`;
     h.ledger.setPiConversationId(conversationId, piId);
@@ -178,7 +178,7 @@ test("embedded code_run recovers a lost create ACK without opening a second sess
   expect(first.sessions.subscriptions).toBe(2);
   expect(first.sessions.listeners.size).toBe(1);
   expect(second.ledger.effectByCall(conversation, "first")?.state).toBe("done");
-  expect(second.core.coding.list(work.id)[0]).toMatchObject({ pane: null, session: `ghost:${session}`, state: "uncertain", deliveredTurn: 1 });
+  expect(second.core.coding.list(work.id)[0]).toMatchObject({ session: `ghost:${session}`, state: "uncertain", deliveredTurn: 1 });
   expect(second.engine.submissions.get(wakeId(session))?.submission.text).toContain('"outcome":"interrupted"');
 });
 
@@ -370,4 +370,46 @@ test("both coding tools refuse revoked PC access and an owner-PC read cannot lea
   expect((await f.call(conversation, "code_run", { session, task: "Refused" })).isError).toBe(true);
   expect(f.sessions.reads).toBe(noReads);
   expect(f.sessions.prompts).toEqual([]);
+});
+
+test("explicit CLI agents are refused before a coding effect or session is created", async () => {
+  const f = setup();
+  const { work, conversation } = await f.createWork();
+  for (const agent of ["omp", "claude", "codex"]) {
+    const result = await f.call(conversation, "code_run", { ...firstTask, agent });
+    expect(result).toMatchObject({ isError: true, text: expect.stringContaining("use the workbench terminal for CLI agents") });
+  }
+  expect(f.ledger.effectsForWork(work.id)).toEqual([]);
+  expect(f.sessions.creates).toEqual([]);
+  const allowed = await f.call(conversation, "code_run", { ...firstTask, agent: "ghost" });
+  expect(JSON.parse(allowed.text)).toMatchObject({ agent: "ghost", disposition: "started", turn: 1 });
+});
+
+test("a coding report releases only its own wait, not a live child Work", async () => {
+  const f = setup();
+  const { work, conversation } = await f.createWork();
+  const helper = f.core.createGhost({ name: "Helper", persona: "" });
+  f.core.works.delegate(work.id, { ghostId: helper.id, title: "Independent task", brief: "Still live", execution: { kind: "workspace" } });
+  const { session } = await start(f, conversation);
+  f.core.works.onIdle(work.id);
+  f.sessions.settle(session, "done");
+  await f.core.idle();
+  expect(f.engine.submissions.has(wakeId(session))).toBe(true);
+  expect(f.core.coding.pending(work.id)).toBe(false);
+  expect(f.ledger.work(work.id).state).toBe("waiting");
+});
+
+test("provider quota cannot wake a Work whose coding turn exhausted its budget during the hold", async () => {
+  const f = setup();
+  const { work, conversation } = await f.createWork();
+  const { session } = await start(f, conversation);
+  f.core.quota.hold(conversation, { text: "Deferred input", origin: "work", requestId: "deferred-before-budget" }, [], "work");
+  expect(f.ledger.work(work.id)).toMatchObject({ hold: "quota", budgetSince: expect.any(Number) });
+  const expiredAt = Date.now() + 65_000;
+  f.core.works.expire(expiredAt);
+  expect(f.ledger.work(work.id)).toMatchObject({ hold: "budget", state: "blocked" });
+  f.core.quota.tick(expiredAt);
+  await f.core.idle();
+  expect(f.engine.submissions.has("deferred-before-budget")).toBe(false);
+  expect(f.sessions.aborts).toEqual([session]);
 });

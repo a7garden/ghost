@@ -11,7 +11,7 @@ export const CompactTitleSlot = createContext<HTMLDivElement | null>(null);
  * The window: a quiet sidebar on the page tone, the destination on an inset sheet,
  * and a title bar that carries location, the activity island and command search.
  */
-export function AppFrame({ desktop, macOSInset, location, island, duty, callTray, sidebar, fill, commands, paletteOpen, onPaletteOpenChange, section, attentionCount, blockedAgents, navigate, hideDock, children }: {
+export function AppFrame({ desktop, macOSInset, location, island, duty, callTray, sidebar, fill, commands, paletteOpen, onPaletteOpenChange, section, attentionCount, navigate, hideDock, children }: {
   /** Inside the Tauri window: draw the draggable title bar above everything. */
   desktop: boolean;
   macOSInset: number;
@@ -30,7 +30,6 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, callTray
   onPaletteOpenChange(open: boolean): void;
   section: string;
   attentionCount: number;
-  blockedAgents: number;
   navigate(path: string): void;
   hideDock: boolean;
   children: ReactNode;
@@ -86,7 +85,6 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, callTray
         <span className="compact-dock__icon">
           <item.icon size={21} aria-hidden="true"/>
           {item.id === 'inbox' && attentionCount > 0 && <span className="compact-dock__badge">{attentionCount}<span className="sr-only">개 확인 요청</span></span>}
-          {item.id === 'coding' && blockedAgents > 0 && <span className="compact-dock__badge">{blockedAgents}<span className="sr-only">개 입력 필요</span></span>}
         </span>
         <span>{item.label}</span>
       </button>)}

@@ -4,7 +4,6 @@ import { dirname, isAbsolute, join } from "node:path";
 import { Type } from "typebox";
 import { validate, type OmpInfo } from "@ghost/contract";
 import { CommandError, invalid } from "../core/errors.ts";
-import { findProgram } from "./herdr.ts";
 
 const Models = Type.Object({
   models: Type.Array(Type.Object({
@@ -32,7 +31,10 @@ export class OmpInfoProvider {
   constructor(private readonly options: { executable?: string | null; sessionsRoot?: string; home?: string } = {}) {}
 
   private get executable(): string | null {
-    return this.options.executable !== undefined ? this.options.executable : findProgram("omp");
+    if (this.options.executable !== undefined) return this.options.executable;
+    const home = this.options.home ?? homedir();
+    const PATH = [join(home, ".bun/bin"), join(home, ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", process.env.PATH].filter(Boolean).join(":");
+    return Bun.which("omp", { PATH });
   }
 
   private async models(): Promise<OmpInfo["models"]> {

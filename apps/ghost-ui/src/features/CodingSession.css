@@ -1,20 +1,24 @@
 @layer components {
-  .embedded-roster { padding: 4px 0 8px; margin-block-end: 8px; border-block-end: 1px solid var(--ghost-line); }
-  .embedded-roster > header { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-inline: 8px 0; }
-  .embedded-roster h2 { margin: 0; color: var(--ghost-ink2); font-size: var(--text-caption); font-weight: 650; }
-  .embedded-roster ul { margin: 0; padding: 0; list-style: none; }
-  .embedded-roster li a {
-    display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 0 8px;
-    min-height: 36px; padding: 5px 8px; border-radius: var(--radius-control); color: var(--ghost-ink);
-  }
-  .embedded-roster li a:hover, .embedded-roster li a[aria-current='page'] { background: var(--ghost-hover); }
-  .embedded-roster li strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); font-weight: 600; }
-  .embedded-roster li a > span[title] { grid-column: 2; }
-  .embedded-roster li a > span[title], .embedded-branch {
+  .coding-changed-files { margin: 0; padding: 0; list-style: none; }
+  .coding-changed-files button { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 8px; align-items: center;
+    text-align: start; cursor: pointer; min-height: 44px; padding: 8px; border-radius: var(--radius-control); }
+  .coding-changed-files button:hover, .coding-changed-files button[aria-current] { background: var(--ghost-hover); }
+  .coding-changed-files button:focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: -2px; }
+  .coding-changed-files button > code { overflow-wrap: anywhere; }
+  .coding-changed-files svg { color: var(--ghost-ink3); }
+  .coding-file-status { width: 19px; height: 19px; display: grid; place-content: center; border-radius: 4px;
+    background: var(--ghost-inset); color: var(--ghost-ink2); font-family: var(--font-mono, monospace); font-size: var(--text-caption); }
+  .coding-file-status[data-tone='positive'] { color: var(--ghost-success-ink); background: var(--ghost-success-tint); }
+  .coding-file-status[data-tone='negative'] { color: var(--ghost-danger-ink); background: var(--ghost-danger-tint); }
+  .coding-file-counts { display: flex; gap: 6px; font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+  .coding-diff { flex: 1; margin: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 12px 16px; font-size: var(--text-caption); line-height: 1.6; }
+  .coding-diff [data-kind='meta'] { color: var(--ghost-ink3); }
+  .coding-diff [data-kind='hunk'] { color: var(--ghost-signal-ink); }
+  .embedded-branch {
     display: flex; align-items: center; gap: 5px; overflow: hidden; white-space: nowrap;
     color: var(--ghost-ink3); font: var(--text-micro)/1.5 var(--font-mono);
   }
-  .embedded-roster li a > span[title] > svg, .embedded-branch > svg { flex: none; }
+  .embedded-branch > svg { flex: none; }
   .embedded-branch > code { overflow: hidden; text-overflow: ellipsis; }
 
   .embedded-workspace .ghost-conversation__header { padding-block: 0; border-block-end: 1px solid var(--ghost-line); }
@@ -56,12 +60,12 @@
   .embedded-step-static > svg { color: var(--ghost-ink3); }
   .embedded-step__body { display: grid; gap: 6px; margin: 2px 0 4px 15px; padding-left: 12px; border-inline-start: 1px solid var(--ghost-line-strong); }
   .embedded-step__body > p { color: var(--ghost-ink2); font-size: var(--text-caption); }
-  .embedded-step__body > .herdr-diff, .embedded-tool-output, .embedded-dialog__command > pre {
+  .embedded-step__body > .coding-diff, .embedded-tool-output, .embedded-dialog__command > pre {
     min-width: 0; max-height: 320px; margin: 0; padding: 8px 10px; border-radius: var(--radius-control);
     background: var(--ghost-hover); overflow: auto; overscroll-behavior: contain; font: var(--text-caption)/1.6 var(--font-mono);
   }
-  :is(.embedded-step__body, .embedded-changes-sheet) .herdr-diff [data-kind='addition'], .embedded-changes__files [data-tone='positive'] { color: var(--ghost-success-ink); }
-  :is(.embedded-step__body, .embedded-changes-sheet) .herdr-diff [data-kind='deletion'], .embedded-changes__files [data-tone='negative'] { color: var(--ghost-danger-ink); }
+  :is(.embedded-step__body, .embedded-changes-sheet) .coding-diff [data-kind='addition'], .embedded-changes__files [data-tone='positive'] { color: var(--ghost-success-ink); }
+  :is(.embedded-step__body, .embedded-changes-sheet) .coding-diff [data-kind='deletion'], .embedded-changes__files [data-tone='negative'] { color: var(--ghost-danger-ink); }
   .embedded-subagent__title { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .embedded-subagent__title > :is(strong, svg) { flex: none; }
   .embedded-subagent__title strong { font-family: var(--font-mono); }
@@ -119,13 +123,13 @@
   .embedded-changes__files { min-width: 0; max-height: 30dvh; overflow: auto; margin: 0; padding: 0; list-style: none; }
   .embedded-changes__files li { display: grid; grid-template-columns: 1ch minmax(0, 1fr) max-content max-content; align-items: baseline; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--ghost-line); font: var(--text-caption)/1.5 var(--font-mono); }
   .embedded-changes__files code { overflow-wrap: anywhere; }
-  .embedded-changes-sheet .herdr-diff { padding: 8px 0; border-radius: var(--radius-control); }
-  :is(.embedded-roster, .embedded-workspace, .embedded-settings, .embedded-changes-sheet) :is(button, a, input, select, summary, pre):focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: -2px; }
+  .embedded-changes-sheet .coding-diff { padding: 8px 0; border-radius: var(--radius-control); }
+  :is(.embedded-workspace, .embedded-settings, .embedded-changes-sheet) :is(button, a, input, select, summary, pre):focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: -2px; }
 
   @media (max-width: 56rem) {
     .embedded-identity { min-height: 36px; gap: 8px; }
     .embedded-identity h2 { font-size: var(--text-body); }
-    .embedded-roster li a, .embedded-choice > label { min-height: 44px; }
+    .embedded-choice > label { min-height: 44px; }
     .embedded-workspace__head { padding: 0 0 3px; }
     .embedded-workspace__actions { gap: 0; }
     .embedded-model { max-width: 40%; }

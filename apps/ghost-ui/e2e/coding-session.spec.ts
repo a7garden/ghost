@@ -2,7 +2,6 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { attachmentB64, editTool, loginDiff, mockCodingSessions, partialReply, sampleSession } from './coding-session-mock';
-import { mockCodingApi } from './mocks';
 import { openScreen } from './visual';
 import { mockWorkbench } from './workbench-mock';
 
@@ -10,7 +9,7 @@ async function openSessionPicker(page: Page, creates: { repo?: string; cwd?: str
   const { service } = await mockWorkbench(page, creates);
   const { spaces: [space] } = service.createSpace({ title: '세션 테스트', root: null, version: 0 });
   service.createTab(space!.id, 1, '코딩 세션');
-  await openScreen(page, { name: 'coding', route: () => '/coding', waits: () => ['새 패널'], prepare: mockCodingApi }, 'light');
+  await openScreen(page, { name: 'coding', route: () => '/coding', waits: () => ['새 패널'] }, 'light');
   await page.getByRole('button', { name: '새 패널' }).click();
   await page.getByRole('dialog', { name: '새 패널' }).getByRole('button', { name: '코딩 세션', exact: true }).click();
   return page.getByRole('dialog', { name: '코딩 세션 선택' });

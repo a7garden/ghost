@@ -144,7 +144,7 @@ export class Terminals {
     const initialAgent = command ? agentName(command) : null;
     const view: TerminalView = { id, cwd, cols, rows, agent: initialAgent, state: initialAgent ? "working" : "idle", exitCode: null };
     const history = new TerminalReplay();
-    const activity = new TerminalActivity(id, view, this.options.quietMs ?? QUIET_MS, event => {
+    const activity = new TerminalActivity(view, this.options.quietMs ?? QUIET_MS, event => {
       try { this.options.onEvent?.({ ...view }, event); }
       catch (error) { this.options.log?.("터미널 알림을 전송하지 못했습니다.", error); }
     });

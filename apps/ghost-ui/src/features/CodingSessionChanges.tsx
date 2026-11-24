@@ -4,8 +4,8 @@ import type { CodingSessionChanges as Changes } from '../host/client';
 import { useHost } from '../host/context';
 import { Modal } from '../components/Modal';
 import { Button, InlineError } from '../ui';
-import { HerdrDiffText } from './HerdrChanges';
-import { changeStatus } from './herdrChangesDisplay';
+import { DiffText } from './DiffText';
+import { changeStatus } from './codingChangesDisplay';
 import { codingError } from './CodingSessionModel';
 
 export function CodingSessionChanges({ id, revision, onClose }: { id: string; revision: number; onClose(): void }) {
@@ -39,7 +39,7 @@ export function CodingSessionChanges({ id, revision, onClose }: { id: string; re
           <code>{file.path}</code><span data-tone="positive">+{file.additions}</span><span data-tone="negative">−{file.deletions}</span>
         </li>)}
       </ul>}
-      {result.diff && <HerdrDiffText value={result.diff} wrap={false}/>}
+      {result.diff && <DiffText value={result.diff}/>}
       {result.truncated && <p className="embedded-muted">변경 사항의 일부만 표시됩니다.</p>}
     </>}
   </Modal>;

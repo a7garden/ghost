@@ -347,7 +347,7 @@ export const MIGRATIONS: readonly string[] = [
   UPDATE ghosts SET tools = replace(tools, '"document_spaces"', '"document_scopes"');
   UPDATE works SET tool_scope = replace(tool_scope, '"document_spaces"', '"document_scopes"') WHERE tool_scope IS NOT NULL;
   `,
-  /* 12: managed coding turns, their exact Herdr target, and a durable result or stop intent. */ `
+  /* 12: managed coding turns with durable result or stop intent; retain legacy terminal bindings. */ `
   CREATE TABLE coding_runs (
     id TEXT PRIMARY KEY,
     work_id TEXT NOT NULL REFERENCES works(id),

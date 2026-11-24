@@ -29,10 +29,9 @@ const settledLabel: Record<Decision['state'], string> = { pending: '', approved:
  * 2026.11.22 : 좁은 화면에서 줄을 옆으로 압축한다 — 이름 없는(전체) 묶음 하나는 위 섹션 제목을 되풀이하지 않고,
  * 빠른 처리는 폭이 허락할 때 본문 옆에 붙는다. 묶음 사이도 좁힌다 (inbox-mobile.css).
  */
-export function InboxView({ state, navigate, focusDecisionId, codingSession }: {
+export function InboxView({ state, navigate, focusDecisionId }: {
   state: State;
   navigate(path: string): void;
-  codingSession?: string | null;
   /** ?decision= opens that decision in place. */
   focusDecisionId: string | null;
 }) {
@@ -87,7 +86,7 @@ export function InboxView({ state, navigate, focusDecisionId, codingSession }: {
   const markRead = (ids: string[]) => { setError(''); void client.send({ type: 'notification.read', notificationIds: ids }).catch(fail('읽음 표시를 저장하지 못했습니다.')); };
   const openNotification = (item: Notification) => {
     if (!item.readAt) markRead([item.id]);
-    const destination = notificationRoute(item, state, codingSession);
+    const destination = notificationRoute(item, state);
     if (destination) navigate(destination);
   };
   const resolveRecommended = async (decision: Decision) => {

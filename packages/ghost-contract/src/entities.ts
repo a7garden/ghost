@@ -296,9 +296,9 @@ export const MAIL_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => too
 export const FINANCE_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("toss_"));
 
 /**
- * The coding agents installed on the owner's Mac (omp, Claude Code, Codex): `code_agents` lists what the Host found and
- * `code_run` hands one a task in an isolated git worktree. Like PC execution it reaches everything the owner's account
- * can, so it is granted only explicitly and runs only for a Ghost the owner allows PC 직접 실행.
+ * Embedded coding for owner-PC Work: `code_agents` reads sessions and `code_run` hands one a task in an isolated
+ * git worktree. Like PC execution it reaches everything the owner's account can, so it is granted only explicitly
+ * and runs only for a Ghost the owner allows PC 직접 실행.
  */
 export const CODE_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("code_"));
 
@@ -925,8 +925,6 @@ export const Settings = Type.Object({
   nextMessageSuggestions: Type.Optional(Type.Boolean()),
   /** Model for next-message suggestions; null follows defaultModel. */
   suggestionModel: Type.Optional(nullable(ModelRef)),
-  /** How a coding follow-up sent while the agent works is delivered; default steer. */
-  codingDelivery: Type.Optional(Type.Union([Type.Literal("steer"), Type.Literal("queue")])),
   providers: Type.Array(Provider, { maxItems: 64 }),
   ownerLanguage: Type.Optional(OwnerLanguage),
   approvals: Type.Optional(ApprovalPolicy),

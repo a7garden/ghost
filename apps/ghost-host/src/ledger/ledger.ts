@@ -86,20 +86,11 @@ export interface CodingRunRecord {
   identity: string;
   attempt: string;
   turnsInAttempt: number;
-  /** False when the Work used an existing pane rather than creating its own worktree. */
-  isolated: boolean;
   opening: boolean;
-  launching: boolean;
-  promptAt: number | null;
   acknowledged: boolean;
-  completionBaseline: number | null | undefined;
-  agentSessionId: string | null;
-  seenPrompt: boolean;
-  foreignPrompt: boolean;
   claim: string | null;
   blockedNoticeAt: number | null;
-  finishing: { message: string; tail: string | null; outcome?: "done" | "failed" | "aborted" | "interrupted" } | null;
-  interrupted: boolean;
+  finishing: { message: string; outcome: "done" | "failed" | "aborted" | "interrupted" } | null;
   /** Used for reservation and reconciliation indexes, not inferred from an owner's UI state. */
   reserved: boolean;
   pending: boolean;
@@ -710,25 +701,13 @@ export class Ledger {
       .map((row) => parseJson<CodingRunRecord>(row.data));
   }
 
-  codingRunsForPane(session: string, pane: string, terminalId: string): CodingRunRecord[] {
-    return (this.db.query("SELECT data FROM coding_runs WHERE session = ? AND pane = ? AND terminal_id = ? ORDER BY reserved DESC, started_at DESC, id DESC")
-      .all(session, pane, terminalId) as Row[]).map((row) => parseJson<CodingRunRecord>(row.data));
-  }
-
-  codingPaneHeld(session: string, pane: string, terminalId: string, workId: string): boolean {
-    return this.db.query(`SELECT 1 FROM coding_runs AS run JOIN works AS work ON work.id = run.work_id
-      WHERE run.session = ? AND ((run.reserved = 1 AND (run.pane = ? OR run.terminal_id = ?))
-        OR (run.terminal_id = ? AND run.work_id <> ? AND work.state NOT IN ('done','failed','cancelled'))) LIMIT 1`)
-      .get(session, pane, terminalId, terminalId, workId) !== null;
-  }
-
   putCodingRun(record: CodingRunRecord) {
     const { run } = record;
     this.db.query(`INSERT INTO coding_runs (id,work_id,session,pane,terminal_id,reserved,pending,started_at,data)
       VALUES (?,?,?,?,?,?,?,?,?)
       ON CONFLICT (id) DO UPDATE SET pane=excluded.pane, terminal_id=excluded.terminal_id, reserved=excluded.reserved,
         pending=excluded.pending, started_at=excluded.started_at, data=excluded.data`)
-      .run(run.id, run.workId, run.session, run.pane, run.terminalId, +record.reserved, +record.pending, run.startedAt, JSON.stringify(record));
+      .run(run.id, run.workId, run.session, run.pane ?? null, run.terminalId ?? null, +record.reserved, +record.pending, run.startedAt, JSON.stringify(record));
     this.emit({ type: "work", work: this.work(run.workId) });
   }
 
@@ -1306,7 +1285,6 @@ export class Ledger {
       memoryModel: this.setting<ModelRef | null>("memoryModel", null),
       nextMessageSuggestions: this.setting<boolean>("nextMessageSuggestions", true),
       suggestionModel: this.setting<ModelRef | null>("suggestionModel", null),
-      codingDelivery: this.setting<Settings["codingDelivery"]>("codingDelivery", "steer"),
       providers: this.providers(),
       ownerLanguage: this.setting<string>("ownerLanguage", DEFAULT_OWNER_LANGUAGE),
       approvals: { ...DEFAULT_APPROVAL_POLICY, ...this.setting<Partial<ApprovalPolicy>>("approvals", {}) },

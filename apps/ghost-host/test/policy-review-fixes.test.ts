@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { CAPABILITY_GRANT, type HerdrPaneView, type PolicyRule } from "@ghost/contract";
+import { CAPABILITY_GRANT, type PolicyRule } from "@ghost/contract";
 import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { Core } from "../src/core/core.ts";
@@ -10,15 +10,13 @@ import { createBrowserTools } from "../src/tools/browser.ts";
 import { classifyDesktopEffect } from "../src/tools/desktop.ts";
 import { DEFAULT_RULES } from "../src/core/policy.ts";
 import { createMainTools } from "../src/tools/main.ts";
-import { harness, tempDir } from "./support.ts";
+import { harness, hostTaskId, tempDir } from "./support.ts";
 import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { createWorkTools } from "../src/tools/work.ts";
 import { HostExecutionEnv, HostMutationQueue } from "../src/sandbox/host-env.ts";
-import type { BrowserPort, BrowserRunOptions, BrowserSessionRef, HerdrPort, HostPort, SandboxEnvFactory } from "../src/integrations/ports.ts";
-import { HerdrStartError } from "../src/integrations/herdr.ts";
-import { CommandError } from "../src/core/errors.ts";
+import type { BrowserPort, BrowserRunOptions, BrowserSessionRef, HostPort, SandboxEnvFactory } from "../src/integrations/ports.ts";
+import { CodingSessions } from "../src/coding/index.ts";
 import { createCodingTools } from "../src/tools/coding.ts";
 
 const opened: { core: Core; ledger: Ledger }[] = [];
@@ -773,242 +771,30 @@ test("a plain read in a Host Work runs at once through the inspector; a change s
   expect(existsSync(join(s.scopeDir, "docs/x"))).toBe(false);
 });
 
-/** A herdr that makes a real git worktree, fires the opened callback before its "agent" runs, and has the agent commit there, the way the owner's herdr would show an agent doing. */
-async function codingFixture(options: { installed?: ("omp" | "claude" | "codex")[]; server?: boolean; blocked?: boolean; startFails?: string; failAfterPane?: boolean } = {}) {
+test("embedded code_run is a Mac write and Rule of Two holds it before the session is created", async () => {
   const s = await scopedHostWork();
-  s.ledger.tx(() => {
-    s.ledger.putGhost({ ...s.ledger.ghost(s.ghost.id), tools: [...s.ledger.ghost(s.ghost.id).tools, "code_run", "code_agents"] });
-    for (const rule of DEFAULT_RULES) s.ledger.putPolicyRule(rule);
-  });
-  const repo = join(s.scopeDir, "repo");
-  mkdirSync(repo, { recursive: true });
-  const gitIn = (cwd: string, ...args: string[]) => execFileSync("/usr/bin/git", args, { cwd, encoding: "utf8" });
-  const git = (...args: string[]) => gitIn(repo, ...args);
-  git("init", "-q", "-b", "main");
-  git("config", "user.email", "t@t");
-  git("config", "user.name", "t");
-  writeFileSync(join(repo, "a.txt"), "one\n");
-  git("add", "-A");
-  git("commit", "-qm", "init");
-  const calls: { op: string; arg: unknown }[] = [];
-  const lastPrompt = new Map<string, string>();
-  const promptSeq = new Map<string, number>();
-  const opened: { pane: string; terminalId: string; checkout: string; branch: string }[] = [];
-  const tree = new Map<string, { checkout: string; branch: string; terminalId: string; status: HerdrPaneView["status"] }>();
-  const commit = (cwd: string) => { writeFileSync(join(cwd, "b.txt"), `${calls.length}\n`); gitIn(cwd, "add", "b.txt"); gitIn(cwd, "commit", "-qm", "touch b"); };
-  const pane = (id: string): HerdrPaneView => {
-    const node = tree.get(id);
-    return { id, workspaceId: "w1", tabId: "w1:t1", workspace: "repo", tab: "work", agent: "omp", status: node?.status ?? "idle", cwd: node?.checkout ?? null, title: "work", focused: false, owned: true, ...(node ? { terminalId: node.terminalId } : {}) };
-  };
-  const result = (id: string, base: string | null) => ({ pane: pane(id), checkout: tree.get(id)!.checkout, branch: tree.get(id)!.branch, base, settled: "unwaited" as const });
-  const sessionStatus = (): HerdrPaneView["status"] => ([...tree.values()].some(node => node.status === "working") ? "working" : [...tree.values()].some(node => node.status === "blocked") ? "blocked" : "idle");
-  const unused = async (): Promise<never> => { throw new Error("not used by the coding tools"); };
-  const herdr: HerdrPort = {
-    session: "default",
-    overview: async () => ({ available: true, session: "default", note: null, workspaces: [...tree.keys()].length === 0 ? [] : [{ id: "w1", label: "repo", status: sessionStatus(), worktree: null, tabs: [{ id: "w1:t1", label: "work", status: sessionStatus(), panes: [...tree.keys()].map(pane) }] }] }),
-    output: async (id: string) => ({ pane: pane(id), text: "changed b.txt; checked nothing" }),
-    // The agent's own record: each managed prompt (marker and all) is one user record with its answer after it, and the cursor names the newest pair.
-    chat: async (id: string, after?: string | null) => ({ pane: id, source: "omp", title: null, model: null, items: after === `c${promptSeq.get(id) ?? 0}` ? [] : [
-      { id: `u${promptSeq.get(id) ?? 0}`, kind: "user", at: 1, text: lastPrompt.get(id) ?? "earlier owner chat" },
-      { id: `a${promptSeq.get(id) ?? 0}`, kind: "agent", at: 2, text: "changed b.txt; checked nothing" },
-    ], cursor: `c${promptSeq.get(id) ?? 0}`, reset: false }),
-    commands: unused,
-    ask: unused,
-    answer: unused,
-    control: unused,
-    controlSend: unused,
-    controlRelease: unused,
-    setup: async () => ({
-      herdr: { path: "/bin/herdr", version: "0.9.5" }, config: { ok: true, note: null }, session: "default", sessions: [{ name: "default", running: options.server !== false }],
-      server: options.server === false ? null : { version: "0.9.5", compatible: true, restartNeeded: false },
-      agents: (["omp", "claude", "codex"] as const).map((id) => ({ id, name: id, path: (options.installed ?? ["omp"]).includes(id) ? `/bin/${id}` : null, integration: "current" as const })),
-      kinds: [],
-      prefs: { session: null, agent: null, notify: "blocked" },
-    }),
-    installIntegration: async () => {},
-    start: async (input, wait?, openedCallback?, guard?) => {
-      calls.push({ op: "start", arg: { ...input, waited: wait !== undefined } });
-      if (options.startFails !== undefined && !options.failAfterPane) throw new CommandError("unavailable", options.startFails);
-      const checkout = join(s.scopeDir, "wt", `repo-${input.branch ?? "task"}`);
-      const branch = `ghost/${input.branch ?? "task"}`;
-      const base = git("rev-parse", "HEAD").trim();
-      git("worktree", "add", "-q", "-b", branch, checkout, base);
-      const id = `w${tree.size + 1}:p1`;
-      const terminalId = `term-${id}`;
-      tree.set(id, { checkout, branch, terminalId, status: options.blocked ? "blocked" : "working" });
-      // herdr fires this after the workspace exists and before the agent is launched or prompted; the run persists the handle it carries.
-      const prepared = result(id, base);
-      opened.push({ pane: id, terminalId, checkout, branch });
-      openedCallback?.(prepared);
-      guard?.authorize?.("open");
-      if (options.failAfterPane) throw new HerdrStartError(options.startFails ?? "agent did not start", id);
-      commit(checkout);
-      guard?.authorize?.("launch");
-      guard?.authorize?.("prompt", pane(id));
-      lastPrompt.set(id, input.task);
-      promptSeq.set(id, (promptSeq.get(id) ?? 0) + 1);
-      return result(id, base);
-    },
-    prompt: async (id: string, text: string, _wait?: unknown, guard?: { authorize?: (pane?: HerdrPaneView) => void }) => {
-      const node = tree.get(id);
-      if (!node) throw new CommandError("not_found", `herdr pane ${id}`);
-      // The exact mutation boundary: herdr lets the Host recheck authority right before the agent is handed the text.
-      guard?.authorize?.(pane(id));
-      calls.push({ op: "prompt", arg: { id, text } });
-      lastPrompt.set(id, text);
-      promptSeq.set(id, (promptSeq.get(id) ?? 0) + 1);
-      node.status = options.blocked ? "blocked" : "working";
-      commit(node.checkout);
-      return result(id, null);
-    },
-    changes: async (id: string) => ({ git: true, branch: tree.get(id)?.branch ?? null, base: null, commits: [], files: [], truncated: false }),
-    diff: unused, createWorkspace: unused, createTab: unused, split: unused, startAgent: unused, rename: unused, close: unused, input: unused, terminal: unused,
-  };
-  // The real core coding service, attached to this herdr the way app assembly does before the engine starts.
-  s.core.coding.attach(herdr);
-  const tools = createCodingTools(s.core, herdr).tools!;
-  const call = async (name: string, args: object, callId: string) => {
-    const out = await tools.find((tool) => tool.name === name)!.execute(args as never,
-      { conversationId: "scoped-host-pi", taskId: `task:${callId}`, callId, env: s.env, output: () => {}, diagnostic: () => {} } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
-    const part = out.output?.[0];
-    return { isError: out.isError === true, text: part?.type === "text" ? part.text : "" };
-  };
-  /** The agent answers: every pane herdr shows goes from working to done. */
-  const settle = () => { for (const node of tree.values()) node.status = "done"; };
-  /** The core service's own reconciler: the first look sees the agent working, the ones after it settle see it done. */
-  const drive = async () => {
-    await s.core.coding.poll();
-    settle();
-    for (let look = 0; look < 3; look++) await s.core.coding.poll();
-  };
-  /** A pane the owner started in herdr themself, idle in the session, working straight in the repo: not isolated, not yet any Work's. */
-  const ownerPane = (id = "w2:p7") => {
-    tree.set(id, { checkout: repo, branch: git("rev-parse", "--abbrev-ref", "HEAD").trim(), terminalId: `term-${id}`, status: "idle" });
-    return id;
-  };
-  return { ...s, repo, git, gitIn, call, calls, opened, settle, drive, ownerPane };
-}
-
-test("code_run starts the agent asynchronously in a fresh worktree, and its settled report reaches the Work conversation", async () => {
-  const s = await codingFixture();
-  const result = await s.call("code_run", { repo: s.repo, agent: "omp", task: "Add b.txt\nwith the number two", branch: "add-b" }, "run-1");
-  expect(result.isError).toBeFalsy();
-  const started = JSON.parse(result.text);
-  expect(started).toMatchObject({ work: s.work.id, pane: "w1:p1", agent: "omp", branch: "ghost/add-b", turn: 1 });
-  expect(typeof started.run).toBe("string");
-  // The call does not wait for the agent: herdr is started with no wait, and the opened handle was persisted before the agent ran.
-  expect(s.calls).toEqual([{ op: "start", arg: expect.objectContaining({ repo: s.repo, branch: "add-b", waited: false }) }]);
-  expect(s.opened[0]).toMatchObject({ pane: "w1:p1", terminalId: "term-w1:p1", checkout: join(s.scopeDir, "wt", "repo-add-b"), branch: "ghost/add-b" });
-  // The agent commits in the worktree herdr cut; the owner's checkout stays untouched.
-  expect(existsSync(join(s.scopeDir, "wt", "repo-add-b", "b.txt"))).toBe(true);
-  expect(s.git("status", "--short")).toBe("");
-  expect(s.git("rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
-  expect(existsSync(join(s.repo, "b.txt"))).toBe(false);
-  expect(s.ledger.pendingDecisions()).toHaveLength(0);
-
-  await s.drive();
-  const run = s.core.coding.list(s.work.id)[0]!;
-  expect(run).toMatchObject({ pane: "w1:p1", checkout: join(s.scopeDir, "wt", "repo-add-b"), branch: "ghost/add-b", state: "settled" });
-  expect(run.deliveredTurn).toBeGreaterThanOrEqual(1);
-  // The report is a new turn in the Work's conversation, under the run's own request id.
-  expect([...s.engine.submissions.keys()].some(id => id === `run:${run.id}:turn:1`)).toBe(true);
-  expect(JSON.stringify(s.engine.to(s.conversationId))).toContain("b.txt");
-});
-
-test("a settled pane carries on in the same conversation and worktree; a busy pane and an unknown pane are refused", async () => {
-  const s = await codingFixture();
-  const first = JSON.parse((await s.call("code_run", { repo: s.repo, agent: "omp", task: "Add b", branch: "again" }, "c-1")).text);
-  await s.drive();
-  const second = await s.call("code_run", { pane: first.pane, task: "Also touch it again" }, "c-2");
-  expect(second.isError).toBeFalsy();
-  expect(JSON.parse(second.text)).toMatchObject({ pane: first.pane, turn: 2 });
-  await s.drive();
-  expect(s.calls[1]).toMatchObject({ op: "prompt" });
-  expect((s.calls[1]!.arg as { id: string; text: string })).toMatchObject({ id: first.pane });
-  expect((s.calls[1]!.arg as { text: string }).text).toContain("Also touch it again");
-  // Same agent conversation and worktree: one branch, both commits in it.
-  const checkout = join(s.scopeDir, "wt", "repo-again");
-  expect(s.gitIn(checkout, "show", "HEAD:b.txt").trim()).toBe("2");
-  expect(s.gitIn(checkout, "show", "HEAD~1:b.txt").trim()).toBe("1");
-  expect(s.git("branch", "--list", "ghost/*").trim().split("\n")).toHaveLength(1);
-
-  // A pane that is still working refuses a new instruction before any mutation.
-  const busy = JSON.parse((await s.call("code_run", { repo: s.repo, agent: "omp", task: "Add b first", branch: "busy" }, "c-3")).text);
-  const rejected = await s.call("code_run", { pane: busy.pane, task: "cut in" }, "c-4");
-  expect(rejected.isError).toBe(true);
-  expect(s.calls.filter(call => call.op === "prompt")).toHaveLength(1);
-
-  const unknown = await s.call("code_run", { pane: "w9:p9", task: "x" }, "c-5");
-  expect(unknown.isError).toBe(true);
-  const neither = await s.call("code_run", { task: "x" }, "c-6");
-  expect(neither.isError).toBe(true);
-  expect(neither.text).toContain("pass exactly one of repo, session or pane");
-});
-
-test("code_run adopts an idle owner-started pane no Work holds: no worktree is cut, and the agent works where the owner had it", async () => {
-  const s = await codingFixture();
-  const pane = s.ownerPane();
-  const adoption = await s.call("code_run", { pane, task: "Fix it here" }, "adopt");
-  // The pane was never isolated by herdr, so its effect may ask the owner through the normal approval before the agent is prompted.
-  const decision = s.ledger.pendingDecisions().find(d => d.kind === "approve_effect");
-  if (decision) {
-    expect(adoption.isError).toBe(true);
-    expect(s.calls).toEqual([]);
-    await s.core.decisions.resolve(decision.id, { outcome: "approve" });
-    await s.core.idle();
-  } else expect(adoption.isError).toBeFalsy();
-  expect(s.calls.filter(call => call.op === "start")).toEqual([]);
-  expect(s.calls.filter(call => call.op === "prompt").length).toBe(1);
-  expect((s.calls.find(call => call.op === "prompt")!.arg as { id: string; text: string })).toMatchObject({ id: pane });
-  expect((s.calls.find(call => call.op === "prompt")!.arg as { text: string }).text).toContain("Fix it here");
-  // Nothing was cut for it: no ghost branch, and the commit lands in the pane's own directory.
-  expect(s.git("branch", "--list", "ghost/*").trim()).toBe("");
-  await s.drive();
-  const run = s.core.coding.list(s.work.id).find(row => row.pane === pane)!;
-  expect(run).toMatchObject({ pane, checkout: s.repo, state: "settled" });
-  expect(existsSync(join(s.repo, "b.txt"))).toBe(true);
-});
-
-test("code_run says what herdr could not do: refused before anything opened, uncertain after a pane opened, blocked at the owner", async () => {
-  const refused = await codingFixture({ startFails: "no herdr server is running at /x" });
-  const none = await refused.call("code_run", { repo: refused.repo, agent: "omp", task: "x" }, "refused");
-  expect(none.isError).toBe(true);
-  expect(none.text).toContain("no herdr server is running");
-
-  const half = await codingFixture({ startFails: "agent_not_ready: the agent is waiting at a login prompt", failAfterPane: true });
-  // What happened after herdr opened a pane reaches the Ghost with the pane named, so it can watch it; the failed opening window is never retried and settles uncertain.
-  const halfRun = await half.call("code_run", { repo: half.repo, agent: "omp", task: "x", branch: "half" }, "half");
-  expect(halfRun.isError).toBeFalsy();
-  expect(halfRun.text).toContain("w1:p1");
-  await half.core.coding.poll();
-  const halfRunRow = half.core.coding.list(half.work.id).find(row => row.pane === "w1:p1")!;
-  expect(["uncertain", "lost"]).toContain(halfRunRow.state);
-  expect(halfRunRow.terminalId).not.toBeNull();
-
-  // An agent waiting at a dialog is blocked on the owner, not failed: the turn stays open and nothing is delivered.
-  const waiting = await codingFixture({ blocked: true });
-  expect((await waiting.call("code_run", { repo: waiting.repo, agent: "omp", task: "x", branch: "blocked" }, "blocked")).isError).toBeFalsy();
-  await waiting.core.coding.poll();
-  const run = waiting.core.coding.list(waiting.work.id)[0]!;
-  expect(run.state).toBe("blocked");
-  expect(run.turn).toBe(1);
-  expect(JSON.stringify(waiting.engine.to(waiting.conversationId))).not.toContain("ghost/blocked");
-});
-
-test("code_agents says whether herdr is ready, which agents are installed, and which live agents run for a Work", async () => {
-  const ready = await codingFixture({ installed: ["claude", "codex"] });
-  expect(JSON.parse((await ready.call("code_agents", {}, "list")).text)).toEqual({
-    defaultExecutor: "ghost", sessions: [], herdr: "ready", session: "default", usedByDefault: "claude", roster: [],
-    agents: [{ id: "omp", name: "omp", installed: false, integration: "current" }, { id: "claude", name: "claude", installed: true, integration: "current" }, { id: "codex", name: "codex", installed: true, integration: "current" }],
-  });
-  const closed = await codingFixture({ server: false });
-  expect(JSON.parse((await closed.call("code_agents", {}, "closed")).text).herdr).toContain("no server is running in session default");
-
-  const live = await codingFixture();
-  await live.call("code_run", { repo: live.repo, agent: "omp", task: "Add b", branch: "roster" }, "start");
-  const roster = JSON.parse((await live.call("code_agents", {}, "roster")).text).roster;
-  expect(roster).toEqual([{ pane: "w1:p1", agent: "omp", status: "working", work: { id: live.work.id, title: expect.any(String), state: expect.any(String) }, run: expect.objectContaining({ turn: 1 }) }]);
-  const detail = JSON.parse((await live.call("code_agents", { pane: "w1:p1" }, "detail")).text).detail;
-  expect(detail.run).toMatchObject({ branch: "ghost/roster", checkout: join(live.scopeDir, "wt", "repo-roster") });
-  expect(detail.evidence).toMatchObject({ untrusted: true, pane: "w1:p1", claim: { source: "agent_transcript" } });
+  const sessions = new CodingSessions({ root: s.outside, ledger: s.ledger, settings: () => s.ledger.settings(), secrets: s.core.secrets, catalog: s.core.catalog, log: () => {}, authorizeGhost: () => {} });
+  s.core.setCodingSessions(sessions);
+  try {
+    s.ledger.tx(() => {
+      const ghost = s.ledger.ghost(s.ghost.id);
+      s.ledger.putGhost({ ...ghost, tools: [...ghost.tools, "code_run"] });
+      for (const rule of DEFAULT_RULES) s.ledger.putPolicyRule(rule);
+      s.ledger.putSetting(`policy:taint:${s.conversationId}`, { untrustedInput: true, privateData: true });
+    });
+    const run = createCodingTools(s.core).tools!.find(tool => tool.name === "code_run")!;
+    const result = await run.execute({ repo: s.scopeDir, task: "Fix it in a worktree" }, {
+      conversationId: "scoped-host-pi", taskId: hostTaskId(), callId: "coding-policy", output: () => {}, diagnostic: () => {},
+    } as unknown as ToolExecutionApi, {} as Context);
+    expect(result.isError).toBe(true);
+    const effect = s.ledger.effectByCall(s.conversationId, "coding-policy")!;
+    expect(effect.state).toBe("pending");
+    expect(s.receipt("coding-policy")).toMatchObject({
+      classification: { target: { kind: "mac", id: s.scopeDir }, access: "write", external: true, reversible: true },
+      evaluation: { decision: "owner", decidedBy: expect.arrayContaining(["rule-of-two"]) },
+    });
+    expect(s.ledger.pendingDecisions({ effectId: effect.id })).toHaveLength(1);
+    expect(sessions.list()).toEqual([]);
+    expect(s.core.coding.list(s.work.id)).toEqual([]);
+  } finally { await sessions.shutdown(); }
 });

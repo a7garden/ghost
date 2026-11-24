@@ -38,7 +38,7 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
   { title: '구성', tools: ['scope_create', 'scope_update', 'scope_attach', 'scope_delete', 'slot_set', 'slot_delete', 'limits_set', 'rule_create', 'rule_update', 'rule_delete', 'rule_propose', 'mcp_create', 'mcp_update', 'mcp_delete', 'config_revert', 'config_history', 'metrics_read'] },
   { title: '목표', tools: ['goal_list', 'goal_propose', 'milestone_plan', 'milestone_update'] },
   { title: 'Mac', tools: [...HOST_TOOLS], privileged: true },
-  { title: 'herdr에서 코딩', tools: [...CODE_TOOLS], privileged: true },
+  { title: '코딩 세션에서 일하기', tools: [...CODE_TOOLS], privileged: true },
   { title: 'PC 조작', tools: [...DESKTOP_TOOLS], privileged: true },
   { title: '자산', tools: [...FINANCE_TOOLS], privileged: true },
 ];

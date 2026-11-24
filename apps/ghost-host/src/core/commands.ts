@@ -466,9 +466,6 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
       return { duty: core.duty.switch(command.onDuty) };
     case "duty.hours":
       return { duty: core.duty.setHours(command.hours) };
-    case "coding.set":
-      ledger.tx(() => ledger.putSetting("coding", { session: command.session, agent: command.agent }));
-      return {};
     case "activity.create":
       return { activityId: core.activities.create(command.config).id };
 
@@ -514,7 +511,6 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
         if (command.memoryModel !== undefined) ledger.putSetting("memoryModel", command.memoryModel);
         if (command.nextMessageSuggestions !== undefined) ledger.putSetting("nextMessageSuggestions", command.nextMessageSuggestions);
         if (command.suggestionModel !== undefined) ledger.putSetting("suggestionModel", command.suggestionModel);
-        if (command.codingDelivery !== undefined) ledger.putSetting("codingDelivery", command.codingDelivery);
         if (command.ownerLanguage !== undefined) ledger.putSetting("ownerLanguage", command.ownerLanguage);
         if (command.approvals !== undefined) ledger.putSetting("approvals", command.approvals);
         if (command.limits !== undefined) ledger.putSetting("limits", { ...ledger.limits(), ...command.limits });

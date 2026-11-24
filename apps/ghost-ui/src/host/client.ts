@@ -9,7 +9,6 @@ import type {
   CallSpeechRequest,
   CallTranscript,
   Command,
-  CodingSetup,
   CommandOf,
   CodingDialogAnswer,
   CodingEvent,
@@ -20,36 +19,10 @@ import type {
   OrchestrationConfig,
   OrchestrationImportPreview,
   OrchestrationView,
-  HerdrChangedFile,
   ConnectionOAuthView,
   ConnectionOAuthClientInput,
   ConnectionOAuthStart,
   CommandResponse,
-  HerdrOutput,
-  HerdrView,
-  HerdrIntegrationInstall,
-  HerdrAgentStart,
-  HerdrClose,
-  HerdrFrame,
-  HerdrControlCommand,
-  HerdrControlEnd,
-  HerdrControlLease,
-  HerdrControlRelease,
-  HerdrInput,
-  HerdrRename,
-  HerdrSplit,
-  HerdrTabCreate,
-  HerdrWorkspaceCreate,
-  HerdrPaneView,
-  HerdrPrompt,
-  HerdrChanges,
-  HerdrDiff,
-  HerdrUpload,
-  HerdrAnswer,
-  HerdrAsk,
-  HerdrChat,
-  ClaudeModels,
-  HerdrCommands,
   NextMessageSuggestions,
   OmpInfo,
   ConversationPage,
@@ -88,13 +61,6 @@ export class HostError extends Error {
   constructor(readonly code: ApiError['code'] | 'network', message: string) {
     super(message);
     this.name = 'HostError';
-  }
-}
-
-export class HerdrControlError extends Error {
-  constructor(readonly code: 'confirm_required' | 'held', message: string) {
-    super(message);
-    this.name = 'HerdrControlError';
   }
 }
 
@@ -206,7 +172,7 @@ export type CodingSessionPatch = Partial<Pick<CodingSession, 'title' | 'model' |
 export type PiGlobalConfig = { settings: PiSettings; canManagePackages: boolean; imageResizeAvailable: boolean };
 export type PiSessionView = PiSessionConfig & { canManagePackages: boolean };
 export type CodingSessionChanges = {
-  files: (Pick<HerdrChangedFile, 'path' | 'status'> & { additions: number; deletions: number })[];
+  files: { path: string; status: WorkbenchChanges['files'][number]['status'] | 'renamed'; additions: number; deletions: number }[];
   diff: string;
   truncated: boolean;
   commits: string[];
@@ -231,9 +197,6 @@ const piJson = (method: 'POST' | 'PUT', input: unknown): RequestInit => ({
  */
 export class HostClient {
   constructor(private readonly token: string | undefined = typeof window === 'undefined' ? undefined : window.__GHOST_TOKEN__) {}
-
-  private herdrController: string | undefined;
-  private herdrRelease: Promise<void> | undefined;
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     return this.token ? { Authorization: `Bearer ${this.token}`, ...extra } : extra;
@@ -327,10 +290,6 @@ export class HostClient {
 
   openWorkbenchTerminal(paneId: string, options: WorkbenchTerminalOpen): Promise<WorkbenchTerminalBinding> {
     return this.json(`/api/workbench/panes/${encodeURIComponent(paneId)}/terminal`, codingJson('POST', options));
-  }
-
-  codingSetup(): Promise<CodingSetup> {
-    return this.json('/api/coding', { cache: 'no-store' });
   }
 
   orchestration(signal?: AbortSignal): Promise<OrchestrationView> {
@@ -460,154 +419,12 @@ export class HostClient {
     }
   }
 
-  installHerdrIntegration(input: HerdrIntegrationInstall): Promise<CodingSetup> {
-    return this.json('/api/coding/integrations', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
-    });
-  }
-
-  /** The workspace tree of the herdr session in use. */
-  herdr(signal?: AbortSignal): Promise<HerdrView> {
-    return this.json('/api/herdr', { signal });
-  }
   ompInfo(cwd: string, signal?: AbortSignal): Promise<OmpInfo> {
     return this.json(`/api/coding/omp?${new URLSearchParams({ cwd })}`, { signal });
-  }
-  herdrOutput(pane: string, signal?: AbortSignal): Promise<HerdrOutput> {
-    return this.json(`/api/herdr/output?${new URLSearchParams({ pane, format: 'ansi', lines: '2000' })}`, { signal });
-  }
-  claudeModels(signal?: AbortSignal): Promise<ClaudeModels> {
-    return this.json('/api/herdr/claude-models', { signal });
-  }
-  herdrScreen(pane: string, signal?: AbortSignal): Promise<HerdrOutput> {
-    return this.json(`/api/herdr/output?${new URLSearchParams({ pane, format: 'text', lines: '200' })}`, { signal });
-  }
-  herdrChanges(pane: string, signal?: AbortSignal): Promise<HerdrChanges> {
-    return this.json(`/api/herdr/changes?${new URLSearchParams({ pane })}`, { signal });
-  }
-  herdrAsk(pane: string, signal?: AbortSignal): Promise<HerdrAsk | null> {
-    return this.json(`/api/herdr/ask?${new URLSearchParams({ pane })}`, { signal });
-  }
-  answerHerdr(input: HerdrAnswer): Promise<HerdrPaneView> {
-    return this.postHerdr('answer', input);
-  }
-  herdrChat(pane: string, after: string, signal?: AbortSignal): Promise<HerdrChat> {
-    const query = new URLSearchParams({ pane });
-    if (after) query.set('after', after);
-    return this.json(`/api/herdr/chat?${query}`, { signal });
-  }
-  herdrSuggestions(pane: string, signal?: AbortSignal): Promise<NextMessageSuggestions> {
-    return this.json(`/api/herdr/suggestions?${new URLSearchParams({ pane })}`, { signal });
   }
   conversationSuggestions(conversation: string, signal?: AbortSignal): Promise<NextMessageSuggestions> {
     return this.json(`/api/suggestions?${new URLSearchParams({ conversation })}`, { signal });
   }
-  herdrCommands(pane: string, signal?: AbortSignal): Promise<HerdrCommands> {
-    return this.json(`/api/herdr/commands?${new URLSearchParams({ pane })}`, { signal });
-  }
-  herdrDiff(pane: string, path: string, signal?: AbortSignal): Promise<HerdrDiff> {
-    return this.json(`/api/herdr/diff?${new URLSearchParams({ pane, path })}`, { signal });
-  }
-  herdrUpload(file: File): Promise<HerdrUpload> {
-    return this.json(`/api/herdr/upload?${new URLSearchParams({ name: file.name })}`, {
-      method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file,
-    });
-  }
-  createHerdrWorkspace(input: HerdrWorkspaceCreate): Promise<HerdrPaneView> {
-    return this.postHerdr('workspaces', input);
-  }
-  createHerdrTab(input: HerdrTabCreate): Promise<HerdrPaneView> {
-    return this.postHerdr('tabs', input);
-  }
-  splitHerdrPane(input: HerdrSplit): Promise<HerdrPaneView> {
-    return this.postHerdr('split', input);
-  }
-  startHerdrAgent(input: HerdrAgentStart): Promise<HerdrPaneView> {
-    return this.postHerdr('agents', input);
-  }
-  renameHerdrNode(input: HerdrRename): Promise<{ ok: true }> {
-    return this.postHerdr('rename', input);
-  }
-  closeHerdrNode(input: HerdrClose): Promise<{ ok: true }> {
-    return this.postHerdr('close', input);
-  }
-  inputHerdr(input: HerdrInput): Promise<{ ok: true }> {
-    return this.postHerdr('input', input);
-  }
-  promptHerdr(input: HerdrPrompt): Promise<HerdrPaneView> {
-    return this.postHerdr('prompt', input);
-  }
-
-  private postHerdr<T>(operation: string, input: object): Promise<T> {
-    return this.json(`/api/herdr/${operation}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
-    });
-  }
-
-  /** Returns `end` only for an explicit terminal end. A dropped connection is retryable. */
-  async herdrTerminal(pane: string, cols: number, rows: number, onFrame: (frame: HerdrFrame) => void, signal: AbortSignal): Promise<'end' | 'disconnected'> {
-    const query = new URLSearchParams({ pane, cols: String(cols), rows: String(rows) });
-    const body = await this.terminalStream(`/api/herdr/terminal?${query}`, signal);
-    for await (const { event, data } of serverEvents(body)) {
-      if (signal.aborted) return 'disconnected';
-      if (event === 'end') return 'end';
-      if (event === 'frame' && data) onFrame(JSON.parse(data) as HerdrFrame);
-      if (event === 'error') {
-        const problem = data ? JSON.parse(data) as { message?: string } : null;
-        throw new HostError('unavailable', problem?.message ?? '터미널에 연결할 수 없습니다.');
-      }
-    }
-    return 'disconnected';
-  }
-
-  async herdrControl({ pane, cols, rows, fit, takeover }: { pane: string; cols: number; rows: number; fit: boolean; takeover: boolean },
-    onLease: (lease: HerdrControlLease) => void, onFrame: (frame: HerdrFrame) => void, signal: AbortSignal,
-  ): Promise<HerdrControlEnd['reason'] | 'disconnected'> {
-    // Route changes release the previous pane before the next controller can resize its pane.
-    await this.herdrRelease;
-    if (signal.aborted) return 'disconnected';
-    this.herdrController ??= crypto.randomUUID();
-    const query = new URLSearchParams({ pane, cols: String(cols), rows: String(rows), client: this.herdrController });
-    if (fit) query.set('fit', '1');
-    if (takeover) query.set('takeover', '1');
-    const body = await this.terminalStream(`/api/herdr/control?${query}`, signal);
-    for await (const { event, data } of serverEvents(body)) {
-      if (signal.aborted) return 'disconnected';
-      if (event === 'lease' && data) onLease(JSON.parse(data) as HerdrControlLease);
-      if (event === 'frame' && data) onFrame(JSON.parse(data) as HerdrFrame);
-      if (event === 'end' && data) return (JSON.parse(data) as HerdrControlEnd).reason;
-    }
-    return 'disconnected';
-  }
-
-  sendHerdrControl(command: HerdrControlCommand): Promise<{ ok: true }> {
-    return this.postHerdr('control/send', command);
-  }
-
-  releaseHerdrControl(release: HerdrControlRelease): Promise<void> {
-    // Unlike sendBeacon, a keepalive request can carry the paired-device Bearer token.
-    const task = this.json('/api/herdr/control/release', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(release), keepalive: true,
-    }).then(() => {}, () => {}); // A dropped request is also released by the Host's stream grace.
-    this.herdrRelease = task;
-    return task;
-  }
-
-  private async terminalStream(path: string, signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
-    const response = await this.request(path, {
-      headers: this.headers({ Accept: 'text/event-stream' }), cache: 'no-store', signal,
-    });
-    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
-    if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
-      const body = (await response.json().catch(() => null)) as { error?: ApiError | { code: HerdrControlError['code']; message: string } } | null;
-      const code = body?.error?.code;
-      const message = body?.error?.message ?? '터미널에 연결할 수 없습니다.';
-      if (code === 'held' || code === 'confirm_required') throw new HerdrControlError(code, message);
-      throw new HostError(response.status === 404 ? 'not_found' : code ?? 'network', message);
-    }
-    return response.body;
-  }
-
   /** The host's own release update state. */
   update(): Promise<UpdateStatus> {
     return this.json('/api/update');

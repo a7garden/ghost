@@ -55,3 +55,7 @@ export function* terminalInput(data: string, binary = false): Iterable<TerminalC
     start = end;
   }
 }
+
+export function sameTerminalSize(a: TerminalSize | undefined, b: TerminalSize | undefined): boolean {
+  return a?.cols === b?.cols && a?.rows === b?.rows;
+}

@@ -187,7 +187,7 @@ test("master and per-session switches remove the tool without changing file tool
       await turn(f, session.id);
       expect(f.sessions.get(session.id)?.state).toBe("idle");
     }
-    const ghostTools = createCodingTools(f.core, null);
+    const ghostTools = createCodingTools(f.core);
     expect(ghostTools.tools?.map(tool => tool.name).sort()).toEqual(["code_agents", "code_run"]);
   } finally { await f.close(); }
 });

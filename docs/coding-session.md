@@ -1,6 +1,6 @@
 # 코딩 세션 (Ghost 내장 코딩 에이전트)
 
-소유자 결정 2026-11-23. Ghost가 비서이자 코딩 에이전트다. 코딩 하네스로 Pi(`@earendil-works/pi-coding-agent` 1.6.0)를 Host 프로세스에 SDK로 임베드하고, 소유자는 앱에서 직접, Ghost는 도구로 같은 세션을 다룬다. herdr 연동([coding-execution.md](coding-execution.md))은 폐기하지 않는다: herdr 터미널 에이전트(omp·Claude Code·Codex)는 그대로 열 수 있고, 내장 세션은 그와 나란히 있는 또 하나의 실행기다. `coding-execution.md`의 "Host는 별도 코딩 실행기를 띄우지 않는다"는 이 결정으로 대체한다.
+소유자 결정 2026-11-23. Ghost는 Pi(`@earendil-works/pi-coding-agent`)를 Host 프로세스에 임베드한다. 소유자는 코딩 작업대에서, Ghost는 도구로 같은 세션을 다룬다. herdr 연동은 2026-11-24에 제거했다. omp·Claude Code·Codex 같은 CLI 에이전트는 소유자가 작업대 터미널에서 직접 실행할 수 있다.
 
 ## 구조
 
@@ -9,7 +9,7 @@
 | `CodingSessions` (`apps/ghost-host/src/coding/`) | Pi `AgentSession` 생성·복원·프롬프트·중단, 이벤트를 `CodingItem`으로 정규화, 대화상자 대기, 도구 경계, 서브에이전트 오케스트레이션, worktree 격리 |
 | 원장 `coding_sessions` | 세션 메타(`CodingSession`), 소유 맡긴 일, 마지막 보고한 턴. 정본 기록은 Pi 세션 파일 `<root>/coding-sessions/<id>/session.jsonl` |
 | API `/api/coding/sessions…` | 앱의 유일한 접점. 이벤트는 SSE |
-| Ghost 도구 | `code_run`·`code_agents`는 내장 세션도 시작·조회·후속 지시한다. 완료 보고는 맡긴 일의 원래 대화로 결정적 id로 돌아온다 |
+| Ghost 도구 | `code_run`으로 내장 세션을 시작하거나 이어가고, `code_agents`로 조회한다. 완료 보고는 맡긴 일의 원래 대화로 결정적 id로 돌아온다 |
 | 앱 | 코딩 탭의 세션 화면: 기록·도구 카드(diff)·이미지 첨부·대화상자·목업 선택·변경 보기 |
 
 ## 불변식
@@ -44,9 +44,9 @@ Pi 확장 UI 컨텍스트(`ctx.ui.select/confirm/input`)와 확장이 등록하�
 
 ## Ghost 도구
 
-- `code_agents`: 내장 세션 목록(상태·cwd·branch·소유 맡긴 일)과 herdr 에이전트를 함께 보여준다. `session`을 주면 그 세션의 최근 기록·변경·주장 대 관측을 제한된 크기로 읽는다.
-- `code_run {repo | session, task, agent?, branch?}`: `agent`를 생략하거나 `ghost`면 내장 세션. `repo`면 새 세션(새 worktree·브랜치), `session`이면 후속 지시(`steer`는 작업 중, 아니면 `prompt`). `omp`·`claude`·`codex`는 지금까지처럼 herdr.
-- 재시도 한도(한 시도에서 지시 최대 네 턴)·소유 독점(세션 하나에 열린 턴 하나)·Work 예산·권한 규칙은 [coding-execution.md](coding-execution.md)와 같다.
+- `code_agents {session?}`: 내장 세션의 상태·작업 폴더·브랜치와 보기 권한이 있는 맡긴 일을 표시한다. 세션을 지정하면 최근 기록, 에이전트의 주장, Host가 읽은 변경을 제한된 크기로 반환한다.
+- `code_run {repo | session, task, agent?, branch?}`: `agent`는 생략하거나 `ghost`만 쓴다. `repo`는 새 worktree와 브랜치에 세션을 열고, `session`은 맡긴 일에 연결된 세션을 이어간다. 작업 중이면 방향을 바꾸고, 대기 중인 소유자 대화상자가 없고 턴이 끝났다면 새 턴을 시작한다.
+- 한 시도에서 지시는 최대 네 번이고, 세션 하나에 열린 턴은 하나다. 맡긴 일의 예산과 권한은 [coding-execution.md](coding-execution.md)를 따른다.
 - 완료 보고는 `session:<id>:turn:<n>` 결정적 id로 원래 대화에 한 번 들어간다. 소유자가 직접 연 세션은 보고하지 않는다.
 
 ## 수용 기준
@@ -57,4 +57,3 @@ Pi 확장 UI 컨텍스트(`ctx.ui.select/confirm/input`)와 확장이 등록하�
 - cwd 밖 쓰기(파일 도구·bash)가 거절되고, 승인 대화상자의 허용 한 번이 그 호출만 연다.
 - Ghost가 `code_run`으로 세션을 열고, 턴이 끝나면 맡긴 일 대화가 한 번 깨어나며, Ghost는 변경 관측(diff)과 직접 실행한 검사를 확인한 뒤 기존 검증 경로로 결과를 낸다.
 - Host 재시작 뒤 `working`이던 세션은 `failed`와 알림이 남고 재전송되지 않으며, 새 프롬프트가 같은 Pi 세션 기록 위에서 이어진다.
-- herdr 연동 화면과 도구는 그대로 동작한다.

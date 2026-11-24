@@ -153,7 +153,7 @@ const ROWS: readonly Row[] = [
   { id: "host-state", tool: "*", when: { targetKind: "host" }, decision: "allow" },
   { id: "browser", tool: "browser_*", decision: "allow" },
   { id: "desktop", tool: "desktop_*", decision: "allow" },
-  // The grant of code_run plus PC 직접 실행 is the authority; the run lands in a fresh branch worktree. rule-of-two still asks when the conversation read untrusted input and private data.
+  // Coding tools require an explicit grant plus PC execution authority; new runs use an isolated worktree. The rule of two still applies.
   { id: "coding", tool: "code_*", decision: "allow" },
   { id: "mail-update", tool: "mail_update", decision: "allow" },
   // tools/browser.ts guardAction: a high-impact target or a checkout page refuses the click; browser_propose asks.

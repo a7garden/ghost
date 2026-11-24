@@ -1,4 +1,18 @@
 @layer components {
+  .agent-launch-hint { margin: 0; color: var(--ghost-ink3); font-size: var(--text-ui); }
+  .agent-options > summary { cursor: pointer; width: fit-content; padding-block: 5px; font-weight: 550; font-size: var(--text-ui); }
+  .agent-option-fields { display: grid; gap: 10px; margin: 4px 0; padding-inline-start: 12px; border-inline-start: 1px solid var(--ghost-line-strong); }
+  .agent-check { display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: var(--text-ui); }
+  .agent-check input { width: 16px; height: 16px; accent-color: var(--ghost-ink); }
+  .agent-model-trigger span { overflow: hidden; text-overflow: ellipsis; }
+  .agent-models { width: min(26rem, calc(100vw - 32px)); display: grid; gap: 6px; padding: 6px; }
+  .agent-model-list { max-height: 38dvh; overflow-y: auto; overscroll-behavior: contain; }
+  .agent-model-list button { width: 100%; text-align: start; }
+  .agent-model-list button span { overflow: hidden; text-overflow: ellipsis; }
+  .agent-model-list small { color: var(--ghost-ink3); }
+  .agent-model-list button[aria-pressed='true'] { background: var(--ghost-hover); }
+  .agent-yolo-confirm { justify-self: start; color: var(--ghost-danger-ink); }
+
   .workbench {
     display: grid;
     grid-template-columns: clamp(10rem, 20%, 14rem) minmax(0, 1fr);

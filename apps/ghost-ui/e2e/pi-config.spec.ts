@@ -41,17 +41,10 @@ test.beforeAll(async () => {
   writeFileSync(fixture, `export default function(pi) {
     pi.registerCommand('visual-check', { description: 'Visual check', handler: async () => {} });
   }`);
-  // HOME, PATH and XDG isolate user tools. Seed a unique herdr session name as well
-  // so even access to a system-installed client cannot address the owner's session.
+  // HOME, PATH and XDG isolate user tools from the test Host.
   const originalHome = homedir();
   const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: home, XDG_STATE_HOME: home, XDG_RUNTIME_DIR: home, GHOST_ROOT: root, GHOST_PORT: '0',
     PATH: process.env.PATH?.split(delimiter).filter(path => !path.startsWith(join(originalHome, '.local'))).join(delimiter) };
-  const initialized = spawn('bun', ['-e', `import { Ledger } from './apps/ghost-host/src/ledger/ledger.ts';
-    const ledger = new Ledger(process.env.GHOST_ROOT + '/ledger.db');
-    ledger.putSetting('coding', { session: ${JSON.stringify(`pi-test-${Date.now()}`)}, notify: 'off' });
-    ledger.close();`], { cwd: repo, env, stdio: 'inherit' });
-  const [code] = await once(initialized, 'exit');
-  expect(code).toBe(0);
   await start(['apps/ghost-host/src/main.ts', 'serve'], repo, env);
   await expect.poll(() => {
     try { return readFileSync(join(root, 'host.json'), 'utf8'); }

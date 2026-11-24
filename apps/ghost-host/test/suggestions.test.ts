@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { NextMessageSuggestions, parse, type HerdrChat, type HerdrPaneView, type Message } from "@ghost/contract";
+import { NextMessageSuggestions, parse, type Message } from "@ghost/contract";
 import { startServer } from "../src/api/server.ts";
 import type { Config } from "../src/config.ts";
 import { Access } from "../src/core/access.ts";
@@ -8,7 +8,6 @@ import { execute } from "../src/core/commands.ts";
 import type { Engine, TranscriptPage } from "../src/core/ports.ts";
 import { Suggestions } from "../src/core/suggestions.ts";
 import { parseComposerPrediction, parseComposerPredictions } from "../src/engine/composer-prediction.ts";
-import { Herdr } from "../src/integrations/herdr.ts";
 import { FakeEngine, harness, tempDir } from "./support.ts";
 
 test("normalizes single suggestions like omp, including quotes, controls, spaces and the length limit", () => {
@@ -42,7 +41,6 @@ class SuggestEngine extends FakeEngine {
 const model = { provider: "faux", model: "test" };
 const OWNER = "test-suggestions-owner";
 const noSuggestions = { suggestions: [] };
-const paneId = "w1:p1";
 
 function fixture() {
   const h = harness();
@@ -63,58 +61,29 @@ test("suggestion routes authorize transcript reads, persist settings and reuse r
   const f = fixture();
   const dir = tempDir();
   const config: Config = { root: dir, host: "127.0.0.1", port: 0, publicOrigin: null, uiDir: null, sandbox: { kind: "local" }, voice: null, apns: null, skills: null, reach: null, browser: null };
-  const herdr = new Herdr(null);
-  const pane: HerdrPaneView = {
-    id: paneId, workspaceId: "w1", tabId: "w1:t1", workspace: "test", tab: "test", title: "test",
-    status: "done", agent: "omp", cwd: null, focused: true, owned: false,
-  };
-  let chat: HerdrChat = {
-    pane: paneId, source: "omp", title: null, model: null, cursor: "100", reset: false,
-    items: [{ id: "1", kind: "user", at: 1, text: "확인해줘" }, { id: "2", kind: "agent", at: 2, text: "확인했어" }, { id: "3", kind: "thinking", at: 2 }],
-  };
-  herdr.overview = async () => ({ available: true, note: null, session: "default", workspaces: [{
-    id: pane.workspaceId, label: "test", status: "done", worktree: null,
-    tabs: [{ id: pane.tabId, label: "test", status: "done", panes: [pane] }],
-  }] });
-  herdr.chat = async () => chat;
-  const server = startServer({ core: f.core, config, ownerToken: OWNER, documents: null, skills: null, herdr });
+  const server = startServer({ core: f.core, config, ownerToken: OWNER, documents: null, skills: null });
   const get = (path: string, token = OWNER) => fetch(`http://127.0.0.1:${server.port}${path}`, { headers: { authorization: `Bearer ${token}` } });
   const read = async (path: string) => parse(NextMessageSuggestions, await (await get(path)).json());
   const direct = `/api/suggestions?conversation=${f.id}`;
-  const coding = `/api/herdr/suggestions?pane=${paneId}`;
-  const update = (settings: { nextMessageSuggestions: boolean; suggestionModel: typeof model | null; codingDelivery: "steer" | "queue" }) => execute(f.core, new Access({ kind: "owner" }), {
+  const update = (settings: { nextMessageSuggestions: boolean; suggestionModel: typeof model | null }) => execute(f.core, new Access({ kind: "owner" }), {
     requestId: crypto.randomUUID(), command: { type: "settings.update", ...settings },
   }, { publicOrigin: "http://127.0.0.1", documents: null });
   try {
-    expect(f.ledger.settings()).toMatchObject({ nextMessageSuggestions: true, suggestionModel: null, codingDelivery: "steer" });
+    expect(f.ledger.settings()).toMatchObject({ nextMessageSuggestions: true, suggestionModel: null });
     expect((await get(direct, "wrong")).status).toBe(401);
-    expect((await get(coding, "wrong")).status).toBe(401);
     expect((await get("/api/suggestions")).status).toBe(400);
-    expect((await get("/api/herdr/suggestions?pane=invalid")).status).toBe(400);
     expect(await read(direct)).toEqual(noSuggestions);
-    expect(await read(coding)).toEqual(noSuggestions);
     expect(f.engine.calls).toHaveLength(0);
 
-    await update({ nextMessageSuggestions: true, suggestionModel: model, codingDelivery: "queue" });
-    expect(f.ledger.settings()).toMatchObject({ nextMessageSuggestions: true, suggestionModel: model, codingDelivery: "queue" });
+    await update({ nextMessageSuggestions: true, suggestionModel: model });
+    expect(f.ledger.settings()).toMatchObject({ nextMessageSuggestions: true, suggestionModel: model });
     const seq = f.ledger.seq();
-    for (const path of [direct, coding, direct, coding]) {
-      expect(await read(path)).toEqual({ suggestions: ["계속해"] });
-    }
+    expect(await read(direct)).toEqual({ suggestions: ["계속해"] });
+    expect(await read(direct)).toEqual({ suggestions: ["계속해"] });
     expect(f.ledger.seq()).toBe(seq);
-    expect(f.engine.calls.map(call => call.messages)).toEqual(Array.from({ length: 2 }, () => [
+    expect(f.engine.calls.map(call => call.messages)).toEqual([[
       { role: "user", text: "확인해줘" }, { role: "assistant", text: "확인했어" },
-    ]));
-
-    for (const status of ["working", "blocked"] as const) {
-      pane.status = status;
-      expect(await read(coding)).toEqual(noSuggestions);
-    }
-    pane.status = "done";
-    chat = { ...chat, items: [...chat.items, { id: "4", kind: "user", at: 3, text: "아직" }] };
-    expect(await read(coding)).toEqual(noSuggestions);
-    chat = { ...chat, source: null };
-    expect(await read(coding)).toEqual(noSuggestions);
+    ]]);
     f.engine.transcript.live = { conversationId: f.id, running: true, partial: null, tools: [] };
     expect(await read(direct)).toEqual(noSuggestions);
     f.engine.transcript.live = null;
@@ -128,13 +97,13 @@ test("suggestion routes authorize transcript reads, persist settings and reuse r
     f.engine.generate = async () => { throw new Error("unavailable"); };
     expect(await read(direct)).toEqual(noSuggestions);
     expect(await read(direct)).toEqual(noSuggestions);
-    expect(f.engine.calls).toHaveLength(3);
+    expect(f.engine.calls).toHaveLength(2);
 
-    await update({ nextMessageSuggestions: false, suggestionModel: null, codingDelivery: "steer" });
-    expect(f.ledger.settings()).toMatchObject({ nextMessageSuggestions: false, suggestionModel: null, codingDelivery: "steer" });
+    await update({ nextMessageSuggestions: false, suggestionModel: null });
+    expect(f.ledger.settings()).toMatchObject({ nextMessageSuggestions: false, suggestionModel: null });
     f.engine.transcript.messages = f.messages;
     expect(await read(direct)).toEqual(noSuggestions);
-    expect(f.engine.calls).toHaveLength(3);
+    expect(f.engine.calls).toHaveLength(2);
   } finally {
     await server.stop();
     f.core.stop();
@@ -147,7 +116,7 @@ test("suggestion routes authorize transcript reads, persist settings and reuse r
 test("concurrent readers share a flight; the final disconnect aborts it and a later reader asks again", async () => {
   const f = fixture();
   f.ledger.tx(() => f.ledger.putSetting("defaultModel", model));
-  const service = new Suggestions(f.core, null);
+  const service = new Suggestions(f.core);
   const first = new AbortController();
   const second = new AbortController();
   const started = Promise.withResolvers<AbortSignal>();

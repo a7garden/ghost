@@ -22,7 +22,7 @@ const LIVE_LANES = 6;
  * Home: hand something off, settle what waits on you, glance at what moves.
  * Each band appears only when it has something in it.
  */
-export function Overview({ state, navigate, codingSession }: { state: State; navigate(path: string): void; codingSession?: string | null }) {
+export function Overview({ state, navigate }: { state: State; navigate(path: string): void }) {
   const now = useNow();
   const { client } = useHost();
   const [error, setError] = useState('');
@@ -65,7 +65,7 @@ export function Overview({ state, navigate, codingSession }: { state: State; nav
       {error && <InlineError>{error}</InlineError>}
       <ul className="feed">{messages.map(item => <NotificationRow key={item.id} item={item} ghostName={names.get(item.ghostId ?? '') ?? item.title} now={now}
         onOpen={() => {
-          const destination = notificationRoute(item, state, codingSession);
+          const destination = notificationRoute(item, state);
           if (!destination) return;
           setError('');
           void client.send({ type: 'notification.read', notificationIds: [item.id] })

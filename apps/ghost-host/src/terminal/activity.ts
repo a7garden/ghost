@@ -1,6 +1,6 @@
 import { Terminal } from "@xterm/headless";
 import type { TerminalAgent, TerminalAgentEvent, TerminalSize, TerminalState } from "@ghost/contract";
-import { detectTerminalAsk } from "../integrations/herdr-ask.ts";
+import { detectTerminalAsk } from "./ask.ts";
 
 const PROMPT_QUIET_MS = 750;
 const WORKING_ROW = /^(?:[\u2800-\u28ff✳✻✽✶✢·•○◐◓◑◒]\s+)?(?:working(?:[. …(]|$)|.*\([^)]*\b(?:esc to interrupt|esc to cancel)\b[^)]*\)\s*$)|^[\u2800-\u28ff]\s+(?:\d+[hms]\s*)+·\s*\p{Co}/iu;
@@ -21,7 +21,7 @@ export class TerminalActivity {
   private finished = false;
   private waiting: string | null = null;
 
-  constructor(private readonly id: string, size: TerminalSize, private readonly quietMs: number, private readonly emit: (event: TerminalAgentEvent) => void) {
+  constructor(size: TerminalSize, private readonly quietMs: number, private readonly emit: (event: TerminalAgentEvent) => void) {
     this.screen = new Terminal({ ...size, allowProposedApi: true, scrollback: 0 });
   }
 
@@ -64,9 +64,9 @@ export class TerminalActivity {
       }
       rows.reverse();
       const text = rows.join("\n");
-      const ask = detectTerminalAsk(text, { id: this.id, agent })?.view;
+      const ask = detectTerminalAsk(text, agent);
       const last = rows.at(-1)?.trim();
-      this.prompt = ask ? JSON.stringify([ask.title, ask.detail, ask.choices.map(choice => choice.label)])
+      this.prompt = ask ? JSON.stringify([ask.title, ask.detail, ask.choices])
         : last && INPUT_ROW.test(last) ? last : null;
       this.ownWorking = rows.slice(-8).some(line => WORKING_ROW.test(line.trim()));
       if (text !== this.seenScreen) {

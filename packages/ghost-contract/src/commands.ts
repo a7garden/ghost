@@ -3,7 +3,6 @@ import { ActivityConfig, ConnectionConfig, ConnectionIconUrl } from "./autonomy.
 import { PolicyRule } from "./policy.ts";
 import { McpServer } from "./mcp.ts";
 import { DutyHours } from "./duty.ts";
-import { CodingPrefs } from "./coding.ts";
 import {
   ADAPTATION_MAX_CHARS,
   ApprovalPolicy,
@@ -149,8 +148,6 @@ export const Command = Type.Union([
   command("duty.switch", { onDuty: Type.Boolean() }),
   /** 근무 시간표. null 이면 시간표 없이 원버튼으로만 바꾼다. */
   command("duty.hours", { hours: nullable(DutyHours) }),
-  /** Which herdr session coding uses and which agent a new coding session starts with. */
-  command("coding.set", CodingPrefs.properties),
 
   // Owner-approved standing delegations and account-scoped connections.
   command("connection.upsert", {
@@ -231,7 +228,7 @@ export const Command = Type.Union([
   command("voice.set", { engine: Type.Optional(CallEngine), voice: Type.Optional(Text(64)) }),
 
   // Settings and providers
-  command("settings.update", { toolSearchThreshold: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })), defaultSlot: Type.Optional(nullable(SlotName)), defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), nextMessageSuggestions: Type.Optional(Type.Boolean()), suggestionModel: Type.Optional(nullable(ModelRef)), codingDelivery: Type.Optional(Type.Union([Type.Literal("steer"), Type.Literal("queue")])), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy), limits: Type.Optional(Type.Partial(Limits)) }),
+  command("settings.update", { toolSearchThreshold: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })), defaultSlot: Type.Optional(nullable(SlotName)), defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), nextMessageSuggestions: Type.Optional(Type.Boolean()), suggestionModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy), limits: Type.Optional(Type.Partial(Limits)) }),
   command("provider.upsert", {
     id: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
     kind: ProviderKind,

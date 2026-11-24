@@ -151,9 +151,9 @@ export class Effects {
 
   /**
    * Everything a Ghost can look at itself: no owner reconciliation. That is any effect on the Ghost's own side
-   * (workspace, scope paths, the Mac, the document vault), shell commands and `code_run` included: the Ghost checks a
-   * file, `git status` or `git ls-remote` as easily as the owner could. Outside effects the owner alone can see
-   * (`OWNER_CONFIRMS`: mail, services, purchases, clicks) and Host API commands stay with the owner.
+   * (workspace, scope paths, the Mac, the document vault), including shell commands and built-in coding runs. The
+   * Ghost can inspect the worktree and check what changed without asking the owner to reconcile the effect.
+   * Outside effects (`OWNER_CONFIRMS`: mail, services, purchases, clicks) and Host API commands stay with the owner.
    */
   selfCheckable(effect: Effect): boolean {
     if (effect.tool in OWNER_CONFIRMS || (COMMAND_EFFECT_TOOLS as readonly string[]).includes(effect.tool)) return false;

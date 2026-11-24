@@ -108,7 +108,7 @@ export function createDirectTools(core: Core): Extension {
   });
   const workList = defineTool({
     name: "work_list",
-    description: "List the Work created in this conversation and this Ghost's live Work, with the coding each has running in herdr. The current main Ghost instead sees the whole team's Work, live and recently settled.",
+    description: "List the Work created in this conversation and this Ghost’s live Work, including each Work’s coding status. The current main Ghost instead sees the whole team’s Work, live and recently settled.",
     parameters: Type.Object({}),
     replay: "safe",
     async execute(_args, api) {

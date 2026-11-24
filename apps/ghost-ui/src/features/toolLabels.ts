@@ -9,7 +9,7 @@ export const toolLabels: Record<string, string> = {
   connection_list: '연결 목록', connection_register: '연결 등록', connection_request: '연결 API 사용',
   host_status: 'Mac 상태', host_services: 'Mac 서비스', host_disk_scan: 'Mac 디스크 검색', host_disk_usage: 'Mac 디스크 사용량',
   host_list: 'Mac 파일 목록', host_read: 'Mac 파일 읽기', host_nodes: 'Tailscale 노드', host_command_propose: 'Mac 명령 제안', host_message_codes: '문자 인증번호 읽기',
-  code_agents: 'herdr 에이전트 목록', code_run: 'herdr에서 코딩',
+  code_agents: '코딩 세션 목록', code_run: '코딩 세션에서 일하기',
   browser_open: '브라우저 열기', browser_snapshot: '브라우저 구조 읽기', browser_screenshot: '브라우저 캡처', browser_read: '브라우저 읽기',
   browser_click: '브라우저 클릭', browser_fill: '브라우저 채우기', browser_type: '브라우저 입력', browser_press: '브라우저 키 누르기',
   browser_select: '브라우저 선택', browser_check: '브라우저 체크', browser_scroll: '브라우저 스크롤', browser_navigate: '브라우저 이동',

@@ -156,24 +156,18 @@ const codingRun = (patch: Partial<CodingRun> = {}): CodingRun => ({
 });
 
 describe('coding runs in the Work aside', () => {
-  it('shows where each run stands and links it back to its herdr pane', () => {
+  it('shows the agent, branch, and state of an old pane run without linking it', () => {
     const markup = renderToStaticMarkup(createElement(WorkCodingRuns, { runs: [codingRun()], now: NOW }));
     expect(markup).toContain('omp · fix/login');
     expect(markup).toContain('작업 중');
     expect(markup).toContain('턴 1');
-    const href = /href="([^"]+)"/.exec(markup)![1]!.replaceAll('&amp;', '&');
-    const target = new URL(href.slice(1), 'https://ghost.test');
-    expect(target.pathname).toBe('/coding');
-    expect(target.searchParams.get('herdr')).toBe('w1:pA');
-    expect(target.searchParams.get('herdrSession')).toBe('default');
-    expect(markup).toContain('herdr에서 보기');
+    expect(markup).not.toContain('href=');
   });
 
-  it('leaves the pane link out while the run has no pane yet', () => {
+  it('does not link an old run with no pane', () => {
     const markup = renderToStaticMarkup(createElement(WorkCodingRuns, { runs: [codingRun({ pane: null, state: 'settled' })], now: NOW }));
     expect(markup).toContain('완료');
-    expect(markup).not.toContain('herdr에서 보기');
-    expect(markup).not.toContain('코딩 세션 열기');
+    expect(markup).not.toContain('href=');
   });
 
   it('opens the embedded session, not the run id', () => {

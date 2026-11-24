@@ -44,7 +44,7 @@ export interface Config {
    * A release finds its own copies beside its Host bundle; `"desktop": null` turns it off.
    */
   desktop?: null | DesktopConfig;
-  /** Coding through the owner's herdr (the Coding tab, code_agents and code_run); `"coding": false` turns it off. */
+  /** The native coding workbench and coding tools; `"coding": false` turns them off. */
   coding?: boolean;
 }
 
@@ -74,7 +74,7 @@ export const DEFAULT_PORT = 62062;
 export function loadConfig(env: Record<string, string | undefined> = process.env, rootOverride?: string): Config {
   const root = resolve(rootOverride ?? env.GHOST_ROOT ?? DEFAULT_ROOT);
   const path = join(root, "config.json");
-  const file = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Partial<Config>) : {};
+  const file = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Partial<Omit<Config, "coding">> & { coding?: unknown }) : {};
   const allowed = ["host", "port", "publicOrigin", "cloudflareAccess", "tailscaleIdentity", "uiDir", "sandbox", "voice", "apns", "skills", "mac", "reach", "browser", "desktop", "coding"];
   for (const key of Object.keys(file)) if (!allowed.includes(key)) throw new Error(`config.json: unknown key ${key}`);
   const port = Number(env.GHOST_PORT ?? file.port ?? DEFAULT_PORT);
@@ -131,6 +131,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     reach: file.reach ?? null,
     browser: file.browser ?? null,
     desktop,
-    coding: file.coding ?? true,
+    coding: file.coding !== false, // Older configs may contain executor preferences instead of a boolean.
   };
 }

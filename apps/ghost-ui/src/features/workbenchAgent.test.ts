@@ -1,6 +1,6 @@
 import type { OmpInfo } from '@ghost/contract';
 import { describe, expect, it } from 'vitest';
-import { buildAgentArgs, type AgentOptions } from './herdrAgentArgs';
+import { buildOmpArgs, type AgentOptions } from './ompAgentArgs';
 import { buildAgentTerminalSpec } from './workbenchAgent';
 
 const cwd = '/Users/test/work tree';
@@ -15,11 +15,16 @@ describe('workbench agent launch', () => {
       conversation: 'pick', session: 'abc-123', directory: cwd,
       model: 'anthropic/example', thinking: 'high', approval: 'yolo',
     };
-    const args = buildAgentArgs('omp', selected, cwd, info, true);
+    const args = buildOmpArgs(selected, cwd, info, true);
     expect(buildAgentTerminalSpec(cwd, { kind: 'omp', args })).toEqual({
       cwd, command: 'omp', args: ['--resume', 'abc-123', '--model', 'anthropic/example', '--thinking', 'high', '--approval-mode', 'yolo'],
     });
-    expect(buildAgentArgs('omp', selected, cwd, info)).not.toContain('--approval-mode');
+    expect(buildOmpArgs(selected, cwd, info)).not.toContain('--approval-mode');
+    expect(buildOmpArgs(selected, '/other/repo', info, true)).not.toContain('--resume');
+    expect(buildOmpArgs({ ...selected, session: 'missing' }, cwd, info, true)).not.toContain('--resume');
+    expect(buildOmpArgs({ ...selected, model: 'missing' }, cwd, info, true)).not.toContain('--model');
+    expect(buildOmpArgs({ ...selected, thinking: 'medium' }, cwd, info, true)).not.toContain('--thinking');
+    expect(buildOmpArgs({ ...selected, conversation: 'continue' }, cwd, info, true)).toContain('--continue');
   });
 
   it('places the model on the Codex resume subcommand and uses the Claude resume picker', () => {

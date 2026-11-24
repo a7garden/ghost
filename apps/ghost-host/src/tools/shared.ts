@@ -227,8 +227,8 @@ export function describeWorkLine(core: Core, work: Work): string {
 export function describeCodingRuns(runs: readonly CodingRun[]): string {
   if (runs.length === 0) return "";
   return `Coding runs:\n${runs.map((run) => {
-    const address = run.agent === "ghost" ? `session ${run.session.slice("ghost:".length)}` : run.pane ?? "no pane yet";
-    return `  - ${run.agent ?? "agent"} ${run.state}, turn ${run.turn} on ${address}${run.branch ? `, branch ${run.branch}` : ""}${run.stopPending ? ", stop pending" : ""}`;
+    const address = run.agent === "ghost" ? ` on session ${run.session.slice("ghost:".length)}` : "";
+    return `  - ${run.agent ?? "agent"} ${run.state}, turn ${run.turn}${address}${run.branch ? `, branch ${run.branch}` : ""}${run.stopPending ? ", stop pending" : ""}`;
   }).join("\n")}`;
 }
 

@@ -23,7 +23,6 @@ import { executionLabel } from './activity-config';
 import { readVerdict, workReason } from './workText';
 import { ProjectChips } from '../components/composer/ProjectMentions';
 import { CancelWorkDialog } from './WorkViews';
-import { codeRunPane, codeRunReceiptRun, herdrPanePath } from './herdrDisplay';
 import { embeddedSessionPath } from './CodingSessionModel';
 
 const effectGlyph: Record<Effect['state'], GlyphState> = { pending: 'running', done: 'done', unknown: 'blocked', denied: 'cancelled' };
@@ -31,16 +30,6 @@ const effectLabel: Record<Effect['state'], string> = { pending: '실행 중', do
 const codingRunGlyph: Record<CodingRun['state'], GlyphState> = { preparing: 'queued', starting: 'queued', working: 'running', blocked: 'attention', settled: 'done', stalled: 'waiting', lost: 'failed', uncertain: 'blocked', closed: 'cancelled' };
 const codingRunLabel: Record<CodingRun['state'], string> = { preparing: '준비 중', starting: '시작 중', working: '작업 중', blocked: '입력 필요', settled: '완료', stalled: '멈춤', lost: '연결 끊김', uncertain: '결과 미확정', closed: '종료' };
 const verdictText: Record<Verdict['outcome'], string> = { pass: '통과', revise: '수정 지시', fail: '미달' };
-
-/** A code_run effect's pane: its own result when it names one, else the coding run its receipt points at, with the session that pane lives in. */
-function effectPane(effect: Effect, runs: readonly CodingRun[]): { pane: string; session?: string | null } | null {
-  if (effect.tool !== 'code_run') return null;
-  const direct = codeRunPane(effect.result);
-  if (direct !== null) return { pane: direct };
-  const runId = codeRunReceiptRun(effect.result);
-  const run = runId === null ? undefined : runs.find(item => item.id === runId);
-  return run?.pane !== undefined && run.pane !== null ? { pane: run.pane, session: run.session } : null;
-}
 
 /** 맡긴 일 detail: where it stands, what waits on the owner, the brief and result, and how it got there. */
 export function WorkDetail({ state, workId, navigate }: { state: State; workId: string; navigate(path: string): void }) {
@@ -165,15 +154,12 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
           </ol>
         </AsideSection>}
 
-        {/* The coding agents herdr is running for this 맡긴 일, each with the pane to watch it in. */}
         {(detail.codingRuns ?? []).length > 0 && <AsideSection compact={compact} title="코딩" count={detail.codingRuns!.length}>
           <WorkCodingRuns runs={detail.codingRuns!} now={now}/>
         </AsideSection>}
 
         <AsideSection compact={compact} title="실행 기록" count={effects.length}>
           {effects.length > 0 ? <ol className="timeline">{[...effects].sort((a, b) => a.createdAt - b.createdAt).map(effect => {
-            const linked = effectPane(effect, detail.codingRuns ?? []);
-            const pane = linked?.pane ?? null;
             return <li key={effect.id} data-state={effect.state}>
               <StateGlyph state={effectGlyph[effect.state]} size={14}/>
               <div className="timeline__copy">
@@ -182,7 +168,6 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
                   {effect.state !== 'done' && <span>{effectLabel[effect.state]}</span>}
                   <time className="tabular" title={absoluteTime(effect.createdAt)}>{relativeTime(effect.endedAt ?? effect.createdAt, now)}</time>
                 </span>
-                {pane && <Button asChild variant="outline" size="sm"><a href={`#${herdrPanePath(pane, linked?.session)}`}>herdr에서 보기</a></Button>}
                 {effect.result && <details className="timeline__result"><summary>출력</summary><pre>{effect.result}</pre></details>}
               </div>
             </li>;
@@ -308,8 +293,7 @@ export function WorkCodingRuns({ runs, now }: { runs: CodingRun[]; now: number }
           <span>턴 {run.turn}</span>
           <time className="tabular" title={absoluteTime(run.updatedAt)}>{relativeTime(run.updatedAt, now)}</time>
         </span>
-        {run.pane ? <Button asChild variant="outline" size="sm"><a href={`#${herdrPanePath(run.pane, run.session)}`}>herdr에서 보기</a></Button>
-          : run.agent === 'ghost' && run.session.startsWith('ghost:coding-') && <Button asChild variant="outline" size="sm">
+        {!run.pane && run.agent === 'ghost' && run.session.startsWith('ghost:coding-') && <Button asChild variant="outline" size="sm">
             <a href={`#${embeddedSessionPath(run.session.slice('ghost:'.length))}`}>코딩 세션 열기</a>
           </Button>}
       </div>

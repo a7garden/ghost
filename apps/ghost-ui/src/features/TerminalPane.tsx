@@ -4,16 +4,14 @@ import type { ILink, Terminal } from '@xterm/xterm';
 import type { TerminalCreate, TerminalSize } from '@ghost/contract';
 import { HostError } from '../host/client';
 import { useHost } from '../host/context';
-import { readTerminalSize, TerminalKeyRail } from './HerdrTerminalControls';
-import { controlRailKey, sameTerminalSize } from './herdrControlModel';
-import { modifiedTerminalKey, noModifiers, type TerminalModifiers } from './herdrMobileInput';
-import { isHistoryPageKey } from './herdrTerminalScroll';
-import { openHerdrXterm } from './herdrXterm';
-import { terminalInput, TerminalWire } from './TerminalPaneProtocol';
+import { readTerminalSize, TerminalKeyRail, TerminalTextSize } from './TerminalControls';
+import { controlRailKey, isHistoryPageKey, modifiedTerminalKey, noModifiers, type TerminalModifiers } from './terminalKeys';
+import { openXterm } from './terminalXterm';
+import { sameTerminalSize, terminalInput, TerminalWire } from './TerminalPaneProtocol';
 import './TerminalPane.css';
 
 type PaneStatus = 'connecting' | 'live' | 'reconnecting' | 'exited' | 'gone' | 'forbidden';
-type KeyboardControls = { key(key: string): void; text(text: string): void; pageUp(text: string): void; dismiss(): void };
+type KeyboardControls = { key(key: string): void; text(text: string): void; pageUp(text: string): void; dismiss(): void; resizeFont(size: number): void };
 
 export function useCreateTerminal() {
   const { client } = useHost();
@@ -57,6 +55,8 @@ export function TerminalPane({ terminalId, onExit }: { terminalId: string; onExi
   const keyboard = useRef<KeyboardControls | null>(null);
   const modifierRef = useRef(noModifiers);
   const [modifiers, setModifiers] = useState(noModifiers);
+  const [fontSize, setFontSize] = useState(readTerminalSize);
+  const currentFontSize = useEffectEvent(() => fontSize);
   const [status, setStatus] = useState<PaneStatus>('connecting');
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [actionError, setActionError] = useState('');
@@ -83,7 +83,7 @@ export function TerminalPane({ terminalId, onExit }: { terminalId: string; onExi
       });
       else window.open(url.href, '_blank', 'noopener,noreferrer');
     };
-    const { terminal, fit, dispose } = openHerdrXterm(node, { scrollback: 20_000, fontSize: readTerminalSize(), cursorBlink: true, disableStdin: true }, activate);
+    const { terminal, fit, dispose } = openXterm(node, { scrollback: 20_000, fontSize: currentFontSize(), cursorBlink: true, disableStdin: true }, activate);
     const links = linkProvider(terminal, activate);
     let destroyed = false;
     let ended = false;
@@ -194,6 +194,10 @@ export function TerminalPane({ terminalId, onExit }: { terminalId: string; onExi
       text(text) { if (!modified(text)) send(text); },
       pageUp(text) { if (terminal.buffer.active.type === 'alternate') send(text); else terminal.scrollPages(-1); },
       dismiss() { terminal.blur(); },
+      resizeFont(size) {
+        terminal.options.fontSize = size;
+        scheduleMeasure();
+      },
     };
     const input = terminal.onData(data => send(data));
     const binary = terminal.onBinary(data => send(data, true));
@@ -258,12 +262,15 @@ export function TerminalPane({ terminalId, onExit }: { terminalId: string; onExi
     : status === 'gone' ? '터미널이 종료되었습니다.' : status === 'forbidden' ? '터미널에 접근할 수 없습니다.'
       : status === 'exited' ? `터미널 종료${exitCode === null ? '' : ` (${exitCode})`}` : actionError;
   return <section ref={pane} tabIndex={-1} className="terminal-pane" aria-label="터미널">
-    <div ref={mount} className="terminal-pane__screen herdr-xterm"/>
+    <div ref={mount} className="terminal-pane__screen"/>
     {label && <div className="terminal-pane__status" role="status">{label}</div>}
-    {status === 'live' && <div className="terminal-pane__keys">
-      <TerminalKeyRail compact modifiers={modifiers} onModifier={key => updateModifiers({ ...modifierRef.current, [key]: !modifierRef.current[key] })}
-        onKey={key => keyboard.current?.key(key)} onText={text => keyboard.current?.text(text)}
-        onPageUp={text => keyboard.current?.pageUp(text)} onDismiss={() => keyboard.current?.dismiss()}/>
+    {status === 'live' && <div className="terminal-pane__controls">
+      <div className="terminal-pane__keys">
+        <TerminalKeyRail modifiers={modifiers} onModifier={key => updateModifiers({ ...modifierRef.current, [key]: !modifierRef.current[key] })}
+          onKey={key => keyboard.current?.key(key)} onText={text => keyboard.current?.text(text)}
+          onPageUp={text => keyboard.current?.pageUp(text)} onDismiss={() => keyboard.current?.dismiss()}/>
+      </div>
+      <TerminalTextSize size={fontSize} onSize={size => { setFontSize(size); keyboard.current?.resizeFont(size); }}/>
     </div>}
   </section>;
 }
