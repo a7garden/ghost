@@ -3,7 +3,7 @@ import { RotateCcw } from 'lucide-react';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { desktopInvoke, initializeDesktopCompanion, isDesktopShell } from '../host/desktop';
-import { Button, InlineError, SegmentedControl, SelectField, Switch } from '../ui';
+import { Button, InlineError, SegmentedControl, SelectField, Skeleton, Switch } from '../ui';
 import { CompanionAvatar, companionGhost } from '../companion/Avatar';
 import { saveCompanionPreferences, useCompanionPreferences, type CompanionPreferences, type CompanionSize } from '../companion/preferences';
 import '../companion/companion.css';
@@ -41,7 +41,7 @@ export default function DesktopAvatarSettings() {
     </header>
     <div className="desktop-avatar-workbench">
       <div className="desktop-avatar-preview" role="img" aria-label={ghost ? `${ghost.name} 데스크톱 아바타 미리보기` : '아바타 미리보기'}>
-        {ghost && state ? <CompanionAvatar ghost={ghost} state={state} preferences={preferences}/> : <span className="text-caption text-ink-3">Ghost를 불러오는 중</span>}
+        {ghost && state ? <CompanionAvatar ghost={ghost} state={state} preferences={preferences}/> : <Skeleton className="size-20 rounded-full" aria-hidden="true"/>}
       </div>
       <div className="desktop-avatar-controls">
         <label className="desktop-avatar-field" htmlFor="desktop-avatar-ghost"><span>Ghost</span>

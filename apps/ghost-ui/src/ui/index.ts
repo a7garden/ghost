@@ -9,7 +9,7 @@ export { Switch } from './switch';
 export { EmptyState } from './empty-state';
 export { InlineError } from './inline-error';
 export { Banner } from './banner';
-export { Skeleton } from './skeleton';
+export { Skeleton, SkeletonChat, SkeletonRows, SkeletonText } from './skeleton';
 export { SegmentedControl } from './segmented-control';
 export { FormField } from './form-field';
 export { Navigation, NavigationGroup, NavigationItem } from './navigation';

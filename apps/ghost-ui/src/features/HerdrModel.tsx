@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { ChevronsUpDown } from 'lucide-react';
-import { Button, Input, Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { Button, Input, Popover, PopoverContent, PopoverTrigger, SkeletonRows } from '../ui';
 
 export type ModelChoice = { selector: string; name: string; provider: string };
 type Choice = ModelChoice;
@@ -42,7 +42,7 @@ export function HerdrModelChip({ agent, cwd, current, disabled, load, onPick }: 
       <div id={id} className="herdr-model-list" role="group" aria-label="모델 목록">
         {visible.map(model => <Button key={model.selector} type="button" variant="ghost" className="justify-between" aria-pressed={current === model.selector}
           onClick={() => { setOpen(false); if (current !== model.selector) onPick(model.selector); }}><span>{model.name}</span><small>{model.provider}</small></Button>)}
-        {!visible.length && <p className="coding-hint">{failed ? '모델 목록을 불러오지 못했습니다.' : models ? '일치하는 모델이 없습니다.' : '불러오는 중…'}</p>}
+        {!visible.length && (failed || models ? <p className="coding-hint">{failed ? '모델 목록을 불러오지 못했습니다.' : '일치하는 모델이 없습니다.'}</p> : <SkeletonRows label="모델 목록을 불러오는 중…" rows={3} className="p-2"/>)}
       </div>
     </PopoverContent>
   </Popover>;

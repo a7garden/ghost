@@ -4,7 +4,7 @@ import type { CodingAgentId, CodingPrefs, CodingSetup } from '@ghost/contract';
 import { CopyButton } from '../components/MessageBody';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
-import { Button, InlineError, SegmentedControl, SelectField, SettingsGroup, SettingsRow } from '../ui';
+import { Button, InlineError, SegmentedControl, SelectField, SettingsGroup, SettingsRow, SkeletonRows } from '../ui';
 
 const INSTALL_DOCS = 'https://herdr.dev/tui/docs/install/';
 const INSTALL = 'curl -fsSL https://herdr.dev/install.sh | sh';
@@ -190,7 +190,7 @@ export function CodingSettings() {
           options={[{ value: 'steer', label: '스티어링', disabled: !state?.settings }, { value: 'queue', label: '대기열', disabled: !state?.settings }]}/>
       </SettingsRow>
     </SettingsGroup>
-    {!view && !readError && <p role="status">herdr 설정을 불러오는 중…</p>}
+    {!view && !readError && <SkeletonRows label="herdr 설정을 불러오는 중…" className="px-4 py-3"/>}
     {view && <>
       <SettingsGroup title="세션과 에이전트">
         <SettingsRow label="herdr 세션" htmlFor={sessionId}>

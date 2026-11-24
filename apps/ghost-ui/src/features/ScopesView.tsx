@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { ChevronRight, Folder, FolderPlus } from 'lucide-react';
-import { Button, Page, PageHeader, Row } from '../ui';
+import { Button, Page, PageHeader, Row, SkeletonText } from '../ui';
 import type { PageSummary, Scope, State } from '@ghost/contract';
 import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { useHost } from '../host/context';
@@ -95,7 +95,7 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
           onLeave={() => changeSection(receiver ? 'conversation' : 'work')} onDeleted={() => select('')}/></div>}
       </div>
       {handoff && receiver && <Modal title="일 맡기기" onClose={() => setHandoff(false)}><HandoffComposer ghosts={ghosts} navigate={navigate} initialScopeIds={[scope.id]} initialMode="work"/></Modal>}
-      {open && <Suspense fallback={<Modal title="문서" onClose={() => setOpen(undefined)} drawer focusClose><p role="status">편집기를 불러오는 중…</p></Modal>}><PageEditorDrawer scopeId={scope.id} pageId={open.pageId} onClose={() => setOpen(undefined)} onSaved={() => setReload(value => value + 1)}/></Suspense>}
+      {open && <Suspense fallback={<Modal title="문서" onClose={() => setOpen(undefined)} drawer focusClose><SkeletonText label="편집기를 불러오는 중…" lines={6}/></Modal>}><PageEditorDrawer scopeId={scope.id} pageId={open.pageId} onClose={() => setOpen(undefined)} onSaved={() => setReload(value => value + 1)}/></Suspense>}
     </div>;
   }
   return <Page width="reading"><PageHeader title={routeLabels.scopes} actions={<Button disabled={!state} onClick={() => setCreating(true)}><FolderPlus size={16}/>새 프로젝트</Button>}/>

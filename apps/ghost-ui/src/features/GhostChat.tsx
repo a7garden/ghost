@@ -2,7 +2,7 @@ import { useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CompactTitleSlot } from '../components/AppFrame';
 import { ArrowRight, CircleAlert, GitBranch, Monitor, Phone, X } from 'lucide-react';
-import { Button, Conversation, Popover, PopoverContent, PopoverTrigger, Row } from '../ui'
+import { Button, Conversation, Popover, PopoverContent, PopoverTrigger, Row, SkeletonChat } from '../ui'
 import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
@@ -208,7 +208,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         {ghost.persona.trim() && <div className="chat-empty__starters" role="group" aria-label="대화 시작 제안">{conversationStarters(ghost.persona).map(({ label, prompt }) =>
           <button type="button" key={label} title={prompt} onClick={() => { setDraft(prompt); inputRef.current?.focus(); }}>{label}</button>)}</div>}
       </div>}
-      {loading && <div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">대화 기록을 읽는 중</span></div>}
+      {loading && <SkeletonChat label="대화 기록을 읽는 중"/>}
       {conversationId && page.before && <div className="grid justify-items-center">
         <button type="button" className="link-quiet" disabled={olderLoading} onClick={loadOlder}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</button>
       </div>}

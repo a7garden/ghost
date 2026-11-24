@@ -4,7 +4,7 @@ import { Download, FileCode2, FileImage, FileText, File as FileIcon, WrapText, X
 import type { ArtifactRef } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { Peek } from './agent/Peek';
-import { Button, Dialog, DialogTitle, SegmentedControl } from '../ui';
+import { Button, Dialog, DialogTitle, SegmentedControl, SkeletonText } from '../ui';
 import { CopyButton, MessageBody } from './MessageBody';
 import './ArtifactPreview.css';
 import { SheetHandle, useCompact } from '../ui/adaptive';
@@ -78,7 +78,7 @@ function FileSheet({ artifact, onClose, returnFocus }: { artifact: ArtifactRef; 
         </div>}
         <div className="file-sheet__viewport" data-file-scroll tabIndex={0} aria-label="파일 내용">
           {error ? <p className="file-sheet__notice text-red" role="alert">{error}</p>
-            : !content ? <p className="file-sheet__notice" role="status">파일을 읽는 중…</p>
+            : !content ? <SkeletonText label="파일을 읽는 중…" lines={6} className="p-6"/>
             : source !== undefined ? source === '' ? <p className="file-sheet__notice">빈 파일</p>
               : markdown && view === 'preview' ? <article className="file-sheet__document"><MessageBody text={source} document/></article>
               : <div className="file-sheet__source" data-wrap={wrap || undefined}>

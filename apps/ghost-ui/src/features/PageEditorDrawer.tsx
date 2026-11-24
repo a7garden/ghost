@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, Textarea } from '../ui';
+import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, SkeletonText, Textarea } from '../ui';
 import { MarkdownEditor } from '../editor/MarkdownEditor';
 import '../editor/styles.css';
 import type { PageView } from '@ghost/contract';
@@ -78,7 +78,7 @@ export function PageEditorDrawer({ scopeId, pageId, onClose, onSaved }: {
   };
   return <Modal title={view ? draft.title || '제목 없음' : '새 문서'} onClose={onClose} drawer focusClose className="sm:max-w-[760px]">
     <div className="grid gap-4">
-      {loading && <p className="m-0 text-ui text-ink-2" role="status">문서를 불러오는 중…</p>}
+      {loading && <SkeletonText label="문서를 불러오는 중…" lines={6}/>}
       {loadError && <InlineError>{loadError}</InlineError>}
       {!loading && !loadError && <>
         {view && !editable && <p className="m-0 flex items-center gap-2 text-caption text-ink-2"><Badge variant="outline">읽기 전용</Badge>이전 형식({view.profile})의 문서는 이 화면에서 고칠 수 없습니다.</p>}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { MetricsView } from '@ghost/contract';
-import { Button, InlineError, SettingsGroup } from '../ui';
+import { Button, InlineError, SettingsGroup, SkeletonText } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Choice, errorText } from './InfrastructureFields';
@@ -39,7 +39,7 @@ export function ScopeMetrics({ scopeId }: { scopeId?: string | null }) {
       <div className="infra-columns"><Choice label="Ghost" value={ghostId} onChange={setGhostId} options={[{ value: '', label: '모두' }, ...(state?.ghosts ?? []).map(ghost => ({ value: ghost.id, label: ghost.name }))]}/>
         <Choice label="모델 자리" value={slot} onChange={setSlot} options={[{ value: '', label: '모두' }, ...Object.keys(state?.settings.slots ?? {}).map(name => ({ value: name, label: name }))]}/></div>
       <Choice label="규칙" value={ruleId} onChange={setRuleId} options={[{ value: '', label: '모두' }, ...(state?.policyRules ?? []).filter(rule => effectiveScopeId === undefined || !rule.scopeId || rule.scopeId === effectiveScopeId).map(rule => ({ value: rule.id, label: `${rule.tool} · ${rule.decision}` }))]}/>
-      {loading && <p role="status">불러오는 중…</p>}{error && <InlineError>{error}</InlineError>}
+      {loading && <SkeletonText label="불러오는 중…" lines={2}/>}{error && <InlineError>{error}</InlineError>}
       {metrics && <>
         <dl className="infra-metrics">{rows.map(([label, value]) => <div className="contents" key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
         {Object.entries(metrics.rules).map(([id, counts]) => <div className="infra-record" key={id}><p className="infra-record__meta">{state?.policyRules.find(rule => rule.id === id)?.tool ?? id}</p><dl className="infra-metrics"><dt>승인</dt><dd>{counts.approved}</dd><dt>거절</dt><dd>{counts.denied}</dd></dl></div>)}
