@@ -1,5 +1,6 @@
 import type { HerdrView, Notification, State } from '@ghost/contract';
 import { herdrPanePath, parseHerdrPane, parseHerdrSession } from './herdrDisplay';
+import { embeddedSessionPath } from './CodingSessionModel';
 
 export function codingNotificationAddress(id: string) {
   const match = /^coding:([^:]+):([^:]+:[^:]+):(blocked|done|exit):\d+$/.exec(id);
@@ -12,6 +13,8 @@ export function codingNotificationAddress(id: string) {
 export function notificationRoute(item: Notification, state: State, coding?: string | null | HerdrView): string | null {
   const terminal = /^coding:terminal:([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}):\d+$/i.exec(item.id);
   if (terminal) return `/coding?terminal=${terminal[1]}`;
+  const session = /^session:(coding-[^:]+):turn:\d+:waiting$/.exec(item.id);
+  if (session) return embeddedSessionPath(session[1]!);
   const address = coding !== undefined ? codingNotificationAddress(item.id) : null;
   if (address) {
     if (!coding || typeof coding === 'string') return address.session === coding ? herdrPanePath(address.pane) : null;

@@ -166,8 +166,9 @@ Feature-level compositions:
   In the terminal, Esc, Tab, ↑, ↓ and Enter share one stationary row with an extra-key
   pad that opens above it without displacing the terminal. Ghost-owned panes fit automatically. Watching someone else's pane does not
   resize it; 직접 조작 requests control for this visit only. Taking another device's
-  active lease requires confirmation. New spaces default to an isolated worktree;
-  direct writes and approval bypass stay visible even when options are folded.
+  active lease requires confirmation. The native workbench only creates a worktree when
+  **worktree로 시작** is checked; **git 변경** reads the focused space without staging
+  or editing files. Direct writes and approval bypass stay visible even when options are folded.
 - **Collaboration**: a `delegate` result reads as a 위임 event line (Ghost · title), and a
   child's report as 위임 결과. Thread cards list every Ghost working under the thread with
   its live state; a waiting Work reads 응답 대기, whether it waits on delegated Work, a question

@@ -78,6 +78,20 @@ test("login shell, stty resize, multiple attachers, reconnect cursor, and retain
   }
 });
 
+test("a command receives each PTY argument literally, including empty values and shell syntax", async () => {
+  const f = fixture();
+  try {
+    const print = join(f.cwd, "print args");
+    writeFileSync(print, "#!/bin/sh\nprintf '<%s>\\n' \"$@\"\n", { mode: 0o700 });
+    const args = ["", "two words", "$(printf changed); $HOME &", "one\ntwo", "한글 \"quoted\""];
+    const id = f.terminals.create({ cwd: f.cwd, ...dimensions, command: print, args });
+    const out = capture(f.terminals, id);
+    await eventually(() => out.frames.some(frame => frame.type === "exit"));
+    expect(out.frames.at(-1)).toEqual({ type: "exit", code: 0 });
+    expect(out.text()).toBe(args.map(arg => `<${arg}>\n`).join("").replaceAll("\n", "\r\n"));
+  } finally { await f.close(); }
+});
+
 test("short-lived PTY commands can immediately write and exit with a private startup descriptor", async () => {
   const f = fixture();
   try {
@@ -172,10 +186,14 @@ test("detects a foreground omp in a shell, reports quiet once, and ignores an ag
     const out = capture(f.terminals, id);
     await eventually(() => out.text().includes("# ") && out.text().split("$ ").length >= 2);
     expect(f.terminals.list()[0]?.agent).toBeNull();
+    expect(f.terminals.busy()).toBe(false);
     f.terminals.input(id, `"${omp}"; printf 'RETURNED:%s\\n' TO_SHELL\r`);
     await eventually(() => f.terminals.list()[0]?.agent === "omp" && f.terminals.list()[0]?.state === "working");
+    expect(f.terminals.busy()).toBe(true);
     await eventually(() => events.length === 1);
     expect(events).toEqual([{ type: "finished", agent: "omp", reason: "quiet" }]);
+    expect(f.terminals.list()[0]).toMatchObject({ agent: "omp", state: "idle" });
+    expect(f.terminals.busy()).toBe(false);
     await eventually(() => f.terminals.list()[0]?.agent === null && out.text().includes("RETURNED:TO_SHELL"));
     expect(events).toHaveLength(1);
   } finally { await f.close(); }
@@ -191,12 +209,14 @@ test("a Claude permission dialog waits once; clearing it resumes work and allows
     await eventually(() => events.length === 1);
     expect(events).toEqual([{ type: "waiting", agent: "claude", reason: "prompt" }]);
     expect(f.terminals.list()[0]?.agent).toBe("claude");
-    expect(f.terminals.list()[0]?.state).toBe("idle");
+    expect(f.terminals.list()[0]?.state).toBe("waiting");
+    expect(f.terminals.busy()).toBe(true);
     // The unchanged real prompt must survive several actual process polling cycles.
     await Bun.sleep(200);
     expect(events).toHaveLength(1);
     f.terminals.input(id, "y\r");
     await eventually(() => f.terminals.list()[0]?.state === "exited");
+    expect(f.terminals.busy()).toBe(false);
     expect(events).toEqual([{ type: "waiting", agent: "claude", reason: "prompt" }, { type: "finished", agent: "claude", reason: "quiet" }]);
   } finally { await f.close(); }
 });

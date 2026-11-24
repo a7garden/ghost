@@ -11,7 +11,7 @@ import { relativeTime, useNow } from './time';
 const phaseLabel: Record<'checking' | 'downloading' | 'waiting' | 'installing', string> = {
   checking: '확인 중',
   downloading: '받는 중',
-  waiting: '진행 중인 대화가 끝나면 설치합니다',
+  waiting: '대화와 코딩 작업이 끝나면 설치합니다',
   installing: '설치하고 다시 시작하는 중',
 };
 
