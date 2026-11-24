@@ -1,4 +1,4 @@
-import type { PiInstall, PiPackage, PiPackageFlags, PiPackageOverrides, PiSessionConfig, PiSettings, PiSettingsOverrides } from '@ghost/contract';
+import type { BrowserLoginFill, BrowserLoginShelf, LocalAccount, LocalAccountConnect, LoginChoice, MailDiscovery, PiInstall, PiPackage, PiPackageFlags, PiPackageOverrides, PiSessionConfig, PiSettings, PiSettingsOverrides, ShadeStatus } from '@ghost/contract';
 import { shell, shellCall } from './shell';
 import type {
   ApiError,
@@ -770,6 +770,43 @@ export class HostClient {
   /** Move the conversation's browser into a visible Chrome window on the Mac running the host. */
   async browserWindow(conversationId: string): Promise<void> {
     await this.json(`/api/browser/sessions/${encodeURIComponent(conversationId)}/window`, { method: 'POST' });
+  }
+
+  /** What the handoff card offers for the page the owner is on: saved logins, a just-captured login, matching Shade logins. */
+  browserLogin(conversationId: string): Promise<BrowserLoginShelf> {
+    return this.json(`/api/browser/sessions/${encodeURIComponent(conversationId)}/login`);
+  }
+
+  /** Type one saved login field into the focused field of the conversation's browser, exactly as the owner typing it. */
+  async browserFill(conversationId: string, input: BrowserLoginFill): Promise<void> {
+    await this.json(`/api/browser/sessions/${encodeURIComponent(conversationId)}/fill`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+  }
+
+  /** Copy one Shade login into the Ghost vault, granted to this conversation's Ghost; the password never reaches the UI. */
+  importShadeLogin(conversationId: string, shadeItemId: string): Promise<LoginChoice> {
+    return this.json(`/api/browser/sessions/${encodeURIComponent(conversationId)}/login/shade`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shadeItemId }) });
+  }
+
+  shadeStatus(): Promise<ShadeStatus> {
+    return this.json('/api/shade');
+  }
+
+  setShadeSaveLogins(saveLogins: boolean): Promise<ShadeStatus> {
+    return this.json('/api/shade', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ saveLogins }) });
+  }
+
+  /** How one mail address connects: provider, servers and sign-in method, resolved on the Host. */
+  mailDiscovery(email: string): Promise<MailDiscovery> {
+    return this.json(`/api/connect/mail?email=${encodeURIComponent(email)}`);
+  }
+
+  /** Accounts already signed in on the Host's Mac that can become a connection with one click. */
+  localAccounts(): Promise<{ accounts: LocalAccount[] }> {
+    return this.json('/api/connect/local');
+  }
+
+  connectLocalAccount(input: LocalAccountConnect): Promise<{ connectionId: string }> {
+    return this.json('/api/connect/local', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
   }
 
   /** Upload owner message bytes; the returned reference can be passed to message.send. */

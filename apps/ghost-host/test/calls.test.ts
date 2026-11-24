@@ -141,3 +141,15 @@ describe("voice calls", () => {
     expect(calls.filter((call) => call.status === "connecting").map((call) => call.id)).toEqual([live]);
   });
 });
+
+describe("call preparation", () => {
+  test("a ringing call warms its conversation, and a failed warm-up never fails the call", async () => {
+    const t = setup();
+    const warmed: string[] = [];
+    Object.assign(t.engine, { prepare: async (conversationId: string) => { warmed.push(conversationId); throw new Error("compaction failed"); } });
+    const id = (await t.send({ type: "call.start", ghostId: t.ghost.id, engine: "local" })).callId as string;
+    await Bun.sleep(5);
+    expect(warmed).toEqual([t.ghost.directConversationId]);
+    expect(t.core.calls.get(id).status).toBe("connecting");
+  });
+});

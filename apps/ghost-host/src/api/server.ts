@@ -43,6 +43,11 @@ import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
 import { ProviderQuotas } from "../integrations/provider-quota.ts";
 import { ConnectionOAuth } from "./connection-oauth.ts";
+import { serveConnect } from "./connect.ts";
+import { serveShade } from "./shade.ts";
+import type { LocalAccounts } from "../integrations/local-accounts.ts";
+import type { LoginShelf } from "../integrations/login-shelf.ts";
+import type { Shade } from "../integrations/shade.ts";
 import { CloudflareAccessVerifier } from "./cloudflare-access.ts";
 import { goPage, TailscaleIdentity } from "./tailscale-identity.ts";
 import { Access } from "../core/access.ts";
@@ -128,8 +133,8 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; terminals?: Terminals | null; workbench?: Workbench | null; omp?: OmpInfoProvider | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null; quotas?: ProviderQuotas }): { port: number; stop(): Promise<void> } {
-  const { core, config, ownerToken, documents, skills, omp = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; terminals?: Terminals | null; workbench?: Workbench | null; omp?: OmpInfoProvider | null; vault?: Vault | null; browser?: BrowserPort | null; logins?: LoginShelf | null; shade?: Shade | null; localAccounts?: LocalAccounts | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null; quotas?: ProviderQuotas }): { port: number; stop(): Promise<void> } {
+  const { core, config, ownerToken, documents, skills, omp = null, vault = null, browser = null, logins = null, shade = null, localAccounts = null, updater = null, memory = null, memoryDreams = null } = deps;
   const quotas = deps.quotas ?? new ProviderQuotas({ providers: () => core.ledger.providers(), secrets: core.secrets });
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
@@ -517,7 +522,9 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       try { return await serveUpdate(request, url, updater); } catch (caught) { return failure(caught); }
     }
     if (pathname === "/api/vault" || pathname.startsWith("/api/vault/")) return serveVault(request, url, core, vault);
-    if (pathname.startsWith("/api/browser/")) return serveBrowser(request, url, core, browser, () => viaEdge || viaIdentity || authenticate(request) !== null);
+    if (pathname.startsWith("/api/browser/")) return serveBrowser(request, url, core, browser, () => viaEdge || viaIdentity || authenticate(request) !== null, deps.logins ?? null);
+    if (pathname === "/api/shade") return serveShade(request, url, deps.shade ?? null);
+    if (pathname.startsWith("/api/connect/")) return serveConnect(request, url, core, access, deps.localAccounts ?? null, publicOrigin);
     if (pathname.startsWith("/api/mail/")) return serveMail(request, url, deps.mail ?? null);
     if (pathname.startsWith("/api/calls/")) {
       try { return await core.calls.serve(request, url, access) ?? error("not_found", "not found", 404); }

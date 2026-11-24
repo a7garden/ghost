@@ -1,5 +1,7 @@
+import { BrowserLoginFill, validate } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
 import { CommandError, invalid, notFound } from "../core/errors.ts";
+import type { LoginShelf } from "../integrations/login-shelf.ts";
 import type { BrowserLiveInput, BrowserPort } from "../integrations/ports.ts";
 import { assertFetchableUrl } from "../integrations/netguard.ts";
 
@@ -46,13 +48,13 @@ async function body(request: Request): Promise<unknown> {
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw invalid("invalid browser JSON body"); }
 }
 /** Authentication is enforced by server.ts, including for paired owner-equivalent devices. */
-export async function serveBrowser(request: Request, url: URL, core: Core, browser: BrowserPort | null, isAuthorized?: () => boolean): Promise<Response> {
+export async function serveBrowser(request: Request, url: URL, core: Core, browser: BrowserPort | null, isAuthorized?: () => boolean, logins: LoginShelf | null = null): Promise<Response> {
   const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "cache-control": "no-store" } });
   try {
     if (!browser) throw new CommandError("unavailable", "the browser is not configured");
     const sessions = browser.sessions();
     if (url.pathname === "/api/browser/sessions" && request.method === "GET") return json({ sessions: sessions.map((s) => ({ ...s, handoffDecisionId: core.ledger.pendingDecisions().find((d) => d.conversationId === s.conversationId && d.kind === "question" && d.proposal?.browserHandoff)?.id ?? null })) });
-    const match = /^\/api\/browser\/sessions\/([^/]{1,128})\/(live|input|window)$/.exec(url.pathname);
+    const match = /^\/api\/browser\/sessions\/([^/]{1,128})\/(live|input|window|login|fill|login\/shade)$/.exec(url.pathname);
     if (!match) throw notFound("browser route not found");
     let id: string; try { id = decodeURIComponent(match[1]!); } catch { throw invalid("invalid conversation id"); }
     const session = sessions.find((s) => s.conversationId === id);
@@ -100,6 +102,23 @@ export async function serveBrowser(request: Request, url: URL, core: Core, brows
       return new Response(stream, { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
     }
     if (match[2] === "input" && request.method === "POST") { await browser.input(session, parseInput(await body(request))); return json({ ok: true }); }
+    if (match[2] === "login" && request.method === "GET") {
+      if (!logins) throw new CommandError("unavailable", "the login shelf is not available");
+      const pending = core.ledger.pendingDecisions().find((d) => d.conversationId === id && d.kind === "question" && d.proposal?.browserHandoff);
+      return json(await logins.shelf(session, pending?.createdAt ?? null));
+    }
+    if (match[2] === "fill" && request.method === "POST") {
+      if (!logins) throw new CommandError("unavailable", "the login shelf is not available");
+      const input = await body(request);
+      if (!validate(BrowserLoginFill, input)) throw invalid("invalid login fill");
+      await logins.fill(session, input); return json({ ok: true });
+    }
+    if (match[2] === "login/shade" && request.method === "POST") {
+      if (!logins) throw new CommandError("unavailable", "the login shelf is not available");
+      const input = await body(request);
+      if (!input || typeof input !== "object" || !("shadeItemId" in input) || typeof input.shadeItemId !== "string" || Object.keys(input).length !== 1) throw invalid("invalid Shade login");
+      return json(await logins.importShade(session, input.shadeItemId), 201);
+    }
     if (match[2] === "window" && request.method === "POST") {
       const current = await browser.run(session, ["get", "url"]);
       const raw = typeof current.data === "string" ? current.data : current.data && typeof current.data === "object" && "url" in current.data ? current.data.url : null;

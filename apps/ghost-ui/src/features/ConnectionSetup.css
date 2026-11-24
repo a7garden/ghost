@@ -1,0 +1,48 @@
+@layer components {
+  /* Address-first mail entry — one input and a continue affordance. */
+  .mail-entry { display: flex; align-items: flex-end; gap: 8px; }
+  .mail-entry__field { display: grid; flex: 1; gap: 6px; min-width: 0; }
+  .mail-entry__field > label { color: var(--ghost-ink2); font-size: var(--text-caption); font-weight: 500; }
+  .mail-entry > button { flex: none; }
+
+  /* Accounts already signed in on this Mac (GitHub CLI). */
+  .local-accounts { display: grid; gap: 10px; padding: 16px 20px; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-btn); }
+  .local-accounts > h3 { margin: 0; color: var(--ghost-ink2); font-size: var(--text-caption); font-weight: 500; }
+  .local-accounts ul { display: grid; margin: 0; padding: 0; list-style: none; }
+  .local-account { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+  .local-account .connection-tile__identity { flex: 1; }
+  .service-state { display: inline-flex; flex: none; align-items: center; gap: 4px; color: var(--ghost-success-ink); font-size: var(--text-caption); font-weight: 500; white-space: nowrap; }
+  .service-state svg { width: 14px; height: 14px; }
+
+  /* The catalog: one calm list per group; a connected service carries its accounts beneath it. */
+  ul.connection-catalog__services { display: grid; margin: 0; padding: 0; list-style: none; overflow: hidden; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-btn); }
+  .service-block { display: grid; min-width: 0; }
+  .service-block + .service-block { box-shadow: inset 0 1px 0 var(--ghost-line); }
+  .service-tile { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 10px 16px; }
+  .service-tile .service-icon { width: 32px; height: 32px; }
+  .service-tile .service-icon img { width: 24px; height: 24px; }
+  .service-tile__name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: var(--text-ui); font-weight: 500; }
+
+  /* Indented under the service's name: 16px padding + 32px icon + 12px gap. */
+  ul.service-block__accounts { display: grid; margin: 0; padding: 0 16px 8px 60px; list-style: none; }
+  .connection-account { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "identity actions" "status actions"; align-items: center; column-gap: 12px; row-gap: 2px; padding: 8px 0; }
+  .connection-account + .connection-account { box-shadow: inset 0 1px 0 var(--ghost-line); }
+  .connection-account > .service-icon { display: none; }
+  .connection-account .connection-tile__identity { grid-area: identity; gap: 2px; }
+  .connection-account .connection-tile__status { grid-area: status; }
+  .connection-account .connection-tile__actions { grid-area: actions; margin-top: 0; padding-top: 0; }
+
+  /* Resolved provider row inside the mail dialog. */
+  .mail-provider { display: flex; align-items: center; gap: 12px; }
+  .mail-provider__identity { display: grid; flex: 1; min-width: 0; gap: 2px; }
+  .mail-provider__identity p { margin: 0; overflow-wrap: anywhere; }
+  .mail-provider__identity p + p { color: var(--ghost-ink2); font-size: var(--text-caption); }
+
+  @media (max-width: 640px) {
+    .service-tile { gap: 10px; padding-inline: 12px; }
+    ul.service-block__accounts { padding: 0 12px 8px 54px; }
+    .local-accounts { padding: 14px 16px; }
+    .local-account { flex-wrap: wrap; row-gap: 8px; }
+    .local-account > button { flex-basis: 100%; }
+  }
+}

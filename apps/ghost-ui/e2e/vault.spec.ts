@@ -86,7 +86,7 @@ test('the handoff completion button answers the question normally', async ({ pag
   await mockStateDecisions(page);
   await recordCommands(page, commands);
   await page.goto(`${baseUrl}/#/inbox?decision=${visualHandoffDecisionId}`);
-  await expect(page.getByText('Chrome 창을 열어 두었습니다')).toBeVisible();
+  await expect(page.getByText('Mac의 Chrome 창에서 마무리해 주세요')).toBeVisible();
   await page.getByRole('button', { name: '다 했어요' }).click();
   await expect.poll(() => commands[0]).toMatchObject({ type: 'decision.resolve', outcome: 'answer', answer: '다 했어요' });
 });

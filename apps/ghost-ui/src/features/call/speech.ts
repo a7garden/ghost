@@ -1,5 +1,14 @@
 const MAX_SPEECH_CHARS = 500;
 
+/**
+ * A sentence-final mark at the very end of a streaming text still closes the sentence: waiting for the next
+ * token holds an opening answer behind the tool call that follows it. A period after a digit stays open
+ * ("버전 2." may become "2.9").
+ */
+function endsHere(text: string, match: RegExpExecArray): boolean {
+  return !match[0].startsWith('.') || !/\d/.test(text[match.index - 1] ?? '');
+}
+
 /** Consume whole sentences. An unfinished streaming tail waits; a long sentence uses the endpoint's limit. */
 export function speechSentences(text: string, offset = 0, final = true): { sentences: string[]; offset: number } {
   const sentences: string[] = [];
@@ -8,7 +17,7 @@ export function speechSentences(text: string, offset = 0, final = true): { sente
   while (offset < text.length) {
     const match = boundaries.exec(text);
     let end = match ? boundaries.lastIndex : text.length;
-    const complete = Boolean(match && (end < text.length || match[0].startsWith('\n')));
+    const complete = Boolean(match && (end < text.length || match[0].startsWith('\n') || endsHere(text, match)));
     if (end - offset > MAX_SPEECH_CHARS) {
       end = offset + MAX_SPEECH_CHARS;
       // Prefer a word boundary, but never split a UTF-16 surrogate pair.
@@ -20,7 +29,8 @@ export function speechSentences(text: string, offset = 0, final = true): { sente
       break;
     }
     const sentence = text.slice(offset, end).trim();
-    if (sentence) sentences.push(sentence);
+    // A stray closing quote that arrived after its sentence was spoken has nothing to say.
+    if (/[\p{L}\p{N}]/u.test(sentence)) sentences.push(sentence);
     offset = end;
   }
   return { sentences, offset };

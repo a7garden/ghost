@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openScreen, screenshot, type Theme } from './visual';
 import { mockConversationActivity, mockIPhone, mockMessageNotification, mockRichConversation, showTranscriptElement } from './iphone-fixtures';
-import { mockStateDecisions, mockVaultApi, visualHandoffDecisionId, visualSecureDecisionId } from './mocks';
+import { mockShadeApi, mockStateDecisions, mockVaultApi, visualHandoffDecisionId, visualSecureDecisionId } from './mocks';
 import type { Decision, MemoryView, ProviderQuota, State } from '@ghost/contract';
 import { readRunState } from './run-state';
 
@@ -112,6 +112,12 @@ for (const theme of ['light', 'dark'] as const) {
         await openScreen(page, { name: tab, route: () => `/settings?tab=${tab}`, waits: () => [], prepare: async page => {
           await mockIPhone(page);
           if (tab === 'vault') await mockVaultApi(page);
+          if (tab === 'connections') {
+            // Never turn this Mac's GitHub CLI sign-in into a visual baseline.
+            await page.route('**/api/connect/local', route => route.fulfill({ json: { accounts: [
+              { source: 'gh', serviceId: 'github', login: 'ghost-owner', scopes: ['gist', 'repo'], connectionId: null },
+            ] } }));
+          }
           if (tab === 'models') {
             // Never turn the Mac account's live quota into a visual baseline.
             const { fixedNow } = readRunState();
@@ -183,7 +189,7 @@ for (const theme of ['light', 'dark'] as const) {
           await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
         }
         if (tab === 'connections') {
-          await page.getByRole('button', { name: 'iCloud', exact: true }).click();
+          await page.getByRole('button', { name: 'iCloud 연결', exact: true }).click();
           await expect(page.getByRole('dialog')).toBeVisible();
           await capture(page, 'connection-mail-dialog', theme, info.project.name);
           await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
@@ -277,6 +283,7 @@ for (const theme of ['light', 'dark'] as const) {
     test('vault loading and error remain distinct from empty', async ({ page }, info) => {
       const { promise: pending, resolve: release } = Promise.withResolvers<void>();
       await openScreen(page, { name: 'vault-loading', route: () => '/settings?tab=vault', waits: () => [], prepare: async page => {
+        await mockShadeApi(page, 'unavailable');
         await page.route('**/api/vault/items', async route => {
           await pending;
           await route.fulfill({ status: 503, json: { ok: false, error: { code: 'internal', message: '금고를 읽지 못했습니다.' } } });

@@ -54,17 +54,22 @@ test.describe('Connection and activity edits', () => {
   });
 
   test('keeps every entered account field after a failed save and allows an explicit retry', async ({ page }) => {
-    await page.getByRole('button', { name: '다른 메일 계정', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '다른 메일 계정 연결', exact: true });
+    // A domain the Host cannot resolve leaves the owner to type the servers, so every field is in play.
+    await page.route('**/api/connect/mail*', route => route.fulfill({ json: {
+      email: 'owner@example.test', domain: 'example.test', provider: null, imap: null, smtp: null, auth: 'password', setupUrl: null, note: null, source: 'none',
+    } }));
+    await page.getByRole('button', { name: '다른 메일 계정 연결', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '이메일 연결', exact: true });
+    await dialog.getByRole('textbox', { name: '이메일 주소', exact: true }).fill('owner@example.test');
+    await expect(dialog.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toBeVisible();
     const fields = [
-      ['메일 주소', 'owner@example.test'], ['이름', 'Retry mail account'],
       ['IMAP 서버', 'imap.example.test'], ['IMAP 포트', '1993'], ['메일함', 'Priority'],
       ['SMTP 서버', 'smtp.example.test'], ['SMTP 포트', '2465'],
     ] as const;
     for (const [label, value] of fields) await dialog.getByRole(label.endsWith('포트') ? 'spinbutton' : 'textbox', { name: label, exact: true }).fill(value);
     const implicitTLS = dialog.getByRole('switch', { name: 'SMTP 암시적 TLS', exact: true });
     if (await implicitTLS.getAttribute('aria-checked') !== 'true') await implicitTLS.click();
-    await dialog.getByLabel('앱 비밀번호', { exact: true }).fill('synthetic-retry-secret');
+    await dialog.getByLabel('비밀번호', { exact: true }).fill('synthetic-retry-secret');
     let attempts = 0;
     await page.route('**/api/commands', async route => {
       if (route.request().postDataJSON()?.command?.type === 'connection.upsert') {
@@ -77,16 +82,16 @@ test.describe('Connection and activity edits', () => {
     await dialog.getByRole('button', { name: '연결', exact: true }).click();
     await expect(dialog.getByRole('alert')).toContainText('Synthetic save unavailable');
     for (const [label, value] of fields) await expect(dialog.getByRole(label.endsWith('포트') ? 'spinbutton' : 'textbox', { name: label, exact: true })).toHaveValue(value);
-    await expect(dialog.getByLabel('앱 비밀번호', { exact: true })).toHaveValue('synthetic-retry-secret');
+    await expect(dialog.getByLabel('비밀번호', { exact: true })).toHaveValue('synthetic-retry-secret');
     await expect(implicitTLS).toHaveAttribute('aria-checked', 'true');
     await expect(dialog.getByRole('button', { name: '연결', exact: true })).toBeEnabled();
     expect(attempts).toBe(1);
-    expect((await storedState(page)).connections.some(item => item.name === 'Retry mail account')).toBe(false);
+    expect((await storedState(page)).connections.some(item => item.config.kind === 'mail' && item.config.username === 'owner@example.test')).toBe(false);
 
     await page.unroute('**/api/commands');
     await dialog.getByRole('button', { name: '연결', exact: true }).click();
     await expect(dialog).toHaveCount(0);
-    const saved = (await storedState(page)).connections.find(item => item.name === 'Retry mail account');
+    const saved = (await storedState(page)).connections.find(item => item.config.kind === 'mail' && item.config.username === 'owner@example.test');
     expect(saved).toBeDefined();
     connections.push(saved!.id);
     expect(saved).toMatchObject({ hasCredential: true, config: {

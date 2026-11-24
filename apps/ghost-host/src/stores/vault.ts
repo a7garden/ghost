@@ -267,11 +267,11 @@ export class Vault implements VaultPort {
     return this.create({ ...input, id, origin, kind: "login", title: input.title ?? origin, password: generatePassword(), ghostIds: [ghostId] }, { creatorGhostId: ghostId });
   }
   /** Owner-entered credentials are owner items, not Ghost-generated quota entries. */
-  saveLogin(ghostId: string, input: { origin: string; username: string; password: string }): VaultItem {
+  saveLogin(ghostId: string, input: { origin: string; username: string; password: string; title?: string; hints?: string }): VaultItem {
     const origin = normalizeOrigin(input.origin);
     validatePassword(input.password);
     const existing = this.list().find((item) => item.kind === "login" && item.origin === origin && item.username === input.username);
-    if (!existing) return this.create({ kind: "login", title: new URL(origin).hostname, origin, username: input.username, password: input.password, ghostIds: [ghostId], hints: "소유자가 브라우저에서 직접 로그인" });
+    if (!existing) return this.create({ kind: "login", title: input.title ?? new URL(origin).hostname, origin, username: input.username, password: input.password, ghostIds: [ghostId], hints: input.hints ?? "소유자가 브라우저에서 직접 로그인" });
     const changed = !existing.hasPassword || this.field(existing.id, "password") !== input.password;
     if (!changed && existing.ghostIds.includes(ghostId)) return existing;
     return this.update(existing.id, { ...(changed ? { password: input.password } : {}), ghostIds: [...new Set([...existing.ghostIds, ghostId])] });

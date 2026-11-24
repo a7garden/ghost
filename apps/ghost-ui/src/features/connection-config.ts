@@ -1,4 +1,4 @@
-import { connectionCredentialScope, type Command, type Connection, type ConnectionConfig } from '@ghost/contract';
+import { connectionCredentialScope, type Command, type Connection, type ConnectionConfig, type MailDiscovery } from '@ghost/contract';
 import { serviceForConnection, type ConnectionService } from './connection-services';
 
 export const connectionKindLabel: Record<ConnectionConfig['kind'], string> = {
@@ -161,4 +161,49 @@ export function buildConnectionCommand(draft: ConnectionDraft, existing: Connect
       : secret ? { credential: secret } : configChanged ? { credential: null } : {}),
   };
   return { ok: true, command };
+}
+
+/** Accounts live under their catalog service; unmatched rows join the custom presets. */
+export function groupConnectionsByService(connections: readonly Connection[]): Map<string, Connection[]> {
+  const groups = new Map<string, Connection[]>();
+  for (const connection of connections) {
+    const key = serviceForConnection(connection)?.id ?? (connection.config.kind === 'mail' ? 'custom-mail' : 'custom-api');
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(connection);
+    else groups.set(key, [connection]);
+  }
+  return groups;
+}
+
+/** One `@` with both sides non-empty; less than that is not worth asking the Host about. */
+export const mailAddressReady = (address: string): boolean => /^[^\s@]+@[^\s@]+$/.test(address.trim());
+
+/** Stale-guard: the Host echoes the address a discovery resolved; compare without case or padding. */
+export const sameMailAddress = (left: string, right: string): boolean => left.trim().toLowerCase() === right.trim().toLowerCase();
+
+/** A local part typed against a provider tile completes with that service's domain. */
+export function mailAddressFromParts(input: string, seed?: ConnectionService): string {
+  const trimmed = input.trim();
+  if (!trimmed || trimmed.includes('@')) return trimmed;
+  return seed?.domain ? `${trimmed}@${seed.domain}` : trimmed;
+}
+
+/**
+ * Discovery → connection draft. The provider names the account (`provider · address`),
+ * its servers ride along hidden under the disclosure, and a missing IMAP host stays
+ * empty so the owner types it with the disclosure already open.
+ */
+export function draftFromMailDiscovery(address: string, discovery: MailDiscovery): ConnectionDraft {
+  return {
+    ...emptyConnectionDraft('mail'),
+    serviceId: discovery.provider?.id ?? 'custom-mail',
+    name: `${discovery.provider?.name ?? discovery.domain} · ${address}`,
+    username: address,
+    host: discovery.imap?.host ?? '',
+    port: String(discovery.imap?.port ?? 993),
+    smtpHost: discovery.smtp?.host ?? '',
+    smtpPort: String(discovery.smtp?.port ?? 587),
+    smtpSecure: discovery.smtp?.secure ?? false,
+    ...(discovery.auth === 'oauth' ? { mailAuthType: 'oauth2' as const } : {}),
+  };
 }
