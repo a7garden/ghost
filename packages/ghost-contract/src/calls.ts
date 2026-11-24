@@ -65,3 +65,10 @@ export type CallTranscript = Static<typeof CallTranscript>;
 /** `POST /api/calls/:id/speech` (local engine): one sentence to speak; the reply body is `audio/wav`, mono PCM16. */
 export const CallSpeechRequest = Type.Object({ text: Type.String({ minLength: 1, maxLength: 500 }) });
 export type CallSpeechRequest = Static<typeof CallSpeechRequest>;
+
+/**
+ * `POST /api/calls/preview`: hear a voice outside a call. The reply body is `audio/wav`, mono PCM16.
+ * Voice names are lowercase identifiers (`default`, `f1`, `marin`); the engine refuses a name it does not know.
+ */
+export const CallVoicePreview = Type.Object({ engine: CallEngine, voice: Type.String({ pattern: "^[a-z0-9_-]{1,32}$" }) });
+export type CallVoicePreview = Static<typeof CallVoicePreview>;

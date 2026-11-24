@@ -6,6 +6,7 @@ import { InlineError, SelectField, SettingsGroup, SettingsRow } from '../../ui';
 import { useCallActions } from './CallProvider';
 import { engineLabel } from './call-state';
 import { errorMessage } from './media';
+import { VoicePicker } from './VoicePicker';
 
 const engines = [
   { value: 'realtime', label: engineLabel.realtime },
@@ -53,9 +54,10 @@ export function VoiceSettings() {
         }}/>
     </SettingsRow>
     {reason && <InlineError id={availabilityId}>{reason}</InlineError>}
-    <SettingsRow label="목소리" htmlFor={voiceId}>
-      <SelectField id={voiceId} label="목소리" options={voices} value={voice} disabled={Boolean(pending)}
-        onValueChange={value => { if (value !== voice) save({ voice: value }); }}/>
+    <SettingsRow className="voice-settings-row" label={<span id={voiceId}>목소리</span>}>
+      <VoicePicker labelledBy={voiceId} scope={engine} voices={voices} value={voice} disabled={Boolean(pending)}
+        onChange={value => { if (value !== voice) save({ voice: value }); }}
+        load={(sample, signal) => client.previewVoice(engine, sample, signal)}/>
     </SettingsRow>
     {error && <InlineError>{error}</InlineError>}
   </SettingsGroup>;

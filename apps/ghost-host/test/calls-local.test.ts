@@ -312,3 +312,44 @@ describe("local call engine under load and failure", () => {
     expect(speech.requests).toHaveLength(1);
   });
 });
+
+describe("local voice preview", () => {
+  const preview = (t: ReturnType<typeof setup>, body: unknown) => {
+    const url = new URL("http://127.0.0.1:9/api/calls/preview");
+    return t.core.calls.serve(new Request(url, { method: "POST", body: JSON.stringify(body) }), url, owner);
+  };
+
+  test("speaks the chosen speaker once, then replays the kept sample", async () => {
+    const speech = new FakeSpeech();
+    servers.push(speech.server);
+    const t = setup(speech.url);
+    t.engine.start();
+    await until(() => t.engine.unavailable() === null);
+    const first = await preview(t, { engine: "local", voice: "m3" });
+    expect(first?.headers.get("content-type")).toBe("audio/wav");
+    expect(new Uint8Array(await first!.arrayBuffer())).toEqual(WAV);
+    expect(speech.requests).toHaveLength(1);
+    expect(speech.requests[0]!.json).toMatchObject({ model: "supertonic-3", voice: "m3", response_format: "wav", input: expect.stringContaining("Ghost") });
+    await preview(t, { engine: "local", voice: "m3" });
+    expect(speech.requests).toHaveLength(1);
+    await preview(t, { engine: "local", voice: "default" });
+    expect(speech.requests).toHaveLength(2);
+  });
+
+  test("refuses a speaker the server does not have, and a failed sample is not kept", async () => {
+    const speech = new FakeSpeech();
+    servers.push(speech.server);
+    const t = setup(speech.url);
+    t.engine.start();
+    await until(() => t.engine.unavailable() === null);
+    await expect(preview(t, { engine: "local", voice: "x9" })).rejects.toMatchObject({ code: "invalid" });
+    await expect(preview(t, { engine: "local", voice: "../etc" })).rejects.toThrow();
+    expect(speech.requests).toHaveLength(0);
+    speech.behavior.status = 500;
+    const failure = await preview(t, { engine: "local", voice: "f2" }).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: "unavailable" });
+    expect(String((failure as Error).message)).not.toContain("SECRET");
+    speech.behavior.status = 200;
+    expect((await preview(t, { engine: "local", voice: "f2" }))?.status).toBe(200);
+  });
+});

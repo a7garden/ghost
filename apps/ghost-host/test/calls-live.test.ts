@@ -394,3 +394,42 @@ test("the production Engine reads each durable input's final text rather than an
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("previews a voice over a short session, keeps the sample, and never caches a refusal", async () => {
+  const f = fixture();
+  const request = () => new Request("http://host.test/api/calls/preview", { method: "POST", body: JSON.stringify({ engine: "realtime", voice: "noeul" }) });
+  const ask = () => f.core.calls.serve(request(), new URL(request().url), owner);
+  const socketAt = async (index: number) => {
+    while (f.sockets.length <= index) await Bun.sleep(1);
+    await Bun.sleep(5);
+    return f.sockets[index]!;
+  };
+
+  const refused = ask().catch((error: unknown) => error);
+  const first = await socketAt(0);
+  first.receive({ type: "error", error: { message: "unknown voice" } });
+  expect(await refused).toMatchObject({ code: "unavailable" });
+
+  const pending = ask();
+  const socket = await socketAt(1);
+  expect(socket.url.href).toBe("wss://provider.test/v1/live/sessions");
+  expect(socket.options.headers.Authorization).toBe(`Bearer ${KEY}`);
+  expect(socket.sent[0]).toMatchObject({ type: "session.start", session: { model: "gpt-live-1.1", audio: { output: { voice: "noeul" }, format: { rate: 24000 } }, delegation: { type: "client" } } });
+  socket.receive({ type: "session.started", session: { id: "preview" } });
+  const samples = Buffer.from(new Int16Array([1, -2, 3, -4]).buffer).toString("base64");
+  socket.receive({ type: "session.output_audio.delta", delta: samples });
+  socket.receive({ type: "session.output_audio.delta", delta: samples });
+  socket.receive({ type: "session.closed", reason: "close_requested" });
+  const response = (await pending)!;
+  expect(response.headers.get("content-type")).toBe("audio/wav");
+  const wav = Buffer.from(await response.arrayBuffer());
+  expect(wav.subarray(0, 4).toString()).toBe("RIFF");
+  expect(wav.readUInt32LE(24)).toBe(24_000);
+  expect(wav.readUInt32LE(40)).toBe(16);
+  expect(wav.byteLength).toBe(44 + 16);
+  expect(Buffer.from(wav.subarray(44)).readInt16LE(2)).toBe(-2);
+
+  await ask();
+  expect(f.sockets).toHaveLength(2);
+  expect(f.requests).toHaveLength(0);
+});

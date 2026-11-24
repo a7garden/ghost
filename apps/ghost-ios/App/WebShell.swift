@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import WebKit
+import AVFoundation
 import GhostMobileCore
 
 /// The paired Host's web UI, full screen. The page draws every Ghost surface and
@@ -155,6 +156,7 @@ private struct ShellWebView: UIViewRepresentable {
     @ObservationIgnored private var loadGeneration = 0
     @ObservationIgnored private var probing = false
     @ObservationIgnored private var downloads: [ObjectIdentifier: URL] = [:]
+    @ObservationIgnored private let callAudio = CallAudioRoute()
 
     init(model: GhostModel, connection: Connection) {
         self.model = model
@@ -281,6 +283,9 @@ private struct ShellWebView: UIViewRepresentable {
             case .success: UINotificationFeedbackGenerator().notificationOccurred(.success)
             case .warning: UINotificationFeedbackGenerator().notificationOccurred(.warning)
             }
+            return ([:], nil)
+        case .audioRoute(let route):
+            do { try callAudio.apply(route) } catch { return (nil, "audio route unavailable") }
             return ([:], nil)
         case .disconnected, .revoked:
             model.disconnect()
@@ -428,5 +433,40 @@ private final class WeakBridge: NSObject, WKScriptMessageHandlerWithReply {
     @MainActor func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
         guard let target else { return (nil, "shell closed") }
         return await target.handle(message)
+    }
+}
+
+/// A call's audio output. WebKit opens its own play-and-record session with the loudspeaker as the default,
+/// so a call held to the ear needs the category set here without `defaultToSpeaker`, and set again whenever
+/// WebKit puts its own options back. The proximity sensor blanks the screen only while the phone is at the ear.
+@MainActor private final class CallAudioRoute {
+    private var route: ShellRequest.AudioRoute = .off
+    private var timer: Timer?
+
+    func apply(_ next: ShellRequest.AudioRoute) throws {
+        route = next
+        timer?.invalidate()
+        timer = nil
+        let session = AVAudioSession.sharedInstance()
+        guard next != .off else {
+            UIDevice.current.isProximityMonitoringEnabled = false
+            try session.overrideOutputAudioPort(.none)
+            return
+        }
+        try configure(session)
+        UIDevice.current.isProximityMonitoringEnabled = next == .receiver
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { try? self?.configure(AVAudioSession.sharedInstance()) }
+        }
+    }
+
+    private func configure(_ session: AVAudioSession) throws {
+        let speaker = route == .speaker
+        var options: AVAudioSession.CategoryOptions = [.allowBluetooth]
+        if speaker { options.insert(.defaultToSpeaker) }
+        if session.category != .playAndRecord || session.mode != .voiceChat || session.categoryOptions != options {
+            try session.setCategory(.playAndRecord, mode: .voiceChat, options: options)
+        }
+        try session.overrideOutputAudioPort(speaker ? .speaker : .none)
     }
 }

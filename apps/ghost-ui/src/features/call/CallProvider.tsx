@@ -1,12 +1,15 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { DEFAULT_VOICE, type Call, type CallEngine, type Ghost } from '@ghost/contract';
 import { HostError } from '../../host/client';
 import { useActiveCall, useCalls } from '../../host/calls';
 import { useHost } from '../../host/context';
+import { shell, shellCall } from '../../host/shell';
 import type { Connection } from '../../host/store';
-import { isLiveCall } from './call-state';
+import { callPhase, callScreenState, isLiveCall, type AudioRoute, type CallLine, type CallPhase, type GhostWork } from './call-state';
 import { connectLocal, prepareLocalAudio, type LocalAudio } from './local-engine';
-import { errorMessage, openMicrophone, type CallMedia, type Captions, type MediaOptions } from './media';
+import { LineBook } from './lines';
+import { SILENT } from './levels';
+import { errorMessage, openMicrophone, type CallMedia, type MediaOptions } from './media';
 import { connectRealtime } from './realtime-engine';
 import { CallCapsule, CallSurface } from './CallSurface';
 
@@ -26,7 +29,9 @@ type Attempt = {
 };
 type View = {
   attempt: Attempt;
-  captions: Captions;
+  lines: CallLine[];
+  phase?: CallPhase;
+  detail?: string;
   error?: string;
   ending?: boolean;
   ended?: boolean;
@@ -44,6 +49,7 @@ type CallActions = {
 };
 const CallContext = createContext<CallActions | null>(null);
 const OWN_CALL = 'ghost.call.media';
+const ROUTE = 'ghost.call.route';
 
 function rememberedCall(id?: string | null): string | null {
   try {
@@ -52,6 +58,16 @@ function rememberedCall(id?: string | null): string | null {
     return sessionStorage.getItem(OWN_CALL);
   } catch {
     return null; // A shell that blocks storage cannot reclaim this tab's media after a reload.
+  }
+}
+
+/** A phone is held to the ear first; the owner's last choice sticks. */
+function rememberedRoute(route?: AudioRoute): AudioRoute {
+  try {
+    if (route) localStorage.setItem(ROUTE, route);
+    return localStorage.getItem(ROUTE) === 'speaker' ? 'speaker' : 'receiver';
+  } catch {
+    return route ?? 'receiver';
   }
 }
 
@@ -72,10 +88,13 @@ export function CallProvider({ children, ghosts, engine, connection }: {
   const [view, setView] = useState<View | null>(null);
   const [minimized, setMinimized] = useState(false);
   const [unavailable, setUnavailable] = useState<CallActions['unavailable']>({});
+  // Undefined until the native shell accepts the route: a Mac or a browser has no earpiece to choose.
+  const [route, setRoute] = useState<AudioRoute | undefined>();
   const current = useRef<Attempt | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const resumeButton = useRef<HTMLButtonElement | null>(null);
   const call = view?.attempt.id ? calls.find(item => item.id === view.attempt.id) : undefined;
+  const meter = useCallback(() => current.current?.media?.levels() ?? SILENT, []);
 
   function patch(attempt: Attempt, next: Partial<View>) {
     setView(previous => previous?.attempt === attempt ? { ...previous, ...next } : previous);
@@ -124,7 +143,7 @@ export function CallProvider({ children, ghosts, engine, connection }: {
     const options: MediaOptions = {
       call: existing ?? { id, conversationId: attempt.ghost.directConversationId, startedAt: attempt.startedAt, endedAt: null },
       client, store, signal,
-      captions: update => setView(previous => previous?.attempt === attempt ? { ...previous, captions: { ...previous.captions, ...update } } : previous),
+      lines: new LineBook(lines => patch(attempt, { lines })),
       failed: error => { if (!signal.aborted) end(attempt, { error }); },
       // Give the sideband's final status and metering priority over a client hangup.
       ended: () => {
@@ -192,7 +211,7 @@ export function CallProvider({ children, ghosts, engine, connection }: {
     const attempt: Attempt = { ghost, engine: chosen, startedAt: Date.now(), controller: new AbortController() };
     current.current = attempt;
     opener.current = trigger;
-    setView({ attempt, captions: {} });
+    setView({ attempt, lines: [] });
     setMinimized(false);
     prepare(attempt, client.startCall(ghost.id, chosen));
   }
@@ -214,9 +233,9 @@ export function CallProvider({ children, ghosts, engine, connection }: {
     const attempt = fromCall(live);
     current.current = attempt;
     setMinimized(false);
-    if (live.engine === 'local') setView({ attempt, captions: {}, resume: true });
+    if (live.engine === 'local') setView({ attempt, lines: [], resume: true });
     else {
-      setView({ attempt, captions: {} });
+      setView({ attempt, lines: [] });
       end(attempt, { error: '이전 음성 연결을 복원할 수 없습니다.' });
     }
     // A fresh Host connection, not the cached snapshot, can authorize recovery.
@@ -236,6 +255,53 @@ export function CallProvider({ children, ghosts, engine, connection }: {
     // The ledger's terminal transition, not updates to the view, runs the cleanup once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [call]);
+
+  // The phase the screen shows: what the audio is doing, else what the Ghost's run is doing.
+  const phaseAttempt = view?.ready ? view.attempt : undefined;
+  useEffect(() => {
+    const media = phaseAttempt?.media;
+    if (!phaseAttempt || !media) return;
+    let work: GhostWork = { running: false };
+    const unwatch = store.watchConversation(phaseAttempt.ghost.directConversationId, event => {
+      if (event.type !== 'live') return;
+      const tool = event.live.running ? event.live.tools.at(-1)?.name : undefined;
+      work = { running: event.live.running, ...(tool ? { tool } : {}) };
+    });
+    const tick = () => {
+      const next = callPhase(media.activity(), work);
+      setView(previous => previous?.attempt === phaseAttempt && (previous.phase !== next.phase || previous.detail !== next.detail)
+        ? { ...previous, phase: next.phase, detail: next.detail } : previous);
+    };
+    tick();
+    const timer = window.setInterval(tick, 120);
+    return () => {
+      window.clearInterval(timer);
+      unwatch();
+    };
+  }, [phaseAttempt, store]);
+
+  // While a call is up: the display stays awake, and on an iPhone the voice comes out of the earpiece or the speaker.
+  const routed = view?.ready && !view.attempt.remote;
+  useEffect(() => {
+    if (!routed) return;
+    let released = false;
+    let lock: WakeLockSentinel | undefined;
+    void navigator.wakeLock?.request('screen').then(sentinel => {
+      if (released) void sentinel.release().catch(() => {}); else lock = sentinel;
+    }, () => {});
+    if (shell) {
+      const wanted = rememberedRoute();
+      shellCall({ type: 'audio.route', route: wanted }).then(() => { if (!released) setRoute(wanted); }, () => {});
+    }
+    return () => {
+      released = true;
+      void lock?.release().catch(() => {});
+      if (shell) {
+        setRoute(undefined);
+        shellCall({ type: 'audio.route', route: 'off' }).catch(() => {});
+      }
+    };
+  }, [routed]);
 
   useEffect(() => {
     const pagehide = () => {
@@ -264,7 +330,7 @@ export function CallProvider({ children, ghosts, engine, connection }: {
     const attempt = fromCall(active);
     current.current = attempt;
     attempt.remote = true;
-    setView({ attempt, captions: {} });
+    setView({ attempt, lines: [] });
     setMinimized(false);
   };
   const tryResume = () => {
@@ -279,22 +345,30 @@ export function CallProvider({ children, ghosts, engine, connection }: {
     else view.attempt.media.setSpeakerMuted(value);
     patch(view.attempt, { [part]: value });
   };
+  const switchRoute = () => {
+    if (!route) return;
+    const next: AudioRoute = route === 'speaker' ? 'receiver' : 'speaker';
+    // The chosen route shows only once the phone has taken it.
+    shellCall({ type: 'audio.route', route: next }).then(() => { rememberedRoute(next); setRoute(next); }, () => {});
+  };
 
-  const callTray = compacted && displayGhost ? <CallCapsule ghost={displayGhost} call={displayedCall} view={view}
+  const surfaceView = view && { ...view, route };
+  const callTray = compacted && displayGhost ? <CallCapsule ghost={displayGhost} call={displayedCall} view={surfaceView}
     capsule={resumeButton} onOpen={button => view ? setMinimized(false) : showForeign(button)}/> : null;
 
   return <CallContext.Provider value={{ start, occupied: Boolean(active || view), unavailable }}>
     {children(callTray)}
     {view && <CallSurface
-      ghost={view.attempt.ghost} call={call} captions={view.captions} view={view} minimized={minimized}
-      remote={Boolean(view.attempt.remote)} opener={opener} capsule={resumeButton}
+      ghost={view.attempt.ghost} call={call} lines={view.lines} view={surfaceView} minimized={minimized}
+      remote={Boolean(view.attempt.remote)} opener={opener} capsule={resumeButton} meter={meter}
       onMinimize={() => setMinimized(true)}
       onResume={tryResume} onUnblockAudio={() => view?.attempt.media?.resumeAudio?.()}
-      onMic={() => muted('micMuted')} onSpeaker={() => muted('speakerMuted')}
+      onMic={() => muted('micMuted')} onSpeaker={() => muted('speakerMuted')} onRoute={switchRoute}
       onEnd={() => {
         const attempt = current.current;
         if (!attempt) return;
-        if (view?.ended || (call && !isLiveCall(call))) { dismiss(attempt); return; }
+        const kind = callScreenState({ ...view, call, now: Date.now() }).kind;
+        if (view?.ended || (call && !isLiveCall(call)) || kind === 'failed') { dismiss(attempt); return; }
         if (attempt.end) { sendEnd(attempt); return; }
         end(attempt, { dismiss: true });
         patch(attempt, { ending: true });

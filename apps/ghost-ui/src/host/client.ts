@@ -736,21 +736,30 @@ export class HostClient {
     });
   }
 
-  async speak(callId: string, speech: CallSpeechRequest, signal: AbortSignal): Promise<ArrayBuffer> {
+  speak(callId: string, speech: CallSpeechRequest, signal: AbortSignal): Promise<ArrayBuffer> {
+    return this.audio(`/api/calls/${encodeURIComponent(callId)}/speech`, speech, signal);
+  }
+
+  /** A few seconds of one voice, outside a call, for the voice picker. */
+  previewVoice(engine: CallEngine, voice: string, signal: AbortSignal): Promise<ArrayBuffer> {
+    return this.audio('/api/calls/preview', { engine, voice }, signal);
+  }
+
+  private async audio(path: string, body: unknown, signal: AbortSignal): Promise<ArrayBuffer> {
     let response: Response;
     try {
-      response = await this.request(`/api/calls/${encodeURIComponent(callId)}/speech`, {
+      response = await this.request(path, {
         method: 'POST', cache: 'no-store', signal,
         headers: this.headers({ 'Content-Type': 'application/json', Accept: 'audio/wav' }),
-        body: JSON.stringify(speech),
+        body: JSON.stringify(body),
       });
     } catch (caught) {
       throw caught instanceof HostError ? caught : new HostError('network', 'Ghost 호스트에 연결할 수 없습니다.');
     }
     if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
     if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: ApiError } | null;
-      throw new HostError(body?.error?.code ?? 'internal', body?.error?.message ?? `음성을 받을 수 없습니다 (${response.status}).`);
+      const failure = (await response.json().catch(() => null)) as { error?: ApiError } | null;
+      throw new HostError(failure?.error?.code ?? 'internal', failure?.error?.message ?? `음성을 받을 수 없습니다 (${response.status}).`);
     }
     return response.arrayBuffer();
   }

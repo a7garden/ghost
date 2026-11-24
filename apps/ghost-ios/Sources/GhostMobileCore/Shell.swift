@@ -115,10 +115,13 @@ public enum ShellRequest: Equatable, Sendable {
     case appInstall(URL)
     case theme(dark: Bool)
     case haptic(HapticStyle)
+    case audioRoute(AudioRoute)
     case disconnected
     case revoked
 
     public enum HapticStyle: String, Sendable { case selection, success, warning }
+    /// Where a call's voice comes out: held to the ear, the loudspeaker, or back to the system's choice.
+    public enum AudioRoute: String, Sendable { case receiver, speaker, off }
 
     public init?(body: Any) {
         guard let body = body as? [String: Any], let type = body["type"] as? String else { return nil }
@@ -137,6 +140,9 @@ public enum ShellRequest: Equatable, Sendable {
         case "haptic":
             guard let raw = body["style"] as? String, let style = HapticStyle(rawValue: raw) else { return nil }
             self = .haptic(style)
+        case "audio.route":
+            guard let raw = body["route"] as? String, let route = AudioRoute(rawValue: raw) else { return nil }
+            self = .audioRoute(route)
         case "disconnected": self = .disconnected
         case "revoked": self = .revoked
         default: return nil

@@ -1,15 +1,15 @@
 import type { Call } from '@ghost/contract';
 import type { HostClient } from '../../host/client';
 import type { HostStore } from '../../host/store';
-
-export type Captions = { owner?: string; ghost?: string };
+import type { CallLevels, MediaActivity } from './call-state';
+import type { LineBook } from './lines';
 
 export type MediaOptions = {
   call: Pick<Call, 'id' | 'conversationId' | 'startedAt' | 'endedAt'>;
   client: HostClient;
   store: HostStore;
   signal: AbortSignal;
-  captions(update: Captions): void;
+  lines: LineBook;
   failed(message: string): void;
   ended(): void;
   audioBlocked(blocked: boolean): void;
@@ -20,6 +20,10 @@ export type CallMedia = {
   setMicMuted(muted: boolean): void;
   setSpeakerMuted(muted: boolean): void;
   resumeAudio?(): void;
+  /** Loudness now; cheap enough to read on every animation frame. */
+  levels(): CallLevels;
+  /** Who is making sound now, for the call phase. */
+  activity(): MediaActivity;
 };
 
 /** Capture is only entered from a click handler; a late grant after hangup is immediately released. */

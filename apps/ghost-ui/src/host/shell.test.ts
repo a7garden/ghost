@@ -10,8 +10,9 @@ describe('native shell boundary', () => {
     for (const type of ['ready', 'notifications.status', 'notifications.request', 'notifications.settings', 'disconnected', 'revoked']) expect(isShellRequest({ type })).toBe(true);
     expect(isShellRequest({ type: 'theme', scheme: 'dark' })).toBe(true);
     expect(isShellRequest({ type: 'haptic', style: 'selection' })).toBe(true);
+    for (const route of ['receiver', 'speaker', 'off']) expect(isShellRequest({ type: 'audio.route', route })).toBe(true);
     expect(isShellRequest({ type: 'app.install', url: 'itms-services://?action=download-manifest&url=https%3A%2F%2Fhost%2Fmanifest.plist' })).toBe(true);
-    for (const value of [undefined, 'ready', { type: 'open' }, { type: 'theme', scheme: 'system' }, { type: 'haptic', style: 'heavy' }, { type: 'app.install' }, { type: 'app.install', url: 'https://host/install' }]) expect(isShellRequest(value)).toBe(false);
+    for (const value of [undefined, 'ready', { type: 'open' }, { type: 'theme', scheme: 'system' }, { type: 'haptic', style: 'heavy' }, { type: 'audio.route', route: 'bluetooth' }, { type: 'audio.route' }, { type: 'app.install' }, { type: 'app.install', url: 'https://host/install' }]) expect(isShellRequest(value)).toBe(false);
   });
   it('routes a mixed native event batch in order, discarding malformed or unknown events', () => {
     const delivered: ShellEvent[] = [];

@@ -5,58 +5,206 @@
     position: fixed;
     inset: 0;
     z-index: 50;
-    background: color-mix(in srgb, var(--ghost-page) 58%, transparent);
+    background: color-mix(in srgb, var(--ghost-page) 72%, transparent);
   }
+
   .voice-call-screen {
+    --call-gutter: clamp(20px, 3vw, 32px);
     position: fixed;
     inset: 50% auto auto 50%;
-    translate: -50% -50%;
     z-index: 50;
+    translate: -50% -50%;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
-    width: min(100% - 32px, 460px);
-    height: min(100dvh - 32px, 550px);
-    padding: clamp(22px, 4.5dvh, 36px) 26px 24px;
+    grid-template-rows: auto minmax(128px, 1fr) auto;
+    width: min(calc(100% - 32px), 788px);
+    height: min(calc(100dvh - 32px), 502px);
+    padding-inline: var(--call-gutter);
+    overflow-y: auto;
     border-radius: var(--radius-xl);
     background: var(--ghost-raised);
     box-shadow: var(--shadow-overlay);
     color: var(--ghost-ink);
   }
-  .voice-call-screen__header { display: grid; justify-items: center; text-align: center; }
-  .voice-call-screen__minimize { position: absolute; inset: 12px 12px auto auto; }
+
+  .voice-call-screen button { min-width: 44px; min-height: 44px; }
+  .voice-call-screen__header {
+    display: flex;
+    min-height: 74px;
+    align-items: center;
+    gap: var(--ghost-space-3);
+    padding-block: 10px;
+    border-block-end: 1px solid var(--ghost-line);
+  }
+  .voice-call-screen__header > .presence { flex: none; }
   .voice-call-screen__name {
-    margin: 8px 0 0;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-    font-size: clamp(21px, 3.2vw, 26px);
-    font-weight: 620;
-    line-height: 1.2;
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-headingSm);
+    font-weight: 640;
+    letter-spacing: -.015em;
+    line-height: var(--text-headingSm--line-height);
   }
   .voice-call-screen__name:focus { outline: none; }
-  .voice-call-screen__state { margin: 9px 0 0; color: var(--ghost-ink2); text-align: center; overflow-wrap: anywhere; }
-  .voice-call-screen__state[data-kind="timer"], .voice-call-capsule__state[data-kind="timer"] {
+  .voice-call-clock, .voice-call-screen__header-state {
+    flex: none;
+    color: var(--ghost-ink2);
+    font-size: var(--text-caption);
+  }
+  .voice-call-clock {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
-  .voice-call-screen__state[data-kind="failed"], .voice-call-capsule__state[data-kind="failed"] { color: var(--ghost-danger-ink); }
-  .voice-call-screen__remote { margin: 6px 0 0; color: var(--ghost-ink3); font-size: var(--text-caption); }
-  .voice-call-screen__captions {
-    align-self: stretch;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding: 18px 2px;
+
+  .voice-call-screen__stage {
+    display: grid;
+    grid-template-columns: minmax(0, 31%) minmax(0, 1fr);
+    min-height: 0;
+  }
+  .voice-call-turn {
+    display: grid;
+    align-content: center;
+    gap: 12px;
+    min-width: 0;
+    padding: 16px 24px 16px 0;
+    border-inline-end: 1px solid var(--ghost-line);
+  }
+  .voice-call-screen__stage[data-empty] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 24px;
+  }
+  .voice-call-screen__stage[data-empty] .voice-call-turn {
+    justify-self: center;
+    width: min(100%, 352px);
+    padding-inline: 0;
+    border: 0;
+  }
+  .voice-call-screen__stage[data-empty] .voice-turn-signal { max-width: none; }
+  .voice-call-turn__status { display: grid; gap: 5px; }
+  .voice-call-turn__label, .voice-call-turn__error {
+    min-width: 0;
+    font-size: var(--text-headingLg);
+    font-weight: 620;
+    letter-spacing: -.03em;
+    line-height: 1.26;
+    overflow-wrap: anywhere;
+    word-break: keep-all;
+  }
+  .voice-call-turn__label { animation: voice-call-turn-in var(--duration-base) var(--ease-enter) both; }
+  .voice-call-turn__error {
+    margin: 0;
+    color: var(--ghost-danger-ink);
+    font-size: var(--text-heading);
+  }
+  .voice-call-turn__detail, .voice-call-turn__note {
+    margin: 0;
+    color: var(--ghost-ink2);
+    font-size: var(--text-caption);
+    overflow-wrap: anywhere;
+  }
+  .voice-call-turn__detail { font-family: var(--font-mono); }
+
+  .voice-turn-signal {
+    display: block;
+    width: 100%;
+    max-width: 208px;
+    height: auto;
+    overflow: visible;
+  }
+  .voice-turn-signal__track { stroke: var(--ghost-line-strong); }
+  .voice-turn-signal__bank {
+    fill: var(--ghost-ink4);
+    transform-box: view-box;
+    transform-origin: 50% 50%;
+    transition: fill var(--duration-base) ease;
+  }
+  .voice-turn-signal__bank rect {
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: transform var(--duration-base) var(--ease-enter);
+  }
+  [data-turn="listening"] .voice-turn-signal__bank[data-side="owner"] { fill: var(--ghost-ink3); }
+  [data-turn="hearing"] .voice-turn-signal__bank[data-side="owner"],
+  [data-turn="speaking"] .voice-turn-signal__bank[data-side="ghost"] { fill: var(--ghost-ink); }
+  [data-turn="awaiting-input"] .voice-turn-signal__bank[data-side="owner"],
+  [data-turn="awaiting-output"] .voice-turn-signal__bank[data-side="ghost"] { fill: var(--ghost-amber-ink); }
+  [data-turn="connecting"] .voice-turn-signal__bank,
+  [data-turn="transcribing"] .voice-turn-signal__bank[data-side="owner"] { fill: var(--ghost-ink3); }
+  :is([data-turn="transcribing"], [data-turn="thinking"], [data-turn="working"]) .voice-turn-signal__bank[data-side="ghost"] {
+    fill: var(--ghost-signal);
+  }
+
+  @keyframes voice-call-turn-in {
+    from { opacity: 0; translate: 0 4px; }
+    to { opacity: 1; translate: 0 0; }
+  }
+
+  .voice-call-screen__transcript {
+    min-height: 0;
+    min-width: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
+    border-radius: var(--radius-control);
   }
-  .voice-call-caption { display: grid; grid-template-columns: minmax(48px, 24%) minmax(0, 1fr); align-items: baseline; gap: 12px; }
-  .voice-call-caption:first-child { margin-top: auto; }
-  .voice-call-caption > span { color: var(--ghost-ink3); font-size: var(--text-caption); text-align: right; overflow-wrap: anywhere; }
-  .voice-call-caption p { min-width: 0; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.55; }
-  .voice-call-screen__actions { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
-  .voice-call-screen__actions button { min-height: 44px; min-width: 44px; border-radius: var(--radius-pill); }
-  .voice-call-screen__actions button[aria-pressed="true"] { background: var(--ghost-hover); color: var(--ghost-ink); }
-  .voice-call-screen__actions .voice-call-screen__end { min-width: 56px; }
+  .voice-call-transcript {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    gap: 14px;
+    margin: 0;
+    padding: 24px 3px 26px 28px;
+    list-style: none;
+  }
+  .voice-call-line {
+    align-self: start;
+    max-width: 88%;
+    min-width: 0;
+    padding-inline-start: 12px;
+    border-inline-start: 2px solid var(--ghost-line-strong);
+    color: var(--ghost-ink3);
+    font-size: var(--text-bodyLg);
+    font-weight: 500;
+    line-height: 1.5;
+  }
+  .voice-call-line:first-child { margin-block-start: auto; }
+  .voice-call-line[data-speaker="owner"] {
+    align-self: end;
+    padding-inline: 0 12px;
+    border-inline-width: 0 2px;
+    border-inline-end-style: solid;
+    border-inline-end-color: var(--ghost-line-strong);
+    font-weight: 430;
+  }
+  .voice-call-line:last-child {
+    max-width: 94%;
+    margin-block-end: auto;
+    color: var(--ghost-ink);
+    font-size: var(--text-headingLg);
+    line-height: 1.34;
+    letter-spacing: -.023em;
+  }
+  .voice-call-line[data-live] { border-color: var(--ghost-ink3); }
+  .voice-call-line p { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; word-break: keep-all; }
+  .voice-call-line:last-child p { text-wrap: pretty; }
+
+  .voice-call-screen__actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 78px;
+    padding-block: 12px;
+    border-block-start: 1px solid var(--ghost-line);
+  }
+  .voice-call-screen__devices, .voice-call-screen__recovery { display: flex; align-items: center; gap: 4px; }
+  .voice-call-screen__devices button[aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--ghost-line-strong); }
+  .voice-call-screen__devices button[aria-pressed="true"]:not(:hover) { background: var(--ghost-hover); }
+  .voice-call-screen__recovery { gap: 8px; flex-wrap: wrap; }
+  .voice-call-screen__tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+  .voice-call-screen button.voice-call-screen__end { min-width: 142px; min-height: 48px; margin-inline-start: auto; }
 
   .voice-call-capsule {
     display: flex;
@@ -66,26 +214,47 @@
   }
   .voice-call-capsule button {
     display: flex;
-    min-width: 0;
-    max-width: min(280px, 100%);
-    min-height: 40px;
     align-items: center;
-    gap: 8px;
-    padding: 4px 11px 4px 7px;
-    border: 0;
+    gap: 10px;
+    min-width: 44px;
+    min-height: 44px;
+    max-width: min(280px, 100%);
+    padding: 5px 13px 5px 9px;
     border-radius: var(--radius-pill);
     background: var(--ghost-raised);
     box-shadow: var(--shadow-card);
     color: var(--ghost-ink);
     cursor: pointer;
   }
-  .voice-call-capsule button:hover { background: var(--ghost-hover); }
-  .voice-call-capsule button:focus-visible, .voice-call-screen__captions:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
+  .voice-call-capsule button:hover { background: var(--ghost-canvas); }
   .voice-call-capsule button > :is(svg, .presence) { flex: none; }
-  .voice-call-capsule__name, .voice-call-capsule__state { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .voice-call-capsule__name { font-size: var(--text-ui); font-weight: 600; }
-  .voice-call-capsule__state { color: var(--ghost-ink2); font-size: var(--text-caption); }
-  .voice-call-capsule__state[data-kind="timer"] { flex: none; }
+  .voice-call-capsule button > svg { color: var(--ghost-ink3); }
+  .voice-call-capsule .voice-call-clock { padding-inline-start: 10px; border-inline-start: 1px solid var(--ghost-line-strong); }
+  .voice-call-capsule__identity { display: grid; min-width: 0; text-align: start; }
+  .voice-call-capsule__name, .voice-call-capsule__state { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .voice-call-capsule__name { font-size: var(--text-ui); font-weight: 630; line-height: 1.25; }
+  .voice-call-capsule__state { color: var(--ghost-ink2); font-size: var(--text-micro); line-height: 1.35; }
+  .voice-call-capsule__state:is([data-phase="working"], [data-phase="thinking"], [data-phase="transcribing"]) { color: var(--ghost-signal-ink); }
+  .voice-call-capsule__state[data-attention] { color: var(--ghost-amber-ink); }
+  .voice-call-capsule__state[data-kind="failed"] { color: var(--ghost-danger-ink); }
+
+  @media (max-width: 35.999rem) {
+    .voice-call-screen { grid-template-rows: auto minmax(178px, 1fr) auto; }
+    .voice-call-screen__stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(44px, 1fr); }
+    .voice-call-turn {
+      gap: 8px;
+      padding: clamp(18px, 4dvh, 34px) 0 16px;
+      border-inline-end: 0;
+    }
+    .voice-turn-signal { max-width: none; }
+    .voice-call-turn:is([data-turn="hearing"], [data-turn="listening"], [data-turn="awaiting-input"]) .voice-call-turn__status { text-align: end; }
+    .voice-call-transcript { padding-inline: 3px; }
+    .voice-call-screen__actions { display: grid; gap: 8px; padding-block: 10px 14px; }
+    .voice-call-screen__tools { justify-content: center; }
+    .voice-call-screen__devices { justify-content: center; gap: 10px; }
+    .voice-call-screen__recovery { justify-content: center; }
+    .voice-call-screen button.voice-call-screen__end { width: 100%; min-height: 52px; }
+  }
 
   @media (max-width: 55.999rem) {
     :root:not([data-desktop-shell]) .voice-call-screen {
@@ -93,16 +262,11 @@
       translate: none;
       width: 100%;
       height: var(--ghost-visible-height, 100dvh);
+      padding-block: env(safe-area-inset-top) max(8px, env(safe-area-inset-bottom));
+      padding-inline: max(var(--call-gutter), env(safe-area-inset-left)) max(var(--call-gutter), env(safe-area-inset-right));
       border-radius: 0;
-      padding: calc(env(safe-area-inset-top) + 32px) max(22px, env(safe-area-inset-right))
-        max(24px, env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left));
-    }
-    :root:not([data-desktop-shell]) .voice-call-screen__minimize {
-      inset: calc(env(safe-area-inset-top) + 8px) max(10px, env(safe-area-inset-right)) auto auto;
-      min-width: 44px;
-      min-height: 44px;
+      box-shadow: none;
     }
     :root:not([data-desktop-shell]) .voice-call-capsule { background: var(--ghost-canvas); }
-    :root:not([data-desktop-shell]) .voice-call-capsule button { min-height: 44px; }
   }
 }

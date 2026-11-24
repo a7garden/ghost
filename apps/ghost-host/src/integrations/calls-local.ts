@@ -1,6 +1,6 @@
 import { CallSpeechRequest, CallTranscript, ContractError, parse, type Call } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
-import type { CallEnginePort } from "../core/calls.ts";
+import { VOICE_SAMPLE_TEXT, type CallEnginePort } from "../core/calls.ts";
 import { CommandError, invalid, notFound } from "../core/errors.ts";
 
 /** `ghost-voice-server` wire identifiers (speech_contract.py); the Host never loads models itself. */
@@ -10,6 +10,8 @@ const TTS_MODEL = "supertonic-3";
 const MAX_WAV_BYTES = 5 * 1024 * 1024;
 /** `CallSpeechRequest` text is ≤500 characters; the JSON wrapper only needs a small bound. */
 const MAX_SPEECH_JSON_BYTES = 16 * 1024;
+/** Speaker names the speech server accepts (`default` lets it choose); the picker offers exactly these. */
+const LOCAL_VOICES = new Set(["default", ...["f", "m"].flatMap((gender) => [1, 2, 3, 4, 5].map((n) => `${gender}${n}`))]);
 const LANGUAGES = new Set(["ko", "en", "ja", "zh"]);
 /** The speech server queues three and runs one at a time; the Host keeps headroom instead of piling up. */
 const MAX_INFLIGHT = 2;
@@ -128,6 +130,29 @@ export function createLocalCallEngine(deps: { core: Core; speechUrl: string; fet
       if (health === "pending") return "음성 서버 상태를 아직 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.";
       if (health === "down") return `음성 서버가 ${speechUrl.href} 에서 실행되고 있지 않습니다.`;
       return "음성 모델이 아직 로드되지 않았습니다. 잠시 후 다시 시도해 주세요.";
+    },
+    /** One sample from the speech server for the voice picker; shares the in-flight bound with call speech. */
+    async preview(voice: string): Promise<Uint8Array> {
+      if (!LOCAL_VOICES.has(voice)) throw invalid("이 목소리는 이 Mac의 음성 엔진에 없습니다.");
+      if (inflight >= MAX_INFLIGHT) throw new CommandError("unavailable", "음성 처리가 몰려 있습니다. 잠시 후 다시 시도해 주세요.");
+      inflight += 1;
+      try {
+        const response = await doFetch(new URL("/v1/audio/speech", speechUrl).href, {
+          method: "POST",
+          redirect: "error",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: TTS_MODEL, input: VOICE_SAMPLE_TEXT, voice, response_format: "wav" }),
+          signal: AbortSignal.timeout(TTS_TIMEOUT_MS),
+        });
+        if (!response.ok) throw new CommandError("unavailable", "음성 서버가 응답하지 않아 들려주지 못했습니다.");
+        return new Uint8Array(await response.arrayBuffer());
+      } catch (error) {
+        if (error instanceof CommandError) throw error;
+        core.log("local voice preview failed", { voice, error: error instanceof Error ? error.message : String(error) });
+        throw new CommandError("unavailable", "음성 처리를 제때 끝내지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      } finally {
+        inflight -= 1;
+      }
     },
     /** Nothing to release server-side; only this call's in-flight upstream fetches are cut, once. */
     async hangup(call: Call): Promise<void> {

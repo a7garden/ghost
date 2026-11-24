@@ -1,7 +1,9 @@
 import {
   CALL_CONNECT_SECONDS,
   CALL_MAX_SECONDS,
+  CallVoicePreview,
   DEFAULT_VOICE,
+  parse,
   type Call,
   type CallEndReason,
   type CallEngine,
@@ -12,14 +14,28 @@ import type { Access } from "./access.ts";
 import { CommandError, conflict, invalid, notFound } from "./errors.ts";
 import { newId } from "./ids.ts";
 
+/** Voice samples kept in memory; each is a few seconds of audio. */
+const MAX_SAMPLES = 48;
+/** What a voice preview says. Korean, since that is the language a call is held in. */
+export const VOICE_SAMPLE_TEXT = "안녕하세요, Ghost예요. 지금 들으시는 목소리로 통화할게요.";
+
 /** Persisted in `settings` (`calls`): no ledger migration, so a release rollback keeps its storage fingerprint. */
 const KEY = "calls";
 /** Ended calls kept for the snapshot; live calls are never trimmed. */
 const KEPT = 50;
 
-/** Tells the model that this turn was spoken and its answer will be read aloud. Kept short and static. */
-export const VOICE_TURN_NOTE =
-  "<host-voice-call> This message was spoken in a live voice call and your reply is read aloud. Answer in short, plain spoken sentences: no markdown, lists, tables, code blocks, links or emoji. If the answer is long, say the gist and that the details are in the conversation.";
+/**
+ * Tells the model that this turn was spoken and what it writes is read aloud. Kept short and static per engine.
+ * Local: the Host reads its words as they stream, so the model answers first and then works; silence while it
+ * works is dead air on a phone. Realtime: a voice model already acknowledged the caller and paraphrases the
+ * final text, so the Ghost only returns the result.
+ */
+export function voiceTurnNote(engine: CallEngine | undefined): string {
+  if (engine === "realtime") {
+    return "<host-voice-call> This request was spoken in a live voice call and a voice assistant already told the caller you are on it. Do not announce that you are starting. Write the result in one or two short, plain spoken sentences: no markdown, lists, tables, code blocks, links or emoji. If it is long, give the gist and say the details are in the conversation.";
+  }
+  return "<host-voice-call> This message was spoken in a live voice call and your words are read aloud as you write them. Use short, plain spoken sentences: no markdown, lists, tables, code blocks, links or emoji. Answer first: before you call a tool or think at length, open with one short sentence that answers or says what you are about to do, because the caller hears nothing while you work. Do not repeat that sentence afterwards. When the work is done, give the result in a sentence or two; if it is long, give the gist and say the details are in the conversation.";
+}
 
 /**
  * What an engine lends the call layer. `unavailable` is synchronous because a call starts inside one
@@ -32,6 +48,8 @@ export interface CallEnginePort {
   hangup(call: Call): Promise<void>;
   /** The engine's own `/api/calls/:id/...` routes; null when the request is not one of them. The caller is already authenticated. */
   serve?(request: Request, url: URL, access: Access): Promise<Response | null>;
+  /** One spoken sample of `voice` as mono PCM16 WAV, outside any call. Engines that cannot say it leave this out or throw `invalid`. */
+  preview?(voice: string): Promise<Uint8Array>;
 }
 
 const live = (call: Call) => call.status === "connecting" || call.status === "active";
@@ -44,6 +62,7 @@ const live = (call: Call) => call.status === "connecting" || call.status === "ac
 export class Calls {
   private readonly engines = new Map<CallEngine, CallEnginePort>();
   private readonly deadlines = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly samples = new Map<string, Promise<Uint8Array>>();
 
   constructor(private readonly core: Core) {}
 
@@ -82,13 +101,38 @@ export class Calls {
     return call;
   }
 
-  /** Offer an authenticated `/api/calls/...` request to each engine in turn. */
+  /** Offer an authenticated `/api/calls/...` request to each engine in turn; `preview` is the Host's own route. */
   async serve(request: Request, url: URL, access: Access): Promise<Response | null> {
+    if (url.pathname === "/api/calls/preview") return this.servePreview(request);
     for (const port of this.engines.values()) {
       const response = await port.serve?.(request, url, access);
       if (response) return response;
     }
     return null;
+  }
+
+  /** Hear a voice before choosing it. One sample per engine and voice is kept, so a repeat costs nothing. */
+  private async servePreview(request: Request): Promise<Response> {
+    if (request.method !== "POST") throw invalid("음성 미리 듣기는 POST로 보내 주세요.");
+    const body: unknown = await request.json().catch(() => { throw invalid("음성 미리 듣기 요청은 JSON으로 보내 주세요."); });
+    const { engine, voice } = parse(CallVoicePreview, body);
+    const port = this.engines.get(engine);
+    const unavailable = port?.preview ? port.unavailable() : `The ${engine} voice engine cannot preview voices.`;
+    if (unavailable !== null || !port?.preview) throw new CommandError("unavailable", unavailable ?? "preview unavailable");
+    const key = `${engine}:${voice}`;
+    let sample = this.samples.get(key);
+    if (sample) {
+      this.samples.delete(key);
+      this.samples.set(key, sample);
+    } else {
+      sample = port.preview(voice);
+      this.samples.set(key, sample);
+      // A failed or refused sample is never kept: the next tap tries again.
+      sample.catch(() => { if (this.samples.get(key) === sample) this.samples.delete(key); });
+      while (this.samples.size > MAX_SAMPLES) this.samples.delete(this.samples.keys().next().value!);
+    }
+    const wav = await sample;
+    return new Response(new Uint8Array(wav), { headers: { "cache-control": "no-store", "content-type": "audio/wav", "x-content-type-options": "nosniff" } });
   }
 
   voice(): VoiceSettings {

@@ -2,6 +2,15 @@ import type { Call, CallEngine, Ghost, Message } from '@ghost/contract';
 
 export const engineLabel: Record<CallEngine, string> = { realtime: '실시간', local: '이 Mac' };
 
+/** What the call is doing right now, from the owner's side of the phone. */
+export type CallPhase = 'listening' | 'hearing' | 'transcribing' | 'thinking' | 'working' | 'speaking';
+/** One utterance in the call's own transcript. `live` lines are still being spoken or recognized. */
+export type CallLine = { id: string; speaker: 'owner' | 'ghost'; text: string; live: boolean };
+/** Smoothed microphone and playback loudness, 0..1. Read it on every animation frame; it is not React state. */
+export type CallLevels = { input: number; output: number };
+/** Where the Ghost's voice comes out on a phone: the earpiece (held to the ear) or the loudspeaker. */
+export type AudioRoute = 'receiver' | 'speaker';
+
 export function isLiveCall(call: Call): boolean {
   return call.status === 'connecting' || call.status === 'active';
 }
@@ -33,4 +42,21 @@ export function captionRole(message: Message, call: Pick<Call, 'id' | 'conversat
   if (message.role === 'user') return message.callId === call.id ? 'owner' : null;
   if (message.role === 'assistant' && message.createdAt >= call.startedAt && message.createdAt <= (call.endedAt ?? Infinity)) return 'ghost';
   return null;
+}
+
+/** What the engine's media layer can tell about the audio right now. */
+export type MediaActivity = { hearing: boolean; transcribing: boolean; speaking: boolean };
+/** What the Ghost's conversation is doing: a run in progress and the tool it is in. */
+export type GhostWork = { running: boolean; tool?: string };
+
+/**
+ * One phase for the whole call. Audio wins over work: the owner talking, then the recognizer, then the Ghost's
+ * voice; only in silence does the screen say the Ghost is thinking or running a tool.
+ */
+export function callPhase(media: MediaActivity, work: GhostWork): { phase: CallPhase; detail?: string } {
+  if (media.hearing) return { phase: 'hearing' };
+  if (media.transcribing) return { phase: 'transcribing' };
+  if (media.speaking) return { phase: 'speaking' };
+  if (work.running) return work.tool ? { phase: 'working', detail: work.tool } : { phase: 'thinking' };
+  return { phase: 'listening' };
 }
