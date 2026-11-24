@@ -36,6 +36,9 @@ export async function serveTerminals(request: Request, url: URL, server: Bun.Ser
     if (request.method === "GET") return Response.json(service.list(), { headers: { "cache-control": "no-store" } });
     if (request.method === "POST") return Response.json({ id: service.create(parse(TerminalCreate, await jsonBody(request))) });
   }
+  if (url.pathname === "/api/terminals/agents" && request.method === "GET") {
+    return Response.json(service.availableAgents(), { headers: { "cache-control": "no-store" } });
+  }
   const stream = STREAM.exec(url.pathname);
   if (stream && request.method === "GET") {
     const id = stream[1]!;

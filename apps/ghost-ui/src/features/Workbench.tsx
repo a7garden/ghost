@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeftRight, ChevronDown, Ellipsis, Folder, Plus, SquareTerminal, MessagesSquare } from 'lucide-react';
-import type { Pane, Scope, Space, Tab, WorkbenchDirection, WorkbenchPaneCreate, WorkbenchState } from '@ghost/contract';
+import { ArrowLeftRight, Bot, ChevronDown, Ellipsis, Folder, GitBranch, Plus, SquareTerminal, MessagesSquare } from 'lucide-react';
+import type { Pane, Scope, Space, Tab, WorkbenchDirection, WorkbenchPaneCreate, WorkbenchSpaceCreate, WorkbenchState } from '@ghost/contract';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { FolderField } from '../components/FolderPicker';
 import { Modal } from '../components/Modal';
@@ -10,16 +10,19 @@ import { Button, InlineError, Input, Popover, PopoverContent, PopoverTrigger } f
 import { isMac, shortcut } from '../ui/keys';
 import { StartSession } from './CodingSessionRoster';
 import { codingError } from './CodingSessionModel';
+import { WorkbenchAgentStart } from './WorkbenchAgentStart';
 import { useWorkbenchAttention, type Attention } from './WorkbenchAttention';
 import { AttentionMark, paneOrder, WorkbenchCanvas } from './WorkbenchCanvas';
+import { WorkbenchChanges } from './WorkbenchChanges';
 import { paneView } from './WorkbenchPane';
+import { resolveSessionLink } from './workbenchSessionLink';
 import './Workbench.css';
 
 type Resource = { kind: 'space'; item: Space } | { kind: 'tab'; item: Tab };
 type Dialog =
-  | { type: 'space' | 'tab' }
+  | { type: 'space' | 'tab' | 'changes' }
   | { type: 'rename' | 'delete'; resource: Resource }
-  | { type: 'pane' | 'session' | 'start'; tabId: string; targetPaneId?: string; direction?: WorkbenchDirection }
+  | { type: 'pane' | 'agent' | 'session' | 'start'; tabId: string; targetPaneId?: string; direction?: WorkbenchDirection }
   | { type: 'close'; pane: Pane }
   | { type: 'move'; paneId: string };
 
@@ -29,26 +32,37 @@ const ATTENTION_PRIORITY: Record<Attention, number> = { done: 1, failed: 2, wait
 const resourcePath = ({ kind, item }: Resource) => `${kind === 'space' ? 'spaces' : 'tabs'}/${encodeURIComponent(item.id)}`;
 
 function NameSheet({ title, initial = '', withRoot, onSave, onClose }: {
-  title: string; initial?: string; withRoot?: boolean; onSave(name: string, root: string | null): Promise<unknown>; onClose(): void;
+  title: string; initial?: string; withRoot?: boolean;
+  onSave(name: string, root: string | null, worktree?: WorkbenchSpaceCreate['worktree']): Promise<unknown>; onClose(): void;
 }) {
   const [name, setName] = useState(initial);
   const [root, setRoot] = useState('');
+  const [withWorktree, setWithWorktree] = useState(false);
+  const [branch, setBranch] = useState('');
   const [pending, setPending] = useState(false);
   const formed = useRef(false);
   const [error, setError] = useState('');
   return <Modal title={title} onClose={() => { if (!formed.current) onClose(); }} className="sm:max-w-[420px]">
     <form className="workbench-form" onSubmit={event => {
       event.preventDefault();
-      if (!name.trim() || formed.current) return;
+      if (!name.trim() || (withWorktree && !branch.trim()) || formed.current) return;
       formed.current = true;
       setPending(true); setError('');
-      void onSave(name.trim(), root.trim() || null).then(onClose).catch(reason => setError(codingError(reason, '저장하지 못했습니다.')))
+      void onSave(name.trim(), root || null, withWorktree ? { branch: branch.trim() } : undefined).then(onClose).catch(reason => setError(codingError(reason, '저장하지 못했습니다.')))
         .finally(() => { formed.current = false; setPending(false); });
     }}>
       <label>이름<Input value={name} required maxLength={200} disabled={pending} onChange={event => setName(event.target.value)}/></label>
-      {withRoot && <FolderField label="작업 폴더 (선택)" optional value={root} disabled={pending} onChange={setRoot}/>}
+      {withRoot && <>
+        <FolderField label="작업 폴더 (선택)" optional value={root} disabled={pending} onChange={value => {
+          setRoot(value);
+          if (!value) setWithWorktree(false);
+        }}/>
+        <label className="workbench-worktree-toggle"><input type="checkbox" checked={withWorktree} disabled={pending || !root}
+          onChange={event => setWithWorktree(event.target.checked)}/>worktree로 시작</label>
+        {withWorktree && <label>브랜치 이름<Input value={branch} required maxLength={200} disabled={pending} onChange={event => setBranch(event.target.value)}/></label>}
+      </>}
       {error && <InlineError>{error}</InlineError>}
-      <Button className="justify-self-end" disabled={pending || !name.trim()} type="submit">{pending ? '저장 중…' : '저장'}</Button>
+      <Button className="justify-self-end" disabled={pending || !name.trim() || (withWorktree && !branch.trim())} type="submit">{pending ? '저장 중…' : '저장'}</Button>
     </form>
   </Modal>;
 }
@@ -65,12 +79,15 @@ function ResourceMenu({ resource, disabled, open }: { resource: Resource; disabl
   </Popover>;
 }
 
-export function Workbench({ scopes, compact, terminalId, navigate }: { scopes: Scope[]; compact: boolean; terminalId: string | null; navigate(path: string): void }) {
+export function Workbench({ scopes, compact, terminalId, sessionId, navigate }: {
+  scopes: Scope[]; compact: boolean; terminalId: string | null; sessionId: string | null; navigate(path: string): void;
+}) {
   const { client } = useHost();
   const [state, setState] = useState<WorkbenchState | null>(null);
   const latest = useRef<WorkbenchState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [sessionLink, setSessionLink] = useState<{ id: string; error: string } | null>(null);
   const [revision, reload] = useState(0);
   const [queued, setQueued] = useState(0);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
@@ -101,10 +118,35 @@ export function Workbench({ scopes, compact, terminalId, navigate }: { scopes: S
   }, [client, revision]);
 
   const activateTerminal = useEffectEvent((id: string) => showFailure(mutate(`terminals/${encodeURIComponent(id)}/focus`, 'POST')));
+  const activateSession = useEffectEvent((id: string, signal: AbortSignal) => {
+    setSessionLink(null);
+    void enqueue(async () => {
+      if (signal.aborted) return;
+      const session = await client.codingSession(id, signal);
+      while (!signal.aborted && latest.current) {
+        const action = resolveSessionLink(latest.current, session);
+        if (!action) break;
+        await change(action.path, 'POST', action.fields);
+        if (action.opensPane) break;
+      }
+      if (!signal.aborted) setSessionLink({ id, error: '' });
+    }).catch(reason => {
+      if (signal.aborted) return;
+      setSessionLink({ id, error: reason instanceof HostError && reason.code === 'not_found'
+        ? '코딩 세션을 찾을 수 없습니다.' : codingError(reason, '코딩 세션을 열지 못했습니다.') });
+    });
+  });
   const loaded = state !== null;
   useEffect(() => {
-    if (loaded && terminalId) activateTerminal(terminalId);
-  }, [loaded, terminalId]);
+    if (loaded && terminalId && sessionId === null) activateTerminal(terminalId);
+  }, [loaded, terminalId, sessionId]);
+
+  useEffect(() => {
+    if (!loaded || sessionId === null) return;
+    const controller = new AbortController();
+    activateSession(sessionId, controller.signal);
+    return () => controller.abort();
+  }, [client, loaded, sessionId]);
 
   useEffect(() => {
     if (!focusAfter.current || focusAfter.current !== focus?.paneId) return;
@@ -121,23 +163,28 @@ export function Workbench({ scopes, compact, terminalId, navigate }: { scopes: S
     setState(snapshot);
   }
 
-  function mutate(path: string, method: 'POST' | 'PATCH' | 'DELETE', fields: Record<string, unknown> = {}) {
+  function enqueue(run: () => Promise<void>) {
     setQueued(count => count + 1);
     setError('');
-    const result = queue.current.catch(() => {}).then(async () => {
-      if (!latest.current) throw new Error('작업대를 아직 불러오지 못했습니다.');
-      try {
-        const snapshot = await client.changeWorkbench(path, method, { ...fields, version: latest.current.version });
-        apply(snapshot);
-      } catch (reason) {
-        if (reason instanceof HostError && reason.code === 'conflict') {
-          try { apply(await client.workbench()); } catch { /* Keep the original refusal visible. */ }
-        }
-        throw reason;
-      }
-    }).finally(() => setQueued(count => count - 1));
+    const result = queue.current.catch(() => {}).then(run).finally(() => setQueued(count => count - 1));
     queue.current = result;
     return result;
+  }
+
+  async function change(path: string, method: 'POST' | 'PATCH' | 'DELETE', fields: Record<string, unknown>) {
+    if (!latest.current) throw new Error('작업대를 아직 불러오지 못했습니다.');
+    try {
+      apply(await client.changeWorkbench(path, method, { ...fields, version: latest.current.version }));
+    } catch (reason) {
+      if (reason instanceof HostError && reason.code === 'conflict') {
+        try { apply(await client.workbench()); } catch { /* Keep the original refusal visible. */ }
+      }
+      throw reason;
+    }
+  }
+
+  function mutate(path: string, method: 'POST' | 'PATCH' | 'DELETE', fields: Record<string, unknown> = {}) {
+    return enqueue(() => change(path, method, fields));
   }
 
   function showFailure(result: Promise<unknown>) {
@@ -151,7 +198,7 @@ export function Workbench({ scopes, compact, terminalId, navigate }: { scopes: S
     showFailure(mutate('focus', 'POST', { spaceId, tabId, paneId }));
   }
 
-  function addPane(target: Extract<Dialog, { type: 'pane' | 'session' | 'start' }>, pane: WorkbenchPaneCreate['pane']) {
+  function addPane(target: Extract<Dialog, { type: 'pane' | 'agent' | 'session' | 'start' }>, pane: WorkbenchPaneCreate['pane']) {
     return mutate(`tabs/${encodeURIComponent(target.tabId)}/panes`, 'POST', { targetPaneId: target.targetPaneId, direction: target.direction, pane });
   }
 
@@ -219,9 +266,12 @@ export function Workbench({ scopes, compact, terminalId, navigate }: { scopes: S
 
   let sheet: ReactNode;
   if (dialog?.type === 'space') {
-    sheet = <NameSheet key="space" title="새 스페이스" withRoot onClose={dismiss} onSave={(title, root) => mutate('spaces', 'POST', { title, root })}/>;
+    sheet = <NameSheet key="space" title="새 스페이스" withRoot onClose={dismiss}
+      onSave={(title, root, worktree) => mutate('spaces', 'POST', { title, root, worktree })}/>;
   } else if (dialog?.type === 'tab' && space) {
     sheet = <NameSheet key="tab" title="새 탭" onClose={dismiss} onSave={title => mutate(`spaces/${encodeURIComponent(space.id)}/tabs`, 'POST', { title })}/>;
+  } else if (dialog?.type === 'changes' && space) {
+    sheet = <WorkbenchChanges key={space.id} spaceId={space.id} onClose={dismiss}/>;
   } else if (dialog?.type === 'rename') {
     const { resource } = dialog;
     sheet = <NameSheet key={resource.item.id} title="이름 변경" initial={resource.item.title} onClose={dismiss}
@@ -230,7 +280,8 @@ export function Workbench({ scopes, compact, terminalId, navigate }: { scopes: S
     const { resource } = dialog;
     const noun = resource.kind === 'space' ? '스페이스' : '탭';
     sheet = <ConfirmDialog title={`${noun} 삭제`} onClose={dismiss} confirmLabel="삭제" onConfirm={() => mutate(resourcePath(resource), 'DELETE')}>
-      <p>‘{resource.item.title}’의 배치가 사라지고 터미널이 종료됩니다. 코딩 세션은 남습니다.</p>
+      <p>‘{resource.item.title}’의 배치가 사라지고 터미널이 종료됩니다. 코딩 세션은 남습니다.
+        {resource.kind === 'space' && resource.item.worktree && ' worktree와 브랜치도 남습니다.'}</p>
     </ConfirmDialog>;
   } else if (dialog?.type === 'close') {
     const id = dialog.pane.id;
@@ -249,7 +300,14 @@ export function Workbench({ scopes, compact, terminalId, navigate }: { scopes: S
     sheet = <Modal title="새 패널" onClose={dismiss}><div className="workbench-picker">
       <button type="button" onClick={() => setDialog({ ...target, type: 'session' })}><MessagesSquare aria-hidden="true"/>코딩 세션</button>
       <button type="button" onClick={() => { dismiss(); showFailure(addPane(target, { kind: 'terminal' })); }}><SquareTerminal aria-hidden="true"/>터미널</button>
+      <button type="button" onClick={() => setDialog({ ...target, type: 'agent' })}><Bot aria-hidden="true"/>에이전트</button>
     </div></Modal>;
+  } else if (dialog?.type === 'agent') {
+    const target = dialog;
+    const spaceId = state?.tabs.find(item => item.id === target.tabId)?.spaceId;
+    const root = state?.spaces.find(item => item.id === spaceId)?.root ?? null;
+    sheet = <WorkbenchAgentStart root={root} onClose={dismiss}
+      onSave={terminalSpec => addPane(target, { kind: 'terminal', terminalSpec })}/>;
   } else if (dialog?.type === 'session') {
     const target = dialog;
     sheet = <Modal title="코딩 세션 선택" onClose={dismiss}><div className="workbench-picker">
@@ -283,6 +341,9 @@ export function Workbench({ scopes, compact, terminalId, navigate }: { scopes: S
     <div className="workbench-main">
       {error && <div className="workbench-error"><InlineError onRetry={!state ? () => reload(value => value + 1) : undefined} retryLabel="다시 불러오기">{error}</InlineError></div>}
       {loading && !state && <p className="workbench-empty" role="status">작업대를 불러오는 중…</p>}
+      {loaded && sessionId !== null && (sessionLink?.id !== sessionId
+        ? <p className="workbench-error" role="status">코딩 세션을 여는 중…</p>
+        : sessionLink.error && <div className="workbench-error"><InlineError>{sessionLink.error}</InlineError></div>)}
       {space ? <>
         <div className="workbench-tab-bar">
           <nav className="workbench-tabs" aria-label="탭">
@@ -294,6 +355,8 @@ export function Workbench({ scopes, compact, terminalId, navigate }: { scopes: S
             </div>)}
           </nav>
           <Button variant="ghost" size="icon" type="button" disabled={busy} aria-label="새 탭" title={`새 탭 (${shortcut(`${OPTION}N`)})`} onClick={() => setDialog({ type: 'tab' })}>{icon}</Button>
+          {space.root && <Button className="ml-auto shrink-0" variant="ghost" size="sm" type="button" disabled={busy}
+            onClick={() => setDialog({ type: 'changes' })}><GitBranch aria-hidden="true"/>git 변경</Button>}
         </div>
         {tab?.layout ? <>
           {order.length > 1 && <div className="workbench-panel-navigation" data-compact={compact || undefined}>

@@ -205,7 +205,7 @@ function Shell() {
   const params = new URLSearchParams(query);
   const section = path.split('/')[1]?.split('?')[0] || 'home';
   const orchestrationOpen = path === orchestrationPath;
-  const legacyCoding = section === 'coding' && (params.get('view') === 'herdr' || params.has('herdr') || params.get('new') === '1' || params.has('session'));
+  const legacyCoding = section === 'coding' && (params.get('view') === 'herdr' || params.has('herdr') || params.get('new') === '1');
   const codingAttention = useHerdrAttention(Boolean(state) && connection === 'live', legacyCoding);
   useEffect(() => {
     if (section === 'workspace' && !compact) {

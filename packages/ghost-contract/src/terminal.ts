@@ -14,9 +14,10 @@ export const TerminalCreate = Type.Object({
 });
 export type TerminalCreate = Static<typeof TerminalCreate>;
 
-export const TerminalAgent = Type.Union([Type.Literal("omp"), Type.Literal("claude"), Type.Literal("codex"), Type.Literal("pi")]);
+export const TERMINAL_AGENTS = ["omp", "claude", "codex", "pi"] as const;
+export const TerminalAgent = Type.Enum(TERMINAL_AGENTS);
 export type TerminalAgent = Static<typeof TerminalAgent>;
-export type TerminalState = "working" | "idle" | "exited";
+export type TerminalState = "working" | "waiting" | "idle" | "exited";
 export type TerminalView = TerminalSize & {
   id: string;
   cwd: string;

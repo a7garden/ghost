@@ -49,3 +49,9 @@ it('opens an owner terminal notification in the workbench without a herdr lookup
   expect(notificationRoute({ ...notification, id: `coding:terminal:${id}:1`, decisionId: null, workId: null }, state))
     .toBe(`/coding?terminal=${id}`);
 });
+
+it('opens embedded session attention directly instead of opening the assigned Work', () => {
+  const item = { ...notification, id: 'session:coding-52ab:turn:2:waiting', decisionId: null };
+  expect(notificationRoute(item, state)).toBe('/coding?session=coding-52ab');
+  expect(notificationRoute(item, state, 'studio')).toBe('/coding?session=coding-52ab');
+});

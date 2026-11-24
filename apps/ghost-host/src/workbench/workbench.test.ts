@@ -39,7 +39,7 @@ function fixture() {
     usage: { input: 0, output: 0, cost: 0 }, createdAt: 0, updatedAt: 0,
   };
   const sessions = { get: (id: string) => id === session.id ? session : null };
-  const workbench = new Workbench(ledger, sessions, terminals);
+  const workbench = new Workbench(ledger, sessions, terminals, root);
   return { root, path, ledger, workbench, created, closed, sessions, terminals };
 }
 
@@ -79,17 +79,18 @@ test("persists layout, spec and focus across ledger reopen; rejects stale writes
   const snapshot = workbench.addPane(tab.id, { version: 3, targetPaneId: left.id, direction: "right", pane: { kind: "terminal" } });
   const right = snapshot.panes[1]!;
   const [binding, duplicate] = await Promise.all([workbench.openTerminal(right.id), workbench.openTerminal(right.id)]);
-  expect(binding).toEqual(duplicate);
+  expect(binding).toEqual({ id: "term-0" });
+  expect(duplicate).toEqual(binding);
   expect(created).toHaveLength(1);
   expect(created[0]?.spec.cwd).toBe(root);
-  expect(JSON.stringify(ledger.setting("workbench.state", null))).not.toContain(binding.id);
-  expect(workbench.focusTerminal(binding.id, snapshot.version)).toEqual(snapshot);
+  expect(JSON.stringify(ledger.setting("workbench.state", null))).not.toContain(binding.id!);
+  expect(workbench.focusTerminal(binding.id!, snapshot.version)).toEqual(snapshot);
   ledger.close();
   ledgers.delete(ledger);
 
   const restarted = new Ledger(path);
   ledgers.add(restarted);
-  const resumed = new Workbench(restarted, sessions, terminals);
+  const resumed = new Workbench(restarted, sessions, terminals, root);
   expect(resumed.read()).toEqual(snapshot);
   await expect(resumed.openTerminal(right.id)).resolves.toEqual({ id: "term-1" });
   const afterTerminal = await resumed.deletePane(right.id, 4);
@@ -98,6 +99,25 @@ test("persists layout, spec and focus across ledger reopen; rejects stale writes
   expect((await resumed.deletePane(left.id, 5)).tabs[0]?.layout).toBeNull();
   expect(sessions.get("preserved")).not.toBeNull();
   expect(closed).toEqual(["term-1"]);
+});
+
+test("an agent pane carries argv to the PTY but only launches again on owner request after restart", async () => {
+  const { root, ledger, workbench, created, sessions, terminals } = fixture();
+  const space = workbench.createSpace({ version: 0, title: "저장소", root }).spaces[0]!;
+  const tab = workbench.createTab(space.id, 1, "CLI").tabs[0]!;
+  const terminalSpec = { cwd: root, command: "omp", args: ["--resume", "session id", "--approval-mode", "write"] };
+  const snapshot = workbench.addPane(tab.id, { version: 2, pane: { kind: "terminal", terminalSpec } });
+  const pane = snapshot.panes[0]!;
+  expect(pane).toMatchObject({ kind: "terminal", terminalSpec });
+  await expect(workbench.openTerminal(pane.id)).resolves.toEqual({ id: "term-0" });
+  expect(created[0]?.spec).toEqual({ ...terminalSpec, cols: 80, rows: 24 });
+
+  const resumed = new Workbench(ledger, sessions, terminals, root);
+  await expect(resumed.openTerminal(pane.id)).resolves.toEqual({ id: null });
+  await expect(resumed.openTerminal(pane.id, "term-0")).resolves.toEqual({ id: null });
+  expect(created).toHaveLength(1);
+  await expect(resumed.openTerminal(pane.id, undefined, true)).resolves.toEqual({ id: "term-1" });
+  expect(created[1]?.spec).toEqual(created[0]?.spec);
 });
 
 test("closes terminal bindings on tab and space deletion and forbids cross-tab moves", async () => {
@@ -113,7 +133,7 @@ test("closes terminal bindings on tab and space deletion and forbids cross-tab m
   expect(tabRemoved.focus).toEqual({ spaceId: space.id, tabId: a.id, paneId: left.id });
   const allRemoved = await workbench.deleteSpace(space.id, 6);
   expect(allRemoved).toEqual({ version: 7, spaces: [], tabs: [], panes: [], focus: null });
-  expect(closed).toEqual([pt2.id, pt1.id]);
+  expect(closed).toEqual([pt2.id!, pt1.id!]);
 });
 
 test("a pending or failed terminal teardown cannot lose the saved pane or restart it", async () => {
@@ -126,7 +146,7 @@ test("a pending or failed terminal teardown cannot lose the saved pane or restar
   const gate = Promise.withResolvers<void>();
   terminals.closeTerminal = () => gate.promise;
   const removal = workbench.deletePane(pane.id, snapshot.version);
-  await expect(workbench.openTerminal(pane.id, binding.id)).rejects.toMatchObject({ code: "conflict" });
+  await expect(workbench.openTerminal(pane.id, binding.id!)).rejects.toMatchObject({ code: "conflict" });
   expect(() => workbench.renameTab(tab.id, snapshot.version, "Too soon")).toThrow(expect.objectContaining({ code: "conflict" }));
   gate.reject(new Error("PTY removal failed"));
   await expect(removal).rejects.toThrow("PTY removal failed");

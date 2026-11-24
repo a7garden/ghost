@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useState } from 'react';
-import type { CodingSession as Session, Pane } from '@ghost/contract';
+import type { CodingSession as Session, Pane, WorkbenchTerminalOpen } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { Button, InlineError } from '../ui';
 import { CodingSession } from './CodingSession';
@@ -26,16 +26,19 @@ export function WorkbenchPaneBody({ pane, visible, onExited, observe }: {
 }) {
   return <div className="workbench-pane-body">
     {pane.kind === 'session' ? <CodingSession id={pane.sessionId} onUpdate={observe}/>
-      : <TerminalBody paneId={pane.id} visible={visible} onExited={onExited}/>}
+      : <TerminalBody paneId={pane.id} visible={visible} onExited={onExited}
+        bypassApproval={pane.terminalSpec.command === 'omp' && Boolean(pane.terminalSpec.args?.some((arg, index, args) =>
+          arg === '--approval-mode' && args[index + 1] === 'yolo'))}/>}
   </div>;
 }
 
-function TerminalBody({ paneId, visible, onExited }: {
-  paneId: string; visible: boolean; onExited(id: string, exited: boolean): void;
+function TerminalBody({ paneId, visible, onExited, bypassApproval }: {
+  paneId: string; visible: boolean; onExited(id: string, exited: boolean): void; bypassApproval: boolean;
 }) {
   const { client } = useHost();
   const [terminalId, setId] = useState<string | null>(null);
-  const [attempt, setAttempt] = useState<{ restart?: string }>({});
+  const [attempt, setAttempt] = useState<WorkbenchTerminalOpen>({});
+  const [needsStart, setNeedsStart] = useState(false);
   const [exited, setExited] = useState(false);
   const [error, setError] = useState('');
   const [started, setStarted] = useState(visible);
@@ -46,11 +49,13 @@ function TerminalBody({ paneId, visible, onExited }: {
     if (!started) return;
     let stopped = false;
     setError('');
-    void client.openWorkbenchTerminal(paneId, attempt.restart).then(({ id }) => {
+    setNeedsStart(false);
+    void client.openWorkbenchTerminal(paneId, attempt).then(({ id }) => {
       if (stopped) return;
       setId(id);
       setExited(false);
-      publish(false);
+      setNeedsStart(id === null);
+      publish(id === null);
     }).catch(reason => {
       if (!stopped) setError(reason instanceof Error ? reason.message : '터미널을 열지 못했습니다.');
     });
@@ -60,9 +65,14 @@ function TerminalBody({ paneId, visible, onExited }: {
 
   return <div className="workbench-terminal">
     {terminalId ? <TerminalPane key={terminalId} terminalId={terminalId} onExit={() => { setExited(true); onExited(paneId, true); }}/>
+      : needsStart ? <div className="workbench-empty">
+        <Button size="sm" variant="outline" type="button" className={bypassApproval ? 'text-danger-ink' : undefined}
+          onClick={() => setAttempt({ start: true })}>{bypassApproval ? '승인 없이 실행' : '저장한 명령 실행'}</Button>
+      </div>
       : !error && <p className="workbench-pane-message" role="status">터미널 여는 중…</p>}
     {error ? <InlineError onRetry={() => setAttempt({ ...attempt })} retryLabel="다시 열기">{error}</InlineError>
       : exited && terminalId && <div className="workbench-terminal-exit"><Button size="sm" variant="outline" type="button" disabled={attempt.restart === terminalId}
-        onClick={() => setAttempt({ restart: terminalId })}>터미널 다시 열기</Button></div>}
+        className={bypassApproval ? 'text-danger-ink' : undefined}
+        onClick={() => setAttempt({ restart: terminalId })}>{bypassApproval ? '승인 없이 다시 실행' : '터미널 다시 열기'}</Button></div>}
   </div>;
 }

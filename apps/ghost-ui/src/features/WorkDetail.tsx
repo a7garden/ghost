@@ -24,6 +24,7 @@ import { readVerdict, workReason } from './workText';
 import { ProjectChips } from '../components/composer/ProjectMentions';
 import { CancelWorkDialog } from './WorkViews';
 import { codeRunPane, codeRunReceiptRun, herdrPanePath } from './herdrDisplay';
+import { embeddedSessionPath } from './CodingSessionModel';
 
 const effectGlyph: Record<Effect['state'], GlyphState> = { pending: 'running', done: 'done', unknown: 'blocked', denied: 'cancelled' };
 const effectLabel: Record<Effect['state'], string> = { pending: '실행 중', done: '완료', unknown: '결과 미확정', denied: '거부됨' };
@@ -295,7 +296,7 @@ function BranchNode({ work, ghostName, needsOwner, onOpen }: { work: Work; ghost
   </li>;
 }
 
-/** The coding agents this Work has working in the owner's herdr: where each run stands, and the pane to watch it in. */
+/** The coding runs connected to this Work, and where to open them. */
 export function WorkCodingRuns({ runs, now }: { runs: CodingRun[]; now: number }) {
   return <ol className="timeline">
     {runs.map(run => <li key={run.id}>
@@ -307,7 +308,10 @@ export function WorkCodingRuns({ runs, now }: { runs: CodingRun[]; now: number }
           <span>턴 {run.turn}</span>
           <time className="tabular" title={absoluteTime(run.updatedAt)}>{relativeTime(run.updatedAt, now)}</time>
         </span>
-        {run.pane && <Button asChild variant="outline" size="sm"><a href={`#${herdrPanePath(run.pane, run.session)}`}>herdr에서 보기</a></Button>}
+        {run.pane ? <Button asChild variant="outline" size="sm"><a href={`#${herdrPanePath(run.pane, run.session)}`}>herdr에서 보기</a></Button>
+          : run.agent === 'ghost' && run.session.startsWith('ghost:coding-') && <Button asChild variant="outline" size="sm">
+            <a href={`#${embeddedSessionPath(run.session.slice('ghost:'.length))}`}>코딩 세션 열기</a>
+          </Button>}
       </div>
     </li>)}
   </ol>;

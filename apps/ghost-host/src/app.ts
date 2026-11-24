@@ -204,7 +204,7 @@ export async function openApp(config: Config): Promise<App> {
       authorizeGhost: (requester, id) => core.coding.authorizeEmbeddedCreate(requester, id),
     }));
     core.setCodingSessions(codingSessions);
-    const workbench = config.coding === false ? null : new Workbench(ledger, codingSessions, terminals);
+    const workbench = config.coding === false ? null : new Workbench(ledger, codingSessions, terminals, config.root);
     const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, herdr, reach: createReach(config), browser, vault, desktop, mail, toss: createToss(), mcp });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
     const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));
@@ -277,7 +277,7 @@ export async function serve(config: Config) {
     if (errors.length) throw new AggregateError(errors, "failed to stop serving Ghost state root");
   };
   try {
-    try { updater = new Updater({ root: config.root, publicOrigin: config.publicOrigin, idle: () => hostIsIdle(app.core) && !app.memoryDreams.isBusy(), log }); }
+    try { updater = new Updater({ root: config.root, publicOrigin: config.publicOrigin, idle: () => hostIsIdle(app.core, app.terminals) && !app.memoryDreams.isBusy(), log }); }
     catch (error) { log("업데이트를 시작하지 못했습니다.", error); }
     const layout = detectLayout();
     if (layout) registerHostBundle(layout).catch((error: unknown) => log("Ghost Host 번들을 시스템에 등록하지 못했습니다.", error));
