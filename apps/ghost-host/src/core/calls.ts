@@ -167,6 +167,14 @@ export class Calls {
     };
     this.put(call);
     this.arm(call.id, CALL_CONNECT_SECONDS);
+    // Loading the conversation and compacting an over-long context would otherwise land inside the owner's first sentence.
+    this.ledger.afterCommit(() => {
+      try {
+        void this.core.engine.prepare?.(call.conversationId).catch((error) => this.core.log("call prepare failed", { callId: call.id, error: error instanceof Error ? error.message : String(error) }));
+      } catch {
+        // No engine is attached; there is nothing to prepare.
+      }
+    });
     return call;
   }
 
