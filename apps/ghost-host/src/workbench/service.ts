@@ -1,10 +1,12 @@
-import { statSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 import type { Pane, Space, Tab, WorkbenchFocus, WorkbenchPaneCreate, WorkbenchSpaceCreate, WorkbenchState, WorkbenchTerminalBinding } from "@ghost/contract";
 import type { CodingSessionsPort } from "../coding/ports.ts";
 import { CommandError, conflict, invalid, notFound } from "../core/errors.ts";
 import type { Ledger } from "../ledger/ledger.ts";
+import { createWorktree, repositoryOf } from "../sandbox/worktree.ts";
+import { spaceChanges } from "./changes.ts";
 import { closePane, firstPane, movePane, resizeSplit, splitPane } from "./layout.ts";
 import type { WorkbenchTerminals } from "./ports.ts";
 
@@ -25,6 +27,7 @@ function directory(path: string): string {
 
 export class Workbench {
   private readonly terminalIds = new Map<string, string>();
+  private readonly pendingLaunches = new Set<string>();
   private readonly opening = new Map<string, Promise<WorkbenchTerminalBinding>>();
   private removing: ReadonlySet<string> | null = null;
 
@@ -32,6 +35,7 @@ export class Workbench {
     private readonly ledger: Pick<Ledger, "setting" | "putSetting" | "tx">,
     private readonly sessions: Pick<CodingSessionsPort, "get"> | null,
     private readonly terminals: WorkbenchTerminals | null,
+    private readonly stateRoot: string,
   ) {}
 
   read(): WorkbenchState {
@@ -75,6 +79,7 @@ export class Workbench {
       }));
       const failure = results.find(result => result.status === "rejected");
       if (failure) throw failure.reason;
+      for (const paneId of removed) this.pendingLaunches.delete(paneId);
       return this.save(state);
     } finally {
       this.removing = null;
@@ -84,9 +89,27 @@ export class Workbench {
   createSpace(input: WorkbenchSpaceCreate): WorkbenchState {
     return this.change(input.version, state => {
       const space: Space = { id: crypto.randomUUID(), title: title(input.title), root: input.root === null ? null : directory(input.root), createdAt: Date.now() };
+      if (input.worktree) {
+        if (!space.root) throw invalid("worktree를 만들 Git 저장소를 선택하세요.");
+        let repo: string;
+        try { repo = repositoryOf(space.root); } catch { throw invalid("커밋이 있는 Git 저장소를 선택하세요."); }
+        const branch = input.worktree.branch.trim();
+        const parent = join(this.stateRoot, "workbench-worktrees");
+        try {
+          mkdirSync(parent, { recursive: true, mode: 0o700 });
+          space.root = createWorktree(repo, join(parent, space.id), branch);
+        } catch (error) {
+          throw invalid(error instanceof Error ? error.message : "worktree를 만들지 못했습니다.");
+        }
+        space.worktree = { repo, branch };
+      }
       state.spaces.push(space);
       this.select(state, space.id);
     });
+  }
+
+  changes(id: string, path: string | null) {
+    return spaceChanges(this.space(this.read(), id).root, path);
   }
 
   renameSpace(id: string, version: number, nextTitle: string): WorkbenchState {
@@ -149,7 +172,7 @@ export class Workbench {
   }
 
   addPane(tabId: string, input: WorkbenchPaneCreate): WorkbenchState {
-    return this.change(input.version, state => {
+    const state = this.change(input.version, state => {
       const tab = this.tab(state, tabId);
       const id = crypto.randomUUID();
       if (Boolean(input.targetPaneId) !== Boolean(input.direction)) throw invalid("분할할 패널과 방향을 선택하세요.");
@@ -169,6 +192,10 @@ export class Workbench {
       tab.layout = layout;
       this.select(state, tab.spaceId, tab, id);
     });
+    if (input.pane.kind === "terminal" && input.pane.terminalSpec?.command && state.focus?.paneId) {
+      this.pendingLaunches.add(state.focus.paneId);
+    }
+    return state;
   }
 
   deletePane(id: string, version: number): Promise<WorkbenchState> {
@@ -237,16 +264,16 @@ export class Workbench {
   private tab(state: WorkbenchState, id: string) { return required(state.tabs.find(tab => tab.id === id), "탭을 찾을 수 없습니다."); }
   private pane(state: WorkbenchState, id: string) { return required(state.panes.find(pane => pane.id === id), "패널을 찾을 수 없습니다."); }
 
-  openTerminal(paneId: string, restart?: string): Promise<WorkbenchTerminalBinding> {
+  openTerminal(paneId: string, restart?: string, start = false): Promise<WorkbenchTerminalBinding> {
     if (this.removing?.has(paneId)) return Promise.reject(conflict("이 패널을 닫고 있습니다."));
     const pending = this.opening.get(paneId);
     if (pending) return pending;
-    const opening = this.bindTerminal(paneId, restart).finally(() => this.opening.delete(paneId));
+    const opening = this.bindTerminal(paneId, restart, start).finally(() => this.opening.delete(paneId));
     this.opening.set(paneId, opening);
     return opening;
   }
 
-  private async bindTerminal(paneId: string, restart?: string): Promise<WorkbenchTerminalBinding> {
+  private async bindTerminal(paneId: string, restart: string | undefined, start: boolean): Promise<WorkbenchTerminalBinding> {
     if (!this.terminals) throw new CommandError("unavailable", "이 Host에서는 터미널을 열 수 없습니다.");
     const current = this.terminalIds.get(paneId);
     if (current) {
@@ -258,8 +285,10 @@ export class Workbench {
     if (this.removing?.has(paneId)) throw conflict("이 패널을 닫고 있습니다.");
     const pane = this.pane(this.read(), paneId);
     if (pane.kind !== "terminal") throw invalid("터미널 패널이 아닙니다.");
+    if (pane.terminalSpec.command && !start && !current && !this.pendingLaunches.has(paneId)) return { id: null };
     const id = this.terminals.create({ ...pane.terminalSpec, cols: 80, rows: 24 });
     this.terminalIds.set(paneId, id);
+    this.pendingLaunches.delete(paneId);
     return { id };
   }
 }

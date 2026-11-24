@@ -21,10 +21,13 @@ export async function serveWorkbench(bench: Workbench, principal: Principal | { 
     return bench.focusTerminal(parse(Id, decodeId(terminalFocus[1]!)), version);
   }
 
-  const route = /^\/api\/workbench\/(spaces|tabs|panes)\/([^/]+)(?:\/(tabs|panes|splits|move|terminal)(?:\/([^/]+))?)?$/.exec(pathname);
+  const route = /^\/api\/workbench\/(spaces|tabs|panes)\/([^/]+)(?:\/(tabs|panes|splits|move|terminal|changes)(?:\/([^/]+))?)?$/.exec(pathname);
   if (!route) throw notFound("작업대 경로를 찾을 수 없습니다.");
   const [, resource, rawId, action, extra] = route;
   const id = parse(Id, decodeId(rawId!));
+  if (resource === "spaces" && action === "changes" && !extra && method === "GET") {
+    return bench.changes(id, new URL(request.url).searchParams.get("path"));
+  }
   if (!action && method === "DELETE") {
     const { version } = parse(WorkbenchVersion, await body());
     if (resource === "spaces") return bench.deleteSpace(id, version);
@@ -46,8 +49,8 @@ export async function serveWorkbench(bench: Workbench, principal: Principal | { 
       return bench.move(id, targetPaneId, version);
     }
     if (resource === "panes" && action === "terminal") {
-      const { restart } = parse(WorkbenchTerminalOpen, await body());
-      return bench.openTerminal(id, restart);
+      const { restart, start } = parse(WorkbenchTerminalOpen, await body());
+      return bench.openTerminal(id, restart, start);
     }
   }
   if (resource === "tabs" && action === "splits" && extra && method === "PATCH") {

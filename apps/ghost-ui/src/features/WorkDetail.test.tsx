@@ -173,5 +173,13 @@ describe('coding runs in the Work aside', () => {
     const markup = renderToStaticMarkup(createElement(WorkCodingRuns, { runs: [codingRun({ pane: null, state: 'settled' })], now: NOW }));
     expect(markup).toContain('완료');
     expect(markup).not.toContain('herdr에서 보기');
+    expect(markup).not.toContain('코딩 세션 열기');
+  });
+
+  it('opens the embedded session, not the run id', () => {
+    const run = codingRun({ agent: 'ghost', session: 'ghost:coding-52ab', pane: null });
+    const markup = renderToStaticMarkup(createElement(WorkCodingRuns, { runs: [run], now: NOW }));
+    expect(markup).toContain('href="#/coding?session=coding-52ab"');
+    expect(markup).toContain('코딩 세션 열기');
   });
 });

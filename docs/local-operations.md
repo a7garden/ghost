@@ -113,6 +113,11 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작�
   - API 응답: `/api/workbench/spaces`(스페이스 0개, 아직 소유자가 만들지 않음), `/api/orchestration/config`(`enabled`, 동시 4·깊이 1, 기본 에이전트), `/api/pi/settings`(자동 압축 켜짐·재시도 3), `POST /api/terminals`(`/bin/echo` 터미널 id 반환).
   - 운영 실사용: 내장 세션 `code_run` 3건(`feat-acceptance-report-code-run-metrics`, `fix-coding-git-writes`, `workspace-admin-whitelist`)이 세션 worktree에서 일해 `main`에 병합됐다. 첫 accepted run은 herdr의 omp였다.
   - 한계: 설치된 Mac 앱 창과 iPhone에서 작업대를 열지 못했다(헤드리스 브라우저 확인만). 스페이스 생성·분할·터미널 패널·터미널 안 에이전트 알림·Pi 확장 적재·오케스트레이션 편집은 운영에서 조작하지 않았다(운영 데이터를 만들지 않으려고 폴더 선택 대화상자까지만 열고 닫았다). herdr와의 동등성 판정은 하지 않았다.
+- 네이티브 코딩 동등성 라운드(2.31.0, 2026-11-24): 체크리스트는 [coding-parity.md](coding-parity.md). 공백 6건(터미널 패널에서 에이전트 시작, omp·Claude Code·Codex 시작 옵션, worktree 스페이스, 스페이스 git 변경 보기, 맡긴 일→세션 딥링크, 터미널 에이전트가 작업 중이면 업데이트 대기)을 닫았다.
+  - 릴리스: [v2.31.0](https://github.com/a7garden/ghost/releases/tag/v2.31.0)(커밋 `49d975f`). 같은 `main`의 2.30.0(통화)·2.30.1(Tailscale 로그인) 변경도 이 릴리스에 들어 있다. 이 변경은 다른 작업의 미커밋 변경과 섞여 있던 작업 트리에서 떼어 격리 worktree에서 릴리스했다. 첫 두 시도는 새 worktree에 의존 캐시가 없어(agent-browser·tauri) 실패했고, 다음 두 시도는 다른 프로젝트(twillroom)의 git repack으로 load average가 220까지 올라 브라우저·터미널 테스트가 5초 제한에 걸려 실패했다. 부하가 내려간 뒤 통과했다.
+  - 설치: Owner API `POST /api/update/install`. 설치 뒤 `current`는 `releases/2.31.0-49d975f`, health `2.31.0`, 대화 674·Ghost 31·맡긴 일 366·코딩 세션 5 그대로. `lastResult`는 확인 시점에 이전 설치(`2.29.3` → `2.30.1`)를 가리키고 있었다. 새 Host가 쓴 값인지 오래된 값인지 확인하지 못했다.
+  - 설치본 확인: 「새 스페이스」에 「worktree로 시작」 확인란이 있고, `GET /api/terminals/agents`가 `omp, claude, codex, pi`를 돌려줬다. 임시 저장소(`/tmp`)로 `POST /api/workbench/spaces`(worktree)가 Host 상태 루트 아래 worktree·브랜치를 만들고, `GET …/changes`가 그 worktree의 수정 파일을(`a.txt` +1) 돌려주고, 스페이스를 삭제해도 worktree와 브랜치가 남았다. 확인 뒤 임시 worktree·브랜치·저장소를 지웠다.
+  - 한계: 새 패널의 「에이전트」 양식, 맡긴 일 상세의 「코딩 세션 열기」, 「git 변경」 서랍은 설치본 화면에서 조작하지 못했다(Host 테스트·UI 테스트·타입 검사로만 확인). 설치된 Mac 앱 창과 iPhone도 확인하지 않았다. 터미널 에이전트 때문에 업데이트가 기다리는 동작은 Host 테스트로만 확인했다.
 
 ### Mac 셸·도구 자동 승인 모드 (운영 정책 변경) — 2026-11-20
 

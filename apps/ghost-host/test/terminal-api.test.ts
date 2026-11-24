@@ -28,6 +28,11 @@ test("owner-authenticated HTTP and WebSocket stream resize, relay input and repo
     expect((await fetch(base, { headers, method: "POST", body: "{" })).status).toBe(400);
     const response = await fetch(base, { headers, method: "POST", body: JSON.stringify({ cwd, command: "/bin/sh", cols, rows }) });
     expect(response.status).toBe(200);
+    expect((await fetch(`${base}/agents`)).status).toBe(401);
+    expect(await (await fetch(`${base}/agents`, { headers })).json()).toEqual(terminals.availableAgents());
+    for (const spec of [{ args: ["no command"] }, { command: "/bin/echo", args: ["before\0after"] }]) {
+      expect((await fetch(base, { headers, method: "POST", body: JSON.stringify({ cwd, cols, rows, ...spec }) })).status).toBe(400);
+    }
     const { id } = await response.json() as { id: string };
     expect(await (await fetch(base, { headers })).json()).toEqual([expect.objectContaining({ id, cols, rows, agent: null })]);
     expect((await fetch(`${base}/${id}/resize`, { method: "POST", headers, body: JSON.stringify({ cols: 101, rows: 33 }) })).status).toBe(200);

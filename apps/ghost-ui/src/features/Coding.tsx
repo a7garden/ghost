@@ -23,7 +23,8 @@ import './CodingSession.css';
 const rosterModes = [{ value: 'agents', label: '에이전트' }, { value: 'spaces', label: '스페이스' }] as const;
 
 export function CodingPage({ legacy, terminalId, navigate, ...props }: HerdrCodingProps & { legacy: boolean; terminalId: string | null; navigate(path: string): void }) {
-  return legacy ? <HerdrCodingPage {...props}/> : <Workbench scopes={props.scopes} compact={props.compact} terminalId={terminalId} navigate={navigate}/>;
+  return legacy ? <HerdrCodingPage {...props}/> : <Workbench scopes={props.scopes} compact={props.compact} terminalId={terminalId}
+    sessionId={props.embeddedSessionId} navigate={navigate}/>;
 }
 
 type HerdrCodingProps = {

@@ -1,7 +1,7 @@
 import { closeSync, realpathSync, statSync, writeSync } from "node:fs";
-import { userInfo } from "node:os";
-import { isAbsolute, relative, sep } from "node:path";
-import { TerminalCreate, TerminalSize, parse, type TerminalAgent, type TerminalAgentEvent, type TerminalServerFrame, type TerminalView } from "@ghost/contract";
+import { homedir, userInfo } from "node:os";
+import { isAbsolute, join, relative, sep } from "node:path";
+import { TERMINAL_AGENTS, TerminalCreate, TerminalSize, parse, type TerminalAgent, type TerminalAgentEvent, type TerminalServerFrame, type TerminalView } from "@ghost/contract";
 import { CommandError, invalid } from "../core/errors.ts";
 import { TerminalActivity } from "./activity.ts";
 import { agentName, TerminalProcesses } from "./processes.ts";
@@ -49,7 +49,8 @@ type Entry = {
   view: TerminalView;
   pid: number;
   tty?: string;
-  foreground: { pid: number; agent: TerminalAgent } | null;
+  foreground: AgentProcess | null;
+  launchAgent: AgentProcess | null;
   pty: Pty;
   exit: Promise<void>;
   closing: Promise<void> | null;
@@ -59,14 +60,29 @@ type Entry = {
   attachers: Set<Attacher>;
 };
 
+type AgentProcess = { pid: number; agent: TerminalAgent };
+
 const POLL_MS = 500;
 const QUIET_MS = 5_000;
 const SAFE_ENV = /^(?:HOME|PATH|USER|LOGNAME|LANG|LC_[A-Z_]+|TMPDIR|SHELL|TZ|SSH_AUTH_SOCK)$/;
-const DEFAULT_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+const DEFAULT_PATH = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 
 function inside(root: string, path: string): boolean {
   const fromRoot = relative(root, path);
   return fromRoot === "" || (!isAbsolute(fromRoot) && fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`));
+}
+
+function terminalPath(root: string): string {
+  const home = homedir();
+  // launchd need not inherit the owner's interactive PATH.
+  const paths = new Set((process.env.PATH ?? "").split(":"));
+  for (const bin of [".bun/bin", ".local/bin", ".cargo/bin"]) paths.add(join(home, bin));
+  for (const bin of DEFAULT_PATH) paths.add(bin);
+  for (const path of paths) {
+    if (!isAbsolute(path) || inside(root, path)) paths.delete(path);
+    else try { if (inside(root, realpathSync(path))) paths.delete(path); } catch { /* an optional directory can be missing */ }
+  }
+  return [...paths].join(":");
 }
 
 function shellEnvironment(root: string, rootAlias: string): Record<string, string> {
@@ -81,11 +97,7 @@ function shellEnvironment(root: string, rootAlias: string): Record<string, strin
     }
     env[key] = value;
   }
-  const paths = (process.env.PATH ?? "").split(":").filter(path => {
-    if (!isAbsolute(path) || inside(root, path)) return false;
-    try { return !inside(root, realpathSync(path)); } catch { return true; }
-  });
-  env.PATH = paths.length ? paths.join(":") : DEFAULT_PATH;
+  env.PATH = terminalPath(root);
   if (env.SHELL && (!isAbsolute(env.SHELL) || !Bun.which(env.SHELL))) delete env.SHELL;
   if (!env.HOME || !env.SHELL) {
     const user = userInfo();
@@ -126,10 +138,11 @@ export class Terminals {
     } catch { throw invalid("작업 폴더가 없습니다."); }
     if (inside(this.root, cwd)) throw new CommandError("forbidden", "Ghost 상태 폴더에서는 터미널을 열 수 없습니다.");
     if (args?.length && command === undefined) throw invalid("인수를 전달할 명령이 필요합니다.");
+    if (command?.includes("\0") || args?.some(arg => arg.includes("\0"))) throw invalid("터미널 명령과 인수에는 널 문자를 넣을 수 없습니다.");
 
     const id = crypto.randomUUID();
     const initialAgent = command ? agentName(command) : null;
-    const view: TerminalView = { id, cwd, cols, rows, agent: initialAgent, state: "idle", exitCode: null };
+    const view: TerminalView = { id, cwd, cols, rows, agent: initialAgent, state: initialAgent ? "working" : "idle", exitCode: null };
     const history = new TerminalReplay();
     const activity = new TerminalActivity(id, view, this.options.quietMs ?? QUIET_MS, event => {
       try { this.options.onEvent?.({ ...view }, event); }
@@ -154,8 +167,9 @@ export class Terminals {
       activity.dispose();
       throw invalid("터미널 명령을 실행할 수 없습니다.");
     }
+    const launchAgent = initialAgent ? { pid: proc.pid, agent: initialAgent } : null;
     const entry: Entry = {
-      view, pid: proc.pid, foreground: initialAgent ? { pid: proc.pid, agent: initialAgent } : null,
+      view, pid: proc.pid, foreground: launchAgent, launchAgent,
       pty: proc.terminal, closing: null, stopRequested: false, history, activity, attachers,
       exit: proc.exited.then(async code => {
         // The process can exit before Bun delivers the last PTY read. Reap jobs that
@@ -186,6 +200,18 @@ export class Terminals {
 
   list(): TerminalView[] { return Array.from(this.entries.values(), entry => ({ ...entry.view })); }
   has(id: string): boolean { return this.entries.has(id); }
+
+  availableAgents(): TerminalAgent[] {
+    const PATH = terminalPath(this.root);
+    return TERMINAL_AGENTS.filter(agent => Bun.which(agent, { PATH }) !== null);
+  }
+
+  busy(): boolean {
+    for (const { view } of this.entries.values()) {
+      if (view.agent !== null && (view.state === "working" || view.state === "waiting")) return true;
+    }
+    return false;
+  }
 
   attach(id: string, after: number | undefined, send: Attacher): () => void {
     const entry = this.require(id);
@@ -260,7 +286,7 @@ export class Terminals {
       for (const entry of this.entries.values()) {
         if (entry.stopRequested || entry.view.state === "exited" || !processes.contains(entry.pid)) continue;
         entry.tty = processes.tty(entry.pid) ?? entry.tty;
-        const foreground = processes.foreground(entry.pid);
+        const foreground = processes.foreground(entry.pid) ?? entry.launchAgent;
         const previous = entry.foreground;
         if (foreground?.pid !== previous?.pid || foreground?.agent !== previous?.agent) {
           if (previous && !processes.contains(previous.pid)) entry.activity.agentExited(previous.agent);

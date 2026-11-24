@@ -74,8 +74,8 @@ import type {
   WorkDetail,
   VoiceSettings,
 } from '@ghost/contract';
-import type { FolderListing, WorkbenchState, WorkbenchTerminalBinding } from '@ghost/contract';
-import { TERMINAL_BEARER_PREFIX, TERMINAL_PROTOCOL, type TerminalCreate, type TerminalView } from '@ghost/contract';
+import type { FolderListing, WorkbenchChanges, WorkbenchFileDiff, WorkbenchState, WorkbenchTerminalBinding, WorkbenchTerminalOpen } from '@ghost/contract';
+import { TERMINAL_BEARER_PREFIX, TERMINAL_PROTOCOL, type TerminalAgent, type TerminalCreate, type TerminalView } from '@ghost/contract';
 
 declare global {
   interface Window {
@@ -291,6 +291,10 @@ export class HostClient {
     return this.json('/api/terminals', { signal });
   }
 
+  terminalAgents(signal?: AbortSignal): Promise<TerminalAgent[]> {
+    return this.json('/api/terminals/agents', { signal, cache: 'no-store' });
+  }
+
   closeTerminal(id: string): Promise<{ ok: true }> {
     return this.json(`/api/terminals/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
@@ -306,14 +310,23 @@ export class HostClient {
     return this.json('/api/workbench/spaces', { signal });
   }
 
+  workbenchChanges(id: string, signal?: AbortSignal): Promise<WorkbenchChanges> {
+    return this.json(`/api/workbench/spaces/${encodeURIComponent(id)}/changes`, { signal, cache: 'no-store' });
+  }
+
+  workbenchFileDiff(id: string, path: string, signal?: AbortSignal): Promise<WorkbenchFileDiff> {
+    const query = new URLSearchParams({ path });
+    return this.json(`/api/workbench/spaces/${encodeURIComponent(id)}/changes?${query}`, { signal, cache: 'no-store' });
+  }
+
   changeWorkbench(path: string, method: 'POST' | 'PATCH' | 'DELETE', input: { version: number }): Promise<WorkbenchState> {
     return this.json(`/api/workbench/${path}`, {
       method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
     });
   }
 
-  openWorkbenchTerminal(paneId: string, restart?: string): Promise<WorkbenchTerminalBinding> {
-    return this.json(`/api/workbench/panes/${encodeURIComponent(paneId)}/terminal`, codingJson('POST', { restart }));
+  openWorkbenchTerminal(paneId: string, options: WorkbenchTerminalOpen): Promise<WorkbenchTerminalBinding> {
+    return this.json(`/api/workbench/panes/${encodeURIComponent(paneId)}/terminal`, codingJson('POST', options));
   }
 
   codingSetup(): Promise<CodingSetup> {

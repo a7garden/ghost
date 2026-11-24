@@ -6,7 +6,13 @@ const path = Type.String({ minLength: 1, maxLength: 4096 });
 const version = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 const body = { additionalProperties: false } as const;
 
-export type Space = { id: string; title: string; root: string | null; createdAt: Static<typeof Timestamp> };
+export type Space = {
+  id: string;
+  title: string;
+  root: string | null;
+  createdAt: Static<typeof Timestamp>;
+  worktree?: { repo: string; branch: string };
+};
 export type Layout =
   | { type: "pane"; paneId: string }
   | { type: "split"; id: string; direction: "row" | "column"; ratio: number; first: Layout; second: Layout };
@@ -36,7 +42,10 @@ export const WORKBENCH_MIN_RATIO = 0.1;
 export const WORKBENCH_MAX_RATIO = 0.9;
 
 export const WorkbenchVersion = Type.Object({ version }, body);
-export const WorkbenchSpaceCreate = Type.Object({ version, title, root: nullable(path) }, body);
+export const WorkbenchSpaceCreate = Type.Object({
+  version, title, root: nullable(path),
+  worktree: Type.Optional(Type.Object({ branch: Type.String({ minLength: 1, maxLength: 200 }) }, body)),
+}, body);
 export type WorkbenchSpaceCreate = Static<typeof WorkbenchSpaceCreate>;
 export const WorkbenchRename = Type.Object({ version, title }, body);
 export type WorkbenchRename = Static<typeof WorkbenchRename>;
@@ -56,7 +65,22 @@ export const WorkbenchMove = Type.Object({ version, targetPaneId: Id }, body);
 export type WorkbenchMove = Static<typeof WorkbenchMove>;
 export const WorkbenchFocus = Type.Object({ version, spaceId: Id, tabId: Type.Optional(Id), paneId: Type.Optional(Id) }, body);
 export type WorkbenchFocus = Static<typeof WorkbenchFocus>;
-/** Live terminal bindings are never in WorkbenchState. An explicit restart names the old binding. */
-export const WorkbenchTerminalOpen = Type.Object({ restart: Type.Optional(Id) }, body);
+/** Live terminal bindings are never in WorkbenchState. After a Host restart, a command pane requires explicit start. */
+export const WorkbenchTerminalOpen = Type.Object({ restart: Type.Optional(Id), start: Type.Optional(Type.Boolean()) }, body);
 export type WorkbenchTerminalOpen = Static<typeof WorkbenchTerminalOpen>;
-export type WorkbenchTerminalBinding = { id: string };
+export type WorkbenchTerminalBinding = { id: string | null };
+
+export type WorkbenchChanges = {
+  branch: string | null;
+  files: {
+    path: string;
+    status: "added" | "modified" | "deleted" | "untracked";
+    /** Git porcelain XY flags (index and working tree). */
+    xy: string;
+    additions: number | null;
+    deletions: number | null;
+  }[];
+  truncated: boolean;
+};
+
+export type WorkbenchFileDiff = { path: string; staged: string; unstaged: string; truncated: boolean };

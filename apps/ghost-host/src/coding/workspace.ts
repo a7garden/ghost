@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import type { CodingImage, CodingSession } from "@ghost/contract";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { invalid } from "../core/errors.ts";
+import { gitArgv, gitEnv, readGit } from "../sandbox/git.ts";
 import { gitRefPlumbing, insidePath, secretPaths } from "../sandbox/seatbelt.ts";
 import { assertNoSymlinkGrants, repositoryOf } from "../sandbox/worktree.ts";
 import type { CodingChanges } from "./ports.ts";
@@ -62,22 +63,6 @@ export function writeRegular(path: string, content: string): void {
     // writeFileSync on an fd writes at offset zero but does not truncate it.
     ftruncateSync(fd, Buffer.byteLength(content));
   } finally { closeSync(fd); }
-}
-
-function gitArgv(cwd: string, args: string[]): string[] {
-  // The Host runs git outside the session's sandbox, so it names the plumbing it refuses to
-  // take from a repository: no hooks, no filesystem monitor, no external diff driver.
-  return [process.platform === "darwin" ? "/usr/bin/git" : "git", "-C", cwd, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "diff.external=", ...args];
-}
-
-function gitEnv(): Record<string, string> {
-  // A session's repository config is the owner's, but the Host never lets it name a command:
-  // no system config, no global config, no credential helper.
-  return {
-    PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: homedir(), TMPDIR: tmpdir(), LANG: "en_US.UTF-8",
-    GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0",
-    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null",
-  };
 }
 
 function git(cwd: string, args: string[]): string {
@@ -183,17 +168,9 @@ export function writePatch(path: string, before: string | null, after: string): 
 }
 
 async function gitRead(cwd: string, args: string[], limit: number): Promise<{ value: string; truncated: boolean }> {
-  const child = Bun.spawn(gitArgv(cwd, args), { env: gitEnv(), stdout: "pipe", stderr: "ignore" });
-  const chunks: Uint8Array[] = [];
-  let size = 0, truncated = false;
-  for await (const chunk of child.stdout) {
-    if (size < limit) chunks.push(chunk.subarray(0, limit - size));
-    size += chunk.byteLength;
-    if (size > limit) { truncated = true; child.kill(); break; }
-  }
-  const status = await child.exited;
-  if (status !== 0 && !truncated) throw invalid("cannot read coding worktree changes");
-  return { value: Buffer.concat(chunks).toString("utf8"), truncated };
+  const result = await readGit(cwd, args, limit);
+  if (result.code !== 0 && !result.truncated) throw invalid("cannot read coding worktree changes");
+  return result;
 }
 
 export async function changesFor(session: CodingSession): Promise<CodingChanges> {

@@ -135,6 +135,7 @@
   .workbench-terminal-exit { position: absolute; inset: auto 8px 8px auto; }
   .workbench-form { display: grid; gap: 12px; }
   .workbench-form label { display: grid; gap: 5px; font-size: var(--text-ui); }
+  .workbench-form .workbench-worktree-toggle { display: flex; align-items: center; gap: 7px; }
   .workbench-menu { width: max-content; padding: 4px; }
   .workbench-menu button, .workbench-picker button {
     display: flex;

@@ -2,14 +2,15 @@ import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Work } from "@ghost/contract";
 import { readFileNoFollow } from "./workspace-env.ts";
+import { gitArgv, gitEnv } from "./git.ts";
 import { gitRefPlumbing } from "./seatbelt.ts";
 
 /** Branch of a Work's worktree. Work ids are host-generated, so the name needs no escaping. */
 export const worktreeBranch = (workId: string) => `ghost/${workId}`;
 
 function git(cwd: string, args: string[]): { ok: boolean; stdout: string; stderr: string } {
-  const child = Bun.spawnSync(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "pipe", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
-  return { ok: child.exitCode === 0, stdout: child.stdout.toString().trim(), stderr: child.stderr.toString().trim() };
+  const child = Bun.spawnSync(gitArgv(cwd, args), { stdout: "pipe", stderr: "pipe", env: gitEnv() });
+  return { ok: child.exitCode === 0, stdout: child.stdout.toString().replace(/\n$/, ""), stderr: child.stderr.toString().trim() };
 }
 
 /** The repository top level of `cwd`, or a reason it cannot carry a worktree. */
@@ -18,6 +19,16 @@ export function repositoryOf(cwd: string): string {
   if (!top.ok || !top.stdout) throw new Error(`Worktree execution needs a git repository: ${cwd}`);
   if (git(cwd, ["rev-parse", "--verify", "--quiet", "HEAD"]).ok === false) throw new Error(`Worktree execution needs a repository with at least one commit: ${cwd}`);
   return realpathSync(top.stdout);
+}
+
+/** Create a fresh branch and checkout. Do not reuse, reset or remove any existing branch or worktree. */
+export function createWorktree(repo: string, path: string, branch: string, base = "HEAD"): string {
+  if (branch.startsWith("-") || branch.includes("\0") || !git(repo, ["check-ref-format", `refs/heads/${branch}`]).ok) {
+    throw new Error("브랜치 이름이 올바르지 않습니다.");
+  }
+  const added = git(repo, ["worktree", "add", "-b", branch, path, base]);
+  if (!added.ok) throw new Error(`worktree를 만들지 못했습니다. ${added.stderr.slice(0, 512)}`);
+  return realpathSync(path);
 }
 
 /**
@@ -34,7 +45,8 @@ export function ensureWorktree(root: string, work: Work, cwd: string): string {
   const hasBranch = git(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).ok;
   const parentBranch = work.parentId ? worktreeBranch(work.parentId) : null;
   const base = parentBranch && git(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${parentBranch}`]).ok ? parentBranch : "HEAD";
-  const added = hasBranch ? git(repo, ["worktree", "add", path, branch]) : git(repo, ["worktree", "add", "-b", branch, path, base]);
+  if (!hasBranch) return createWorktree(repo, path, branch, base);
+  const added = git(repo, ["worktree", "add", path, branch]);
   if (!added.ok) throw new Error(`git worktree add failed: ${added.stderr.slice(0, 512)}`);
   return realpathSync(path);
 }

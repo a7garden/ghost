@@ -83,7 +83,7 @@ export class TerminalActivity {
         this.waiting = this.prompt;
         this.emit({ type: "waiting", agent, reason: "prompt" });
       }
-      return "idle";
+      return "waiting";
     }
     if (this.ownWorking || quiet < this.quietMs || (this.worked && !this.finished && now - this.agentSince < this.quietMs)) {
       if (!this.finished) this.worked = true;
