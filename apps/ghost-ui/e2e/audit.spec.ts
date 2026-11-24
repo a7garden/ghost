@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openScreen, screenshot, type Theme } from './visual';
 import { mockConversationActivity, mockIPhone, mockMessageNotification, mockRichConversation, showTranscriptElement } from './iphone-fixtures';
-import { mockCodingApi, mockStateDecisions, mockVaultApi, visualHandoffDecisionId, visualSecureDecisionId } from './mocks';
+import { mockCodingApi, mockShadeApi, mockStateDecisions, mockVaultApi, visualHandoffDecisionId, visualSecureDecisionId } from './mocks';
 import type { Decision, MemoryView, ProviderQuota, State } from '@ghost/contract';
 import { readRunState } from './run-state';
 
@@ -300,6 +300,7 @@ for (const theme of ['light', 'dark'] as const) {
     test('vault loading and error remain distinct from empty', async ({ page }, info) => {
       const { promise: pending, resolve: release } = Promise.withResolvers<void>();
       await openScreen(page, { name: 'vault-loading', route: () => '/settings?tab=vault', waits: () => [], prepare: async page => {
+        await mockShadeApi(page, 'unavailable');
         await page.route('**/api/vault/items', async route => {
           await pending;
           await route.fulfill({ status: 503, json: { ok: false, error: { code: 'internal', message: '금고를 읽지 못했습니다.' } } });

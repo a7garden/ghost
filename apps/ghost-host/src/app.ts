@@ -12,6 +12,9 @@ import { createDocuments } from "./integrations/documents.ts";
 import { MemoryStore } from "./stores/memory.ts";
 import { MemoryDreams } from "./memory/dreams.ts";
 import { createBrowser } from "./integrations/browser.ts";
+import { LocalAccounts } from "./integrations/local-accounts.ts";
+import { LoginShelf } from "./integrations/login-shelf.ts";
+import { Shade } from "./integrations/shade.ts";
 import { createDesktop } from "./integrations/desktop.ts";
 import { createReach } from "./integrations/reach.ts";
 import { createSkills } from "./integrations/skills.ts";
@@ -63,6 +66,10 @@ export interface App {
   memory: MemoryStore;
   memoryDreams: MemoryDreams;
   mail: MailService;
+  /** What the handoff card offers for the page the owner is on; null without a browser. */
+  logins: LoginShelf | null;
+  shade: Shade;
+  localAccounts: LocalAccounts;
   mailWatcher: MailWatcher;
   close(): Promise<void>;
 }
@@ -185,11 +192,21 @@ export async function openApp(config: Config): Promise<App> {
     const host = config.mac ? new MacHost({ roots: config.mac.roots, stateRoot: config.root }) : null;
     const vault = (openedVault = createVault(config.root));
     const mcp = (openedMcp = createHostMcpClients({ root: config.root, ledger, sources: openedSources, vault }));
+    const shade = new Shade({ prefs: {
+      // Shade's own agent-write switch is the owner's consent to add items; this only lets the owner turn mirroring off.
+      saveLogins: () => ledger.setting<boolean>("shade:saveLogins", true),
+      setSaveLogins: (value) => ledger.tx(() => ledger.putSetting("shade:saveLogins", value)),
+    } });
+    let logins: LoginShelf | null = null;
     const browser = (openedBrowser = createBrowser(config, { root: config.root, onLogin(ref, login) {
+      const startedAt = Date.now();
       const item = vault.saveLogin(ref.ghostId, login);
       core.ledger.tx(() => core.notify({ id: `browser-login:${item.id}:${item.updatedAt}`, kind: "message", ghostId: ref.ghostId, conversationId: ref.conversationId, workId: null, decisionId: null, title: "로그인 정보를 금고에 저장했어요", body: `${item.origin} · ${item.username}` }));
+      void logins?.captured(ref, login, item, startedAt);
       return item.id;
     } }));
+    logins = browser ? new LoginShelf({ vault, shade, browser }) : null;
+    const localAccounts = new LocalAccounts();
     const desktop = (openedDesktop = createDesktop(config, { root: config.root }));
     const memory = (openedMemory = new MemoryStore(config.root));
     const herdr = (openedHerdr = config.coding === false ? null : new Herdr(undefined, { root: config.root, log, prefs: () => codingPrefs(core.ledger.setting<unknown>("coding", null)) }));
@@ -225,6 +242,9 @@ export async function openApp(config: Config): Promise<App> {
       host,
       vault,
       browser,
+      logins,
+      shade,
+      localAccounts,
       memory,
       memoryDreams,
       mail,
@@ -295,7 +315,7 @@ export async function serve(config: Config) {
     app.core.catalog.start(catalogChanged);
     app.core.codexCatalog.start(catalogChanged);
     const token = ownerToken(config.root);
-    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, herdr: app.herdr, terminals: app.terminals, workbench: app.workbench, omp: app.omp, vault: app.vault, browser: app.browser, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
+    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, herdr: app.herdr, terminals: app.terminals, workbench: app.workbench, omp: app.omp, vault: app.vault, browser: app.browser, logins: app.logins, shade: app.shade, localAccounts: app.localAccounts, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
     push = startPush(app.core, config);
     const hostFile = join(config.root, "host.json");
     writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });

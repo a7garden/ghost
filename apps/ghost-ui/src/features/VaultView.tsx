@@ -8,6 +8,7 @@ import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
 import { visibleGhosts } from './ghostState';
 import { absoluteTime } from './time';
+import { ShadeSettings } from './ShadeSettings';
 
 const kindLabels: Record<VaultItemKind, string> = { login: '로그인', card: '카드', contact: '연락처', secret: '비밀', api: 'API 키' };
 
@@ -202,6 +203,7 @@ export function VaultView() {
         </span>
       </SettingsRow>)}</SettingsGroup>
       : items && <div className="calm"><KeyRound size={16} aria-hidden="true"/><p>금고 항목 없음</p></div>}
+    <ShadeSettings/>
     {error && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
     {editing && <VaultItemDialog item={editing} ghosts={ghosts} onClose={() => setEditing(null)}

@@ -5,6 +5,7 @@ export * from "./views.ts";
 export * from "./interactive.ts";
 export * from "./autonomy.ts";
 export * from "./connection-oauth.ts";
+export * from "./login-setup.ts";
 export * from "./duty.ts";
 export * from "./coding.ts";
 export * from "./coding-run.ts";

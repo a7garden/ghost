@@ -741,6 +741,11 @@ export class AgentBrowser implements BrowserPort {
     });
   }
   sessions() { return [...this.sessionMap.values()].map((s) => ({ ...s.ref, engine: s.engine ?? "chrome" as const, headed: s.headed })); }
+  pageUrl(ref: BrowserSessionRef) {
+    const session = this.sessionMap.get(ref.conversationId);
+    const url = session?.ref.ghostId === ref.ghostId ? session.bridge?.page?.url ?? session.handoffUrl ?? null : null;
+    return url && !this.hasProtectedValue(session!, url) ? url : null;
+  }
   private existing(ref: BrowserSessionRef) {
     const session = this.sessionMap.get(ref.conversationId);
     if (!session || session.ref.ghostId !== ref.ghostId) throw new CommandError("not_found", "Browser session not found");

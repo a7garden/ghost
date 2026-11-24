@@ -9,15 +9,15 @@ import type { ConnectionService } from './connection-services';
 export const supportsConnectionOAuth = (id: string) => ['google', 'outlook', 'x', 'notion', 'slack'].includes(id);
 
 /** Login credentials and authorization codes never pass through the conversation. */
-export function ConnectionOAuthPanel({ service, ghosts, onConnected }: {
-  service: ConnectionService; ghosts: Ghost[]; onConnected(): void;
+export function ConnectionOAuthPanel({ service, ghosts, defaultUsername = '', onConnected }: {
+  service: ConnectionService; ghosts: Ghost[]; /** Mail only: the address the owner already typed. */ defaultUsername?: string; onConnected(): void;
 }) {
   const { client } = useHost();
   const [view, setView] = useState<ConnectionOAuthView | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState(service.name);
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(defaultUsername);
   const [googleDrive, setGoogleDrive] = useState(true);
   const [ghostIds, setGhostIds] = useState<string[]>([]);
   const [clientId, setClientId] = useState(''), [clientSecret, setClientSecret] = useState('');

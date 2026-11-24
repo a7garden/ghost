@@ -1,20 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Globe2, Mail, Pencil, PlugZap, Search, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowUpRight, Check, Globe2, Mail, Pencil, PlugZap, Search, Sparkles, Trash2 } from 'lucide-react';
 import { Button, Checkbox, FormField, InlineError, Input, Switch, Textarea } from '../ui';
-import type { Command, Connection, Ghost } from '@ghost/contract';
+import type { Command, Connection, Ghost, LocalAccount } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
 import { uiTerms } from '../uiText';
-import { buildConnectionCommand, type ConnectionDraft, connectionSummary, draftForService, draftFromConnection } from './connection-config';
-import { connectionServices, connectionSetupPrompt, serviceById, serviceForConnection, type ConnectionService } from './connection-services';
+import { buildConnectionCommand, groupConnectionsByService, type ConnectionDraft, connectionSummary, draftForService, draftFromConnection } from './connection-config';
+import { connectionServices, connectionSetupPrompt, localScopeSummary, serviceById, serviceForConnection, type ConnectionService } from './connection-services';
 import { ExternalAnchor } from '../components/ExternalAnchor';
 import { ConnectionOAuthPanel, supportsConnectionOAuth } from './ConnectionOAuthPanel';
 import { ReadPaths } from './ReadPaths';
+import { MailConnect } from './MailConnect';
+import './ConnectionSetup.css';
 
 type TestState = { phase: 'testing' } | { phase: 'ok'; summary: string } | { phase: 'error'; message: string };
 
-function ServiceIcon({ service, iconUrl }: { service?: ConnectionService; iconUrl?: string }) {
+export function ServiceIcon({ service, iconUrl }: { service?: ConnectionService; iconUrl?: string }) {
   const { client } = useHost();
   const [localIcon, setLocalIcon] = useState<{ path: string; url: string } | null>(null);
   const [failed, setFailed] = useState(false);
@@ -49,10 +51,22 @@ export function Connections({ navigate }: { navigate(path: string): void }) {
   const [removing, setRemoving] = useState<Connection | null>(null);
   const [tests, setTests] = useState<Record<string, TestState>>({});
   const [query, setQuery] = useState('');
+  const [mailAddress, setMailAddress] = useState('');
+  const [mail, setMail] = useState<{ seed?: ConnectionService; address?: string } | null>(null);
+  const [localAccounts, setLocalAccounts] = useState<LocalAccount[] | null>(null);
+  const [linked, setLinked] = useState<Record<string, string>>({});
   const connections = (state?.connections ?? []).slice().sort((a, b) => a.createdAt - b.createdAt);
+  const grouped = groupConnectionsByService(connections);
   const setupRequest = useRef<{ text: string; id: string } | null>(null);
   const available = connectionServices.filter(service => `${service.name} ${service.id}`.toLowerCase().includes(query.trim().toLowerCase()));
   const main = state?.ghosts.find(ghost => ghost.isDefault && ghost.state === 'active');
+
+  // Local sign-ins are an extra: a Host without the route or a Mac without them stays silent.
+  useEffect(() => {
+    let disposed = false;
+    void client.localAccounts().then(({ accounts }) => { if (!disposed) setLocalAccounts(accounts); }).catch(() => {});
+    return () => { disposed = true; };
+  }, [client]);
 
   const test = async (id: string) => {
     setTests(prev => ({ ...prev, [id]: { phase: 'testing' } }));
@@ -65,7 +79,7 @@ export function Connections({ navigate }: { navigate(path: string): void }) {
   };
   const save = async (command: Command, requestId: string) => {
     const result = await client.send<{ connectionId: string }>(command, requestId);
-    setSelected(null); setEditing(null);
+    setSelected(null); setEditing(null); setMail(null);
     setNotice('');
     await test(result.connectionId);
   };
@@ -77,6 +91,16 @@ export function Connections({ navigate }: { navigate(path: string): void }) {
     await client.send({ type: 'message.send', conversationId: main.directConversationId, text }, setupRequest.current.id);
     navigate(`/ghosts/${main.id}`);
   };
+  const connectLocal = async (account: LocalAccount) => {
+    setPending(`local:${account.login}`); setError('');
+    try {
+      const { connectionId } = await client.connectLocalAccount({ source: account.source, login: account.login });
+      setLinked(prev => ({ ...prev, [account.login]: connectionId }));
+      await test(connectionId);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '이 Mac의 계정을 연결하지 못했습니다.');
+    } finally { setPending(''); }
+  };
 
   return <section className="flex min-w-0 flex-col gap-6" aria-label={uiTerms.connections}>
     <div className="settings-section-header flex flex-wrap items-center justify-between gap-3">
@@ -85,24 +109,42 @@ export function Connections({ navigate }: { navigate(path: string): void }) {
     </div>
     {error && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 text-caption text-ink-2" role="status">{notice}</p>}
-    {connections.length > 0 && <ul className="connection-grid" aria-label="등록한 계정">
-      {connections.map(connection => {
-        const service = serviceForConnection(connection);
-        const status = tests[connection.id];
-        return <li key={connection.id} className="connection-tile">
-          <ServiceIcon service={service} iconUrl={connection.iconUrl}/>
-          <div className="connection-tile__identity"><h3>{connection.name}</h3><p>{connectionSummary(connection)}</p></div>
-          <p className="connection-tile__status" data-phase={status?.phase} role="status">
-            {status?.phase === 'testing' ? '인증 확인 중…' : status?.phase === 'ok' ? '인증 확인됨' : status?.phase === 'error' ? status.message : connection.hasCredential ? '인증 정보 저장됨' : '인증 정보 필요'}
-          </p>
-          <div className="connection-tile__actions">
-            <Button variant="ghost" size="sm" type="button" disabled={status?.phase === 'testing'} aria-label={`${connection.name} 연결 테스트`} onClick={() => void test(connection.id)}><PlugZap size={14}/>확인</Button>
-            <Button variant="ghost" size="icon" type="button" aria-label={`${connection.name} 편집`} onClick={() => { setError(''); setEditing(connection); }}><Pencil size={15}/></Button>
-            <Button variant="ghost" size="icon" type="button" aria-label={`${connection.name} 삭제`} onClick={() => { setError(''); setRemoving(connection); }}><Trash2 size={15}/></Button>
-          </div>
-        </li>;
-      })}
-    </ul>}
+    <form className="mail-entry" onSubmit={event => {
+      event.preventDefault();
+      if (!mailAddress.trim() || !state) return;
+      setError(''); setMail({ address: mailAddress.trim() }); setMailAddress('');
+    }}>
+      <div className="mail-entry__field">
+        <label htmlFor="mail-entry-address">이메일 주소로 연결</label>
+        <Input id="mail-entry-address" type="email" inputMode="email" autoComplete="username" placeholder="name@example.com" value={mailAddress} disabled={!state} onChange={event => setMailAddress(event.target.value)}/>
+      </div>
+      <Button type="submit" disabled={!state || !mailAddress.trim()}>계속</Button>
+    </form>
+    {localAccounts !== null && localAccounts.length > 0 && <section className="local-accounts" aria-label="이 Mac의 계정">
+      <h3>이 Mac의 계정</h3>
+      <ul>
+        {localAccounts.map(account => {
+          const connectionId = account.connectionId ?? linked[account.login];
+          const status = connectionId ? tests[connectionId] : undefined;
+          return <li key={`${account.source}:${account.login}`} className="local-account">
+            <ServiceIcon service={serviceById(account.serviceId)}/>
+            <div className="connection-tile__identity"><h3>{account.login}</h3><p>{localScopeSummary(account.scopes)}</p></div>
+            <p className="connection-tile__status" data-phase={status?.phase} role="status">
+              {pending === `local:${account.login}` ? '연결하는 중…'
+                : status?.phase === 'testing' ? '인증 확인 중…'
+                : status?.phase === 'ok' ? '인증 확인됨'
+                : status?.phase === 'error' ? status.message : ''}
+            </p>
+            {connectionId
+              ? <span className="service-state"><Check size={14} aria-hidden="true"/>연결됨</span>
+              : <Button size="sm" type="button" disabled={!state || pending !== ''} onClick={() => void connectLocal(account)}>이 Mac의 계정 사용</Button>}
+          </li>;
+        })}
+      </ul>
+      {localAccounts.some(account => !(account.connectionId ?? linked[account.login])) && (
+        <p className="m-0 text-caption text-ink-2">토큰은 이 Mac의 GitHub CLI에서 복사되며, CLI에서 로그아웃하면 연결이 끊깁니다.</p>
+      )}
+    </section>}
     <section className="connection-catalog" aria-label="서비스 연결">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="m-0 text-ui font-medium">서비스 연결</h3>
@@ -112,11 +154,40 @@ export function Connections({ navigate }: { navigate(path: string): void }) {
         const services = available.filter(service => service.group === group);
         return services.length > 0 && <div key={group} className="connection-catalog__group">
           {group !== '서비스' && <h4>{group}</h4>}
-          <ul>{services.map(service => <li key={service.id}>
-            <button type="button" disabled={!state} onClick={() => setSelected(service)} className="service-choice">
-              <ServiceIcon service={service}/><span>{service.name}</span><ArrowUpRight size={14} className="service-choice__arrow" aria-hidden="true"/>
-            </button>
-          </li>)}</ul>
+          <ul className="connection-catalog__services">
+            {services.map(service => {
+              const accounts = grouped.get(service.id) ?? [];
+              return <li key={service.id} className="service-block">
+                <div className="service-tile">
+                  <ServiceIcon service={service}/>
+                  <span className="service-tile__name">{service.name}</span>
+                  {accounts.length > 0 && <span className="service-state"><Check size={14} aria-hidden="true"/>{accounts.length > 1 ? `연결됨 ${accounts.length}` : '연결됨'}</span>}
+                  <Button variant="outline" size="sm" type="button" disabled={!state}
+                    aria-label={`${service.name} ${accounts.length > 0 ? '계정 추가' : '연결'}`}
+                    onClick={() => { setError(''); if (service.kind === 'mail') setMail({ seed: service }); else setSelected(service); }}>
+                    {accounts.length > 0 ? '계정 추가' : '연결'}
+                  </Button>
+                </div>
+                {accounts.length > 0 && <ul className="service-block__accounts" aria-label={`${service.name}에 연결된 계정`}>
+                  {accounts.map(connection => {
+                    const status = tests[connection.id];
+                    return <li key={connection.id} className="connection-account">
+                      <ServiceIcon service={service} iconUrl={connection.iconUrl}/>
+                      <div className="connection-tile__identity"><h3>{connection.name}</h3>{!connection.name.includes(connectionSummary(connection)) && <p>{connectionSummary(connection)}</p>}</div>
+                      <p className="connection-tile__status" data-phase={status?.phase} role="status">
+                        {status?.phase === 'testing' ? '인증 확인 중…' : status?.phase === 'ok' ? '인증 확인됨' : status?.phase === 'error' ? status.message : connection.hasCredential ? '인증 정보 저장됨' : '인증 정보 필요'}
+                      </p>
+                      <div className="connection-tile__actions">
+                        <Button variant="ghost" size="sm" type="button" disabled={status?.phase === 'testing'} aria-label={`${connection.name} 연결 테스트`} onClick={() => void test(connection.id)}><PlugZap size={14}/>확인</Button>
+                        <Button variant="ghost" size="icon" type="button" aria-label={`${connection.name} 편집`} onClick={() => { setError(''); setEditing(connection); }}><Pencil size={15}/></Button>
+                        <Button variant="ghost" size="icon" type="button" aria-label={`${connection.name} 삭제`} onClick={() => { setError(''); setRemoving(connection); }}><Trash2 size={15}/></Button>
+                      </div>
+                    </li>;
+                  })}
+                </ul>}
+              </li>;
+            })}
+          </ul>
         </div>;
       })}
       {available.length === 0 && <div className="flex flex-col items-start gap-3"><p className="m-0 text-ink-2">일치하는 서비스가 없습니다.</p><Button variant="outline" onClick={() => setSelected(serviceById('custom-api')!)}>다른 서비스 연결</Button></div>}
@@ -124,6 +195,8 @@ export function Connections({ navigate }: { navigate(path: string): void }) {
     {(selected || editing) && <ConnectionDialog key={editing?.id ?? selected?.id} existing={editing} service={selected ?? serviceForConnection(editing!) ?? serviceById(editing!.config.kind === 'mail' ? 'custom-mail' : 'custom-api')!}
       ghosts={state?.ghosts.filter(ghost => ghost.state === 'active') ?? []} canAssist={Boolean(main)} onAssist={assist}
       onClose={() => { setSelected(null); setEditing(null); }} onSave={save}/>}
+    {mail && <MailConnect key={mail.address ?? mail.seed?.id ?? 'mail'} seed={mail.seed} initialAddress={mail.address ?? ''}
+      canAssist={Boolean(main)} onAssist={assist} onClose={() => setMail(null)} onSave={save}/>}
     {removing && <Modal title="연결 삭제" onClose={() => pending === '' && setRemoving(null)}>
       <p className="m-0">{removing.name} 연결과 저장된 인증 정보를 삭제할까요? 이 연결을 쓰는 자동 활동과 API 접근도 중단됩니다.</p>
       {error && <InlineError>{error}</InlineError>}

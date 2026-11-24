@@ -253,6 +253,8 @@ export interface BrowserPort {
   /** Prepare secure Chrome owner interaction; headed defaults true for the explicit Mac-window action. */
   handoff(session: BrowserSessionRef, url: string | null, options?: { headed?: boolean; authorize?: () => void }): Promise<void>;
   sessions(): BrowserSessionInfo[];
+  /** The page the session last reported, without running a command; null when unknown or it carries a protected value. */
+  pageUrl?(session: BrowserSessionRef): string | null;
   /** Shared local screencast, owner-only. Returns an unsubscribe function. */
   live(session: BrowserSessionRef, options: { maxFps: number }, sink: (event: BrowserLiveEvent) => void): Promise<() => void>;
   input(session: BrowserSessionRef, input: BrowserLiveInput): Promise<void>;

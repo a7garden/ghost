@@ -1,6 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 import type { CodingPrefs, CodingSetup, Decision, HerdrAgentStart, HerdrChanges, HerdrClose, HerdrDiff, HerdrFrame, HerdrInput, HerdrIntegrationInstall, HerdrOutput, HerdrPaneView, HerdrPrompt, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrUpload, HerdrView, HerdrWorkspaceCreate, HerdrWorkspaceView, OmpInfo, VaultItem } from '@ghost/contract';
 import type { HerdrAnswer, HerdrAsk, HerdrChat, HerdrChatItem, HerdrCommands, HerdrControlCommand, HerdrControlEnd, HerdrControlLease, HerdrControlRelease } from '@ghost/contract';
+import type { ShadeState, ShadeStatus } from '@ghost/contract';
 import { readRunState } from './run-state';
 
 /** The synthetic decision ids the decision-surface screens focus. */
@@ -77,9 +78,19 @@ async function fulfillJson(route: Route, status: number, body: unknown): Promise
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
+/** The Shade state a screen shows, independent of whether this Mac has Shade installed or unlocked. */
+export async function mockShadeApi(page: Page, state: ShadeState): Promise<void> {
+  const status: ShadeStatus = { state, writable: state === 'ready', saveLogins: true };
+  await page.route('**/api/shade', route => {
+    if (route.request().method() === 'PUT') void fulfillJson(route, 200, { ...status, saveLogins: (route.request().postDataJSON() as { saveLogins: boolean }).saveLogins });
+    else void fulfillJson(route, 200, status);
+  });
+}
+
 /** Serves the vault item list so the 금고 settings screen renders without the host's vault routes. */
 export async function mockVaultApi(page: Page): Promise<void> {
   const items = vaultItems();
+  await mockShadeApi(page, 'ready');
   await page.route('**/api/vault/items', route => {
     if (route.request().method() === 'GET') void fulfillJson(route, 200, { items });
     else void route.continue();

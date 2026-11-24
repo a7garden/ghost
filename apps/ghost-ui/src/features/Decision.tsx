@@ -1,7 +1,7 @@
 import { haptic } from '../host/shell';
-import { useContext, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ArrowRight, ArrowUp, ArrowUpRight, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, CircleHelp, FileText, Flag, KeyRound,
-  ListChecks, Lock, Monitor, MousePointerClick, type LucideIcon } from 'lucide-react';
+  ListChecks, Lock, MousePointerClick, type LucideIcon } from 'lucide-react';
 import { Button, Checkbox, FormField, InlineError, Input } from '../ui'
 import { DESTRUCTIVE_RISK, reviewOf, type ActivityConfig, type Decision, type SecureFormRequest, type State, type VaultItemKind, type WorkResult } from '@ghost/contract';
 import { executionLabel, policySummary, sourceSummary } from './activity-config';
@@ -9,7 +9,7 @@ import { toolLabels } from './toolLabels';
 import { DotAvatar } from '../components/DotAvatar';
 import { ArtifactPreview } from '../components/ArtifactPreview';
 import { DocumentProposalPreview } from '../components/DocumentProposalPreview';
-import { BrowserLiveView } from './BrowserLiveView';
+import { HandoffPanel } from './HandoffPanel';
 import { MessageBody } from '../components/MessageBody';
 import { useHost } from '../host/context';
 import { browserHandoffProposal, decisionChip, decisionHeading, decisionTone, emptySecureForm, goalProposal, handoffDoneAnswer,
@@ -20,7 +20,6 @@ import { canHandOver, deferDecision, fullTextOpen, ownerOrder, setFullTextOpen, 
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { isMac, modKey } from '../ui/keys';
-import { BrowserPaneContext } from './BrowserPaneContext';
 
 type DocumentProposal = { scopeId?: string; scope_id?: string; title?: string; body?: string; profile?: string; pageId?: string | null; page_id?: string | null };
 
@@ -177,7 +176,6 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
   autoFocus?: boolean;
 }) {
   const { client } = useHost();
-  const browserPane = useContext(BrowserPaneContext);
   const now = useNow();
   const [answer, setAnswer] = useState('');
   const [error, setError] = useState('');
@@ -313,16 +311,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
     {secureForm && <SecureForm decision={decision} request={secureForm} cardBusy={busy} autoFocus={autoFocus}
       onResolved={() => onResolved('answer')} onDecline={() => resolve('deny')}/>}
 
-    {!secureForm && handoff && <div className="decision__handoff">
-      <p className="decision__handoff-note"><Monitor size={14} aria-hidden="true"/>{handoff.live
-        ? 'Ghost의 브라우저입니다. 아래 화면을 직접 조작해 마무리한 뒤 「다 했어요」를 눌러 주세요.'
-        : 'Mac에서 Chrome 창을 열어 두었습니다. 창에서 직접 마무리해 주세요.'}</p>
-      {handoff.url && <p className="decision__handoff-url">{handoff.url}</p>}
-      {handoff.reason.trim() && handoff.reason.trim() !== decision.detail.trim() && <p className="decision__request-reason">{handoff.reason}</p>}
-      {decision.state === 'pending' && handoff.live && (browserPane?.conversationId === decision.conversationId
-        ? <Button type="button" variant="outline" className="h-[34px] justify-self-start rounded-pill px-4" disabled={busy} onClick={browserPane.open}>브라우저 화면 열기</Button>
-        : <BrowserLiveView conversationId={decision.conversationId} compact/>)}
-    </div>}
+    {!secureForm && handoff && <HandoffPanel decision={decision} handoff={handoff} busy={busy}/>}
 
     {review?.mainNote && !isResult && <div className="decision__review"><p><strong>메인 의견</strong> {review.mainNote}</p></div>}
     </div>
