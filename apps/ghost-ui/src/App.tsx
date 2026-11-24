@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BriefcaseBusiness, CircleAlert, Clock3, KeyRound, Mic, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Server, Smartphone, SquareTerminal, Users } from 'lucide-react';
+import { BriefcaseBusiness, ChartColumn, CircleAlert, Clock3, Gauge, History, KeyRound, Layers, ListChecks, Mic, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Smartphone, SquareTerminal, Users, Wifi, Wrench } from 'lucide-react';
 import { DutySwitch } from './components/DutySwitch';
 import { DutySettings } from './features/DutySettings';
 import { Banner, Button, EmptyState, ScrollRails, Skeleton, type CommandItem } from './ui';
@@ -281,8 +281,8 @@ function Shell() {
     { id: 'activities', label: uiTerms.activities, group: '설정', onSelect: go('/settings?tab=activities') },
     { id: 'connections', label: uiTerms.connections, group: '설정', onSelect: go('/settings?tab=connections') },
     { id: 'voice', label: '음성', group: '설정', onSelect: go('/settings?tab=voice') },
-    ...[{ id: 'slots', label: '모델 자리' }, { id: 'limits', label: '한도' }, { id: 'mcp', label: 'MCP 서버' }, { id: 'rules', label: uiTerms.rules }, { id: 'history', label: uiTerms.configHistory }, { id: 'metrics', label: uiTerms.metrics }].map(item => ({ ...item, group: '설정', onSelect: go(`/settings?tab=${item.id}`) })),
-    { id: 'host', label: routeLabels.host, group: '설정', onSelect: go('/settings?tab=host') },
+    ...[{ id: 'rules', label: uiTerms.rules }, { id: 'history', label: uiTerms.configHistory }, { id: 'limits', label: uiTerms.limits }, { id: 'metrics', label: uiTerms.metrics }, { id: 'slots', label: uiTerms.modelCombos }, { id: 'mcp', label: uiTerms.mcp }].map(item => ({ ...item, group: uiTerms.advanced, onSelect: go(`/settings?tab=${item.id}`) })),
+    { id: 'host', label: uiTerms.connectionStatus, group: '설정', onSelect: go('/settings?tab=host') },
     { id: 'update', label: '업데이트', group: '설정', onSelect: go('/settings?tab=update') },
     { id: 'settings', label: uiTerms.settings, group: '설정', onSelect: go('/settings') },
   ] : [];
@@ -300,13 +300,13 @@ function Shell() {
     { id: 'schedules', label: uiTerms.schedules, icon: Clock3, content: <Schedules/> },
     { id: 'activities', label: uiTerms.activities, icon: Repeat2, content: <Activities navigate={navigate}/> },
     { id: 'connections', label: uiTerms.connections, icon: PlugZap, content: <Connections navigate={navigate}/> },
-    { id: 'slots', label: '모델 자리', icon: Server, content: <SlotSettings/> },
-    { id: 'limits', label: '한도', icon: Clock3, content: <LimitSettings/> },
-    { id: 'mcp', label: 'MCP 서버', icon: PlugZap, content: <McpSettings/> },
-    { id: 'rules', label: uiTerms.rules, icon: CircleAlert, content: <PolicySettings/> },
-    { id: 'history', label: uiTerms.configHistory, icon: RefreshCw, content: <ConfigHistory/> },
-    { id: 'metrics', label: uiTerms.metrics, icon: Server, content: <ScopeMetrics/> },
-    { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
+    { id: 'slots', label: uiTerms.modelCombos, icon: Layers, content: <SlotSettings/> },
+    { id: 'limits', label: uiTerms.limits, icon: Gauge, content: <LimitSettings/> },
+    { id: 'mcp', label: uiTerms.mcp, icon: Wrench, content: <McpSettings/> },
+    { id: 'rules', label: uiTerms.rules, icon: ListChecks, content: <PolicySettings/> },
+    { id: 'history', label: uiTerms.configHistory, icon: History, content: <ConfigHistory/> },
+    { id: 'metrics', label: uiTerms.metrics, icon: ChartColumn, content: <ScopeMetrics/> },
+    { id: 'host', label: uiTerms.connectionStatus, icon: Wifi, content: <HostView/> },
     { id: 'coding', label: '코딩', icon: SquareTerminal, content: <><PiConfigSettings/><CodingSettings/></> },
     { id: 'voice', label: '음성', icon: Mic, content: <VoiceSettings/> },
     { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },

@@ -127,7 +127,7 @@ test.describe('Connection and activity edits', () => {
     for (const name of ['파일 읽기', '문서 읽기', '브라우저 열기', '금고 목록']) {
       await expect(tools.getByRole('button', { name, exact: true })).toBeVisible();
     }
-    await expect(dialog.getByText('브라우저 도구는 별도의 브라우저·금고 승인 규칙을 따르며', { exact: false })).toBeVisible();
+    await expect(dialog.getByText('브라우저와 Mac 파일·명령 도구는 각자의 승인 기준을 따릅니다', { exact: false })).toBeVisible();
     await dialog.getByRole('button', { name: '취소', exact: true }).click();
   });
 

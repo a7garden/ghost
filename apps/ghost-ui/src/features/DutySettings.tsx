@@ -36,7 +36,7 @@ export function DutySettings() {
     <SettingsGroup title="지금">
       <SettingsRow label={duty.onDuty ? '근무 중' : '퇴근'}
         description={<>
-          {duty.onDuty ? 'Ghost들이 자율 깨우기 · 예약 · 활동 규칙으로 스스로 일합니다.' : 'Ghost들이 새 일을 스스로 시작하지 않습니다. 진행 중인 일은 마저 끝내고, 그동안 때가 된 예약은 출근하면 한 번씩 돕니다.'}
+          {duty.onDuty ? 'Ghost들이 스스로 판단해서, 예약한 시간에, 자동 활동 조건이 맞으면 일을 시작합니다.' : 'Ghost들이 새 일을 스스로 시작하지 않습니다. 진행 중인 일은 마저 끝내고, 그동안 때가 된 예약은 출근하면 한 번씩 돕니다.'}
           {duty.nextChangeAt !== null && <span className="mt-0.5 block">{clock(duty.nextChangeAt)}에 {duty.onDuty ? '퇴근' : '출근'}합니다{duty.override ? ' (직접 바꾼 상태가 끝나는 때)' : ''}.</span>}
         </>}>
         <Button variant="outline" type="button" disabled={pending} onClick={() => void run(() => client.send({ type: 'duty.switch', onDuty: !duty.onDuty }), duty.onDuty ? '퇴근했습니다.' : '출근했습니다.')}>

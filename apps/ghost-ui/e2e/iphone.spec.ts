@@ -174,7 +174,7 @@ for (const theme of ['light', 'dark'] as const) {
       }
       if (screen.name === 'settings') {
         await page.setViewportSize({ width: 320, height: 640 });
-        await page.getByRole('searchbox', { name: '설정 찾기' }).fill('승인');
+        await page.getByRole('searchbox', { name: '설정 찾기' }).fill('승인과');
         await expect(page.locator('.settings-index-row')).toHaveCount(1);
         await page.getByRole('button', { name: '승인과 언어' }).tap();
         await expect(page.getByRole('navigation', { name: '위치' })).toContainText('승인과 언어');

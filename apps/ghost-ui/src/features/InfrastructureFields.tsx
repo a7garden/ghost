@@ -2,19 +2,19 @@ import { useId, type ReactNode } from 'react';
 import { Button, FormField, Input, Textarea } from '../ui';
 import './infrastructure.css';
 
-export function TextField({ label, value, onChange, multiline = false, required = false, ...props }: {
-  label: string; value: string; onChange(value: string): void; multiline?: boolean; required?: boolean;
+export function TextField({ label, value, onChange, multiline = false, required = false, description, ...props }: {
+  label: string; value: string; onChange(value: string): void; multiline?: boolean; required?: boolean; description?: string;
   type?: string; min?: number; max?: number; step?: string; maxLength?: number; pattern?: string; placeholder?: string;
 }) {
-  return <FormField label={label} required={required}>{control => multiline
+  return <FormField label={label} required={required} description={description}>{control => multiline
     ? <Textarea {...control} value={value} onChange={event => onChange(event.target.value)} rows={3} maxLength={props.maxLength} placeholder={props.placeholder}/>
     : <Input {...control} {...props} value={value} onChange={event => onChange(event.target.value)}/>}</FormField>;
 }
 
-export function Choice({ label, value, onChange, options, required = false }: {
-  label: string; value: string; onChange(value: string): void; options: { value: string; label: string }[]; required?: boolean;
+export function Choice({ label, value, onChange, options, required = false, description }: {
+  label: string; value: string; onChange(value: string): void; options: { value: string; label: string }[]; required?: boolean; description?: string;
 }) {
-  return <FormField label={label} required={required}>{control => <select {...control} className="infra-select" value={value} onChange={event => onChange(event.target.value)}>
+  return <FormField label={label} required={required} description={description}>{control => <select {...control} className="infra-select" value={value} onChange={event => onChange(event.target.value)}>
     {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
   </select>}</FormField>;
 }

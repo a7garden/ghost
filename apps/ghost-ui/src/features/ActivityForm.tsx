@@ -137,9 +137,9 @@ export function ActivityFormDialog({ state, connections, activity, initialScopeI
               <SwitchLine label="드래프트 PR 포함" checked={draft.includeDrafts} disabled={saving} onChange={includeDrafts => set({ includeDrafts })}/>
             </>
             : draft.sourceKind === 'poll' ? <>
-              <TextField label="폴링 경로" required value={draft.pollPath} onChange={pollPath => set({ pollPath })} placeholder="/items"/>
-              <TextField label="항목 배열 JSON 포인터" value={draft.itemsPointer} onChange={itemsPointer => set({ itemsPointer })} placeholder="/items"/>
-              <TextField label="항목 ID JSON 포인터" value={draft.idPointer} onChange={idPointer => set({ idPointer })} placeholder="/id"/>
+              <TextField label="확인할 주소" required value={draft.pollPath} onChange={pollPath => set({ pollPath })} placeholder="/items" description="연결 계정 주소 뒤에 붙는 경로입니다. /로 시작합니다."/>
+              <TextField label="목록 위치" value={draft.itemsPointer} onChange={itemsPointer => set({ itemsPointer })} placeholder="/items" description="응답 안에서 항목 목록이 있는 위치입니다. 응답 전체가 목록이면 비워 둡니다."/>
+              <TextField label="항목 구분 값 위치" value={draft.idPointer} onChange={idPointer => set({ idPointer })} placeholder="/id" description="항목마다 다른 값(ID)이 있는 위치입니다. 이 값으로 새 항목을 알아봅니다."/>
             </> : <>
               <div className="grid gap-4 sm:grid-cols-2">
                 <FormField label="보낸 사람" description="비워 두면 모든 보낸 사람.">
@@ -176,7 +176,7 @@ export function ActivityFormDialog({ state, connections, activity, initialScopeI
         ? <>
           <FolderField label="작업 폴더" value={draft.hostCwd} disabled={saving} onChange={hostCwd => set({ hostCwd })}/>
           <p className="infra-record__meta">이 폴더 안에서 파일과 명령을 곧바로 실행합니다.</p>
-          <p className="activity-warn">이 Mac 실행은 샌드박스 없이 셸을 씁니다. PC 전체와 네트워크에 영향을 줄 수 있고 아래 PR 댓글·메일 회신 승인 설정으로 제한되지 않습니다.</p>
+          <p className="activity-warn">이 Mac에서 직접 실행하면 보호 장치 없이 파일과 명령을 씁니다. Mac 전체와 인터넷에 영향을 줄 수 있고, 아래 「PR 댓글·메일 회신」 설정으로 막을 수 없습니다.</p>
         </>
         : <p className="activity-warn activity-warn--calm">{draft.executionKind === 'workspace' ? '분리된 작업 공간에서 실행됩니다.' : '컨테이너에서 실행됩니다.'}</p>}
 
@@ -210,7 +210,7 @@ export function ActivityFormDialog({ state, connections, activity, initialScopeI
           options={(Object.keys(externalActionsLabel) as (keyof typeof externalActionsLabel)[])
             .map(value => ({ value, label: externalActionsLabel[value], disabled: saving }))}/>}
       </FormField>
-      <p className="activity-warn activity-warn--calm">이 활동에서 받은 메일의 회신·PR 댓글만 여기서 제어합니다. 브라우저 도구는 별도의 브라우저·금고 승인 규칙을 따르며, 이 설정으로 제한되지 않습니다. Mac 도구도 별도 권한과 자체 승인 규칙을 따릅니다. 샌드박스·PC 파일과 셸 도구에도 적용되지 않습니다.</p>
+      <p className="activity-warn activity-warn--calm">이 설정은 이 활동이 받은 메일의 회신과 PR 댓글에만 적용됩니다. 브라우저와 Mac 파일·명령 도구는 각자의 승인 기준을 따릅니다.</p>
       <FormField label="결과 전달">
         {() => <SegmentedControl aria-label="결과 전달" value={draft.delivery}
           onValueChange={value => set({ delivery: value as typeof draft.delivery })}
