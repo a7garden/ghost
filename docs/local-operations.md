@@ -125,6 +125,15 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작�
   - 설치본 확인(Owner API): `GET /api/shade`가 `locked`(이 Mac의 Shade는 초기화됐고 잠겨 있다), `GET /api/connect/mail?email=…@kakao.com`이 `imap.kakao.com:993`(추측 서버), `GET /api/connect/local`이 이 Mac의 `gh` 계정을 돌려줬다. 서비스된 UI 번들에 새 문구(「이메일 주소로 연결」·「이 Mac의 계정 사용」·「새 로그인을 Shade에도 저장」)가 있다. 운영 연결은 만들지 않았다(소유자가 UI에서 누르는 동작이다).
   - 격리 Host·실제 Chrome 확인: 임시 상태 루트의 Host에서 `POST /api/connect/local`이 GitHub 연결을 만들고 `connection.test`가 통과했고 토큰은 `secrets/connections`에만 남았다. 실제 Chrome(공개 시험용 로그인 페이지)에서 칸을 누른 뒤 `fill`이 아이디·비밀번호를 넣고, 소유자 입력으로 로그인하자 캡처가 저장됨을 알렸다. 칸이 없거나 아이디 칸에 비밀번호, 비밀번호 칸에 아이디를 넣으려는 요청은 거절됐다. Shade가 실제로 잠금 해제·에이전트 접근 켜짐인 상태의 조회·가져오기·쓰기는 시험하지 못했다(Shade CLI는 가짜 실행기로만 확인했다).
   - 한계: 설치된 Mac 앱 창과 iPhone에서 새 화면을 조작하지 못했다(Playwright의 격리 Host 화면과 서비스된 번들 확인까지). 같은 실행에서 이 변경과 무관한 기존 시각 기준 이미지 불일치(홈·확인할 일·코딩 등)가 남아 있어 고치지 않았다.
+- herdr 연동 철거(2.33.0, 2026-11-24): 소유자가 [동등성 체크리스트](coding-parity.md)의 `차이` 4건을 승인하고(터미널 비영속, 선택지 카드 답하기·에이전트 기록 대화 화면·상태별 전체 받은함 없음) 철거를 지시했다. 「소유자 확인」 열은 실물 확인 없이 건너뛰었다.
+  - 제거: `Herdr` 클래스와 herdr CLI 호출 전부, `/api/herdr/*`, `GET /api/coding`(herdr 설정)·`/api/coding/integrations`, 터미널 제어 임대, 감시기, herdr 채팅·명령·Claude 모델 조회, 코딩 탭의 herdr 화면(`?view=herdr`)과 설정 화면의 herdr 연결 패널, herdr pane에 대한 다음 메시지 제안. `code_run`·`code_agents`는 내장 세션만 쓴다(`agent`는 생략 또는 `ghost`, `omp`·`claude`·`codex`는 거절하고 작업대 터미널을 안내, `pane` 인수 없음).
+  - 유지·이름 변경: 터미널 입력 감지(`terminal/ask.ts`), omp 모델·대화 조회(`integrations/omp.ts`), 키 막대·xterm·diff 표시(`TerminalControls`·`terminalXterm`·`terminalKeys`·`DiffText`), omp 시작 옵션(`OmpAgentOptions`), 프로그램 탐색(`integrations/program.ts`, 다른 작업의 Shade·로컬 계정이 쓴다). 터미널 글자 크기 조절이 작업대 터미널에 들어왔다.
+  - 호환: SQL 이전 없음. `coding_runs`의 `pane`·`terminal_id` 열과 옛 `coding` 설정값은 읽히되 쓰지 않고, 상태 루트의 `herdr-leases.json`·`herdr-owned.json`은 읽지 않은 채 남겨 두었다. 진행 중이던 옛 herdr 실행은 예약만 풀리고 입력은 재전송하지 않는다.
+  - 릴리스: [v2.33.0](https://github.com/a7garden/ghost/releases/tag/v2.33.0)(커밋 `1c19181`). 격리 worktree(`wt/ghost-herdr-removal`)에서 만들었다. 원격이 두 번 앞서 가서 `origin/main`과 `github/main`을 병합했다(2.31.1 Tailscale `/go`, 2.32.0 로그인 핸드오프). 병합에서 다른 작업의 새 모듈이 `herdr.ts`의 `findProgram`을 가져다 쓰고 있어 `program.ts`로 옮겼다. 타입 검사만으로는 UI의 CSS 병합 오류를 못 잡았고(`CodingSession.css` 블록 깨짐) 빌드에서 잡았다.
+  - 설치: Owner API `POST /api/update/install` `{version:"2.33.0"}`, 약 90초 뒤 `lastResult`: `installed` `2.32.0-67ebcce` → `2.33.0-1c19181`, health `2.33.0`. 대화 674·Ghost 31·맡긴 일 366·코딩 세션 5·`coding_runs` 4 그대로.
+  - 설치본 확인(Owner API): `/api/herdr`·`/api/coding`은 404, `/api/coding/sessions`·`/api/coding/models`·`/api/terminals/agents`·`/api/workbench/spaces`는 200. 옛 herdr 실행(`omp`, pane `w83:p1`, `settled`)이 맡긴 일 상세 API에 그대로 읽힌다. `/#/coding?view=herdr`는 작업대로 열린다.
+  - 검증: Host·UI 단위 테스트와 릴리스 검사 통과, 타입 검사 통과, UI 빌드 통과. e2e(작업대·코딩 세션·Pi 설정·오케스트레이션·딥링크) 통과. 작업대 e2e는 2.29.3 폴더 선택기 이후 이미 깨져 있었고(텍스트 입력 → 선택기), 포커스 변경 중 단축키가 무시되는 경합이 있어 반복 입력으로 고쳤다. 코딩 설정·홈 dock의 기준 이미지를 새로 만들었다. `iphone.spec`의 대화 작성기·설정 이미지 불일치(수백~2천 픽셀)는 이 변경과 무관해 보여 손대지 않았다.
+  - 한계: 설치된 Mac 앱 창과 iPhone에서 철거 뒤 코딩 탭을 열지 못했다(서비스된 UI의 헤드리스 브라우저 확인까지). 로컬 `main` 체크아웃은 `origin/main`과 갈라져 있어 갱신하지 않았다(다른 작업자의 미커밋 변경이 같은 파일에 겹친다).
 
 ### Mac 셸·도구 자동 승인 모드 (운영 정책 변경) — 2026-11-20
 
