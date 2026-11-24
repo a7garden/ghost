@@ -119,6 +119,12 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작�
   - 설치: Owner API `POST /api/update/install`. 설치 뒤 `current`는 `releases/2.31.0-49d975f`, health `2.31.0`, 대화 674·Ghost 31·맡긴 일 366·코딩 세션 5 그대로. `lastResult`는 확인 시점에 이전 설치(`2.29.3` → `2.30.1`)를 가리키고 있었다. 새 Host가 쓴 값인지 오래된 값인지 확인하지 못했다.
   - 설치본 확인: 「새 스페이스」에 「worktree로 시작」 확인란이 있고, `GET /api/terminals/agents`가 `omp, claude, codex, pi`를 돌려줬다. 임시 저장소(`/tmp`)로 `POST /api/workbench/spaces`(worktree)가 Host 상태 루트 아래 worktree·브랜치를 만들고, `GET …/changes`가 그 worktree의 수정 파일을(`a.txt` +1) 돌려주고, 스페이스를 삭제해도 worktree와 브랜치가 남았다. 확인 뒤 임시 worktree·브랜치·저장소를 지웠다.
   - 한계: 새 패널의 「에이전트」 양식, 맡긴 일 상세의 「코딩 세션 열기」, 「git 변경」 서랍은 설치본 화면에서 조작하지 못했다(Host 테스트·UI 테스트·타입 검사로만 확인). 설치된 Mac 앱 창과 iPhone도 확인하지 않았다. 터미널 에이전트 때문에 업데이트가 기다리는 동작은 Host 테스트로만 확인했다.
+- 로그인 핸드오프·연결 계정·Shade 연동(2.32.0, 2026-11-24): 설계는 [agent-capabilities](agent-capabilities.md)의 Handoff·Vault 행과 Owner API(브라우저·메일) 표.
+  - 릴리스: [v2.32.0](https://github.com/a7garden/ghost/releases/tag/v2.32.0)(커밋 `67ebcce`). 격리 worktree(`wt/ghost-login-handoff`)에서 만들고, 새 worktree라 `dist/vendor`(agent-browser)·`src-tauri/target`은 정본 체크아웃에서 APFS 복제로 가져왔다. 릴리스 직전 `github/main`이 2.31.2(통화)까지 앞서 가 있어 두 번 병합했고, 그 병합본의 Host 테스트 1648 통과·UI 단위 477 통과·타입 검사 통과를 확인한 뒤 일반 푸시했다. 로컬 `main`은 갈라진 채라 건드리지 않았다(정본 체크아웃에 다른 작업의 미커밋 변경이 겹친다).
+  - 설치: Owner API `POST /api/update/install` `{version:"2.32.0"}`. 약 30초 뒤 health `2.32.0`, `current`는 `releases/2.32.0-67ebcce`, Ghost 31·대화 674·맡긴 일 200·기기 1·프로젝트 13·연결 2 그대로. 설치 전 활성 대화가 없어 대기 없이 바뀌었다. `lastResult`는 확인 시점에 이전 설치(`2.31.0` → `2.31.2`)를 가리켰다.
+  - 설치본 확인(Owner API): `GET /api/shade`가 `locked`(이 Mac의 Shade는 초기화됐고 잠겨 있다), `GET /api/connect/mail?email=…@kakao.com`이 `imap.kakao.com:993`(추측 서버), `GET /api/connect/local`이 이 Mac의 `gh` 계정을 돌려줬다. 서비스된 UI 번들에 새 문구(「이메일 주소로 연결」·「이 Mac의 계정 사용」·「새 로그인을 Shade에도 저장」)가 있다. 운영 연결은 만들지 않았다(소유자가 UI에서 누르는 동작이다).
+  - 격리 Host·실제 Chrome 확인: 임시 상태 루트의 Host에서 `POST /api/connect/local`이 GitHub 연결을 만들고 `connection.test`가 통과했고 토큰은 `secrets/connections`에만 남았다. 실제 Chrome(공개 시험용 로그인 페이지)에서 칸을 누른 뒤 `fill`이 아이디·비밀번호를 넣고, 소유자 입력으로 로그인하자 캡처가 저장됨을 알렸다. 칸이 없거나 아이디 칸에 비밀번호, 비밀번호 칸에 아이디를 넣으려는 요청은 거절됐다. Shade가 실제로 잠금 해제·에이전트 접근 켜짐인 상태의 조회·가져오기·쓰기는 시험하지 못했다(Shade CLI는 가짜 실행기로만 확인했다).
+  - 한계: 설치된 Mac 앱 창과 iPhone에서 새 화면을 조작하지 못했다(Playwright의 격리 Host 화면과 서비스된 번들 확인까지). 같은 실행에서 이 변경과 무관한 기존 시각 기준 이미지 불일치(홈·확인할 일·코딩 등)가 남아 있어 고치지 않았다.
 
 ### Mac 셸·도구 자동 승인 모드 (운영 정책 변경) — 2026-11-20
 
