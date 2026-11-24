@@ -1,12 +1,17 @@
 // App-owned UI. Retained-source notices: ./LICENSE.
 import type { ReactNode, KeyboardEvent } from "react"
-import { useEffect, useId, useRef, useState } from "react"
+import { Fragment, useEffect, useId, useRef, useState } from "react"
+import { ChevronDown } from "lucide-react"
 import "./settings.css"
 
 export interface SettingsLayoutSection {
   id: string
   label: string
   icon?: ReactNode
+  /** Heading shown above the first section of each run of equal groups. */
+  group?: string
+  /** Rare, technical sections: hidden behind one toggle until opened or selected. */
+  folded?: boolean
 }
 
 export interface SettingsLayoutProps {
@@ -22,6 +27,8 @@ export interface SettingsLayoutProps {
   }
   className?: string
   compactDetail?: boolean
+  /** Label of the toggle that opens the `folded` sections. */
+  foldedLabel?: string
 }
 
 export interface SettingsGroupProps {
@@ -51,12 +58,14 @@ export function SettingsLayout({
   strings,
   className,
   compactDetail = false,
+  foldedLabel,
 }: SettingsLayoutProps) {
   const instanceId = useId()
   const panelId = `${instanceId}-panel`
   const settingsRef = useRef<HTMLDivElement>(null)
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const [horizontalNavigation, setHorizontalNavigation] = useState(false)
+  const [foldedOpen, setFoldedOpen] = useState(false)
 
   useEffect(() => {
     const settings = settingsRef.current
@@ -76,18 +85,20 @@ export function SettingsLayout({
 
   const tabId = (sectionId: string) => `${instanceId}-tab-${sectionId}`
   const selectedSection = sections.find((section) => section.id === activeSection)
+  const foldedVisible = foldedOpen || Boolean(selectedSection?.folded)
+  const shown = sections.filter((section) => !section.folded || foldedVisible)
 
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, sectionId: string) => {
     const previousKey = horizontalNavigation ? "ArrowLeft" : "ArrowUp"
     const nextKey = horizontalNavigation ? "ArrowRight" : "ArrowDown"
-    const currentIndex = sections.findIndex((section) => section.id === sectionId)
+    const currentIndex = shown.findIndex((section) => section.id === sectionId)
     let nextSection: SettingsLayoutSection | undefined
 
-    if (event.key === "Home") nextSection = sections[0]
-    else if (event.key === "End") nextSection = sections[sections.length - 1]
+    if (event.key === "Home") nextSection = shown[0]
+    else if (event.key === "End") nextSection = shown[shown.length - 1]
     else if (event.key === previousKey || event.key === nextKey) {
       const offset = event.key === nextKey ? 1 : -1
-      nextSection = sections[(currentIndex + offset + sections.length) % sections.length]
+      nextSection = shown[(currentIndex + offset + shown.length) % shown.length]
     } else return
 
     if (!nextSection) return
@@ -108,30 +119,42 @@ export function SettingsLayout({
             aria-label={strings.navigationLabel}
             aria-orientation={horizontalNavigation ? "horizontal" : "vertical"}
           >
-            {sections.map((section) => {
+            {shown.map((section, index) => {
               const isSelected = activeSection === section.id
+              const previous = shown[index - 1]
+              const startsFold = Boolean(section.folded) && !previous?.folded
+              const heading = !section.folded && section.group && section.group !== previous?.group ? section.group : null
               return (
-                <button
-                  key={section.id}
-                  ref={(node) => {
-                    if (node) tabRefs.current.set(section.id, node)
-                    else tabRefs.current.delete(section.id)
-                  }}
-                  id={tabId(section.id)}
-                  className="ghost-settings__section ghost-navigation-item"
-                  type="button"
-                  role="tab"
-                  aria-selected={isSelected}
-                  aria-controls={panelId}
-                  tabIndex={isSelected || (!selectedSection && section === sections[0]) ? 0 : -1}
-                  onClick={() => onSectionChange(section.id)}
-                  onKeyDown={(event) => onTabKeyDown(event, section.id)}
-                >
-                  {section.icon && <span className="ghost-settings__section-icon" aria-hidden="true">{section.icon}</span>}
-                  <span>{section.label}</span>
-                </button>
+                <Fragment key={section.id}>
+                  {heading && <div className="ghost-settings__group-label" role="presentation">{heading}</div>}
+                  {startsFold && <div className="ghost-settings__group-label" role="presentation">{foldedLabel}</div>}
+                  <button
+                    ref={(node) => {
+                      if (node) tabRefs.current.set(section.id, node)
+                      else tabRefs.current.delete(section.id)
+                    }}
+                    id={tabId(section.id)}
+                    className="ghost-settings__section ghost-navigation-item"
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    aria-controls={panelId}
+                    tabIndex={isSelected || (!selectedSection && section === shown[0]) ? 0 : -1}
+                    onClick={() => onSectionChange(section.id)}
+                    onKeyDown={(event) => onTabKeyDown(event, section.id)}
+                  >
+                    {section.icon && <span className="ghost-settings__section-icon" aria-hidden="true">{section.icon}</span>}
+                    <span>{section.label}</span>
+                  </button>
+                </Fragment>
               )
             })}
+            {foldedLabel && !foldedVisible && sections.some((section) => section.folded) && (
+              <button type="button" className="ghost-settings__fold ghost-navigation-item" aria-expanded="false" onClick={() => setFoldedOpen(true)}>
+                <span className="ghost-settings__section-icon" aria-hidden="true"><ChevronDown /></span>
+                <span>{foldedLabel}</span>
+              </button>
+            )}
           </div>
         </nav>
         <section

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { CodingSession, PiPackage, PiSettings, PiSettingsOverrides } from '@ghost/contract';
 import type { PiGlobalConfig, PiSessionView } from '../host/client';
 import { useHost } from '../host/context';
-import { Button, InlineError, SettingsGroup, SettingsRow } from '../ui';
+import { Button, InlineError, SettingsGroup, SettingsRow, SkeletonRows } from '../ui';
 import { useEmbeddedModels } from './CodingSessionLive';
 import { codingBusy, codingError } from './CodingSessionModel';
 import { PI_BASE_TOOLS, PiCompactionFields, PiDeliveryField, PiDisclosure, PiImageField, PiModelFields, PiRetryFields, PiToolFields } from './PiConfigFields';
@@ -31,7 +31,7 @@ export function PiConfigSettings() {
   }, [client, loadAttempt]);
   if (!config || !draft) return <SettingsGroup title="내장 코딩">
     {error ? <InlineError onRetry={() => { setError(''); retry(value => value + 1); }} retryLabel="다시 불러오기">{error}</InlineError>
-      : <p className="pi-meta" role="status">코딩 설정을 불러오는 중…</p>}
+      : <SkeletonRows label="코딩 설정을 불러오는 중…" rows={4} className="px-4 py-3"/>}
   </SettingsGroup>;
 
   const tools = [...new Set([...PI_BASE_TOOLS, ...packages.flatMap(item => item.tools)])];
@@ -119,7 +119,7 @@ export function PiSessionSettings({ session, disabled }: { session: CodingSessio
   }
 
   if (!config) return error ? <InlineError onRetry={() => { setError(''); retry(value => value + 1); }} retryLabel="다시 불러오기">{error}</InlineError>
-    : <p className="pi-meta" role="status">Pi 설정을 불러오는 중…</p>;
+    : <SkeletonRows label="Pi 설정을 불러오는 중…" rows={4}/>;
   const { defaults, context, packages, packageOverrides } = config;
   const dirty = JSON.stringify(config.overrides) !== JSON.stringify(draft);
   return <section className="pi-session pi-settings" aria-label="Pi 세션 설정">

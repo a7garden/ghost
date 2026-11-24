@@ -1,5 +1,5 @@
 import { Search, X } from 'lucide-react';
-import { Button, InlineError, Row } from '../../ui';
+import { Button, InlineError, Row, SkeletonRows } from '../../ui';
 import { isEditableProfile } from '../../features/scopePages';
 import type { PageSummary } from '@ghost/contract';
 
@@ -34,9 +34,9 @@ export function DocumentIndex({ pages, total, search, onSearch, loading, error, 
         <Button variant="outline" size="sm" type="button" onClick={onCreate}>새 문서</Button>
       </div>
     </div>
-    {loading && pages.length > 0 && <p className="doc__status" role="status">문서를 불러오는 중…</p>}
+    {loading && pages.length === 0 && !error && <SkeletonRows label="문서를 불러오는 중…" rows={3} className="p-3"/>}
     {error && <InlineError>{error}</InlineError>}
-    {!error && pages.length > 0 && <ol className="doc__index">
+    {!error && pages.length > 0 && <ol className="doc__index" aria-busy={loading || undefined}>
       {pages.map(item => {
         const legacy = !isEditableProfile(item.profile);
         return <li key={item.pageId}>

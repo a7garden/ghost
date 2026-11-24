@@ -15,7 +15,8 @@ export const ownerLanguages: readonly { value: string; label: string }[] = [
 
 /** Waits the owner can pick before a reversible decision goes ahead; 0 turns it off. */
 export const autoWaits: readonly { value: string; label: string }[] = [
-  { value: '0', label: '자동 진행 안 함' }, { value: '10', label: '10분' }, { value: '30', label: '30분' },
+  { value: '0', label: '자동 진행 안 함' }, { value: '1', label: '1분' }, { value: '3', label: '3분' }, { value: '5', label: '5분' },
+  { value: '10', label: '10분' }, { value: '30', label: '30분' },
   { value: '60', label: '1시간' }, { value: '120', label: '2시간' }, { value: '480', label: '8시간' },
 ];
 

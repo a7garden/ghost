@@ -19,8 +19,3 @@ export const pathCrumb = (path: string): PathCrumb => {
     ? { leading: null, trailing: segments }
     : { leading: segments[0]!, trailing: segments.slice(-2) };
 };
-
-/** 문서에는 계약상 시각이 없다; 이 세션에서 저장한 순간만 기록해 마지막 편집으로 보여 준다. */
-const sessionEdits = new Map<string, number>();
-export const noteScopeEdit = (scopeId: string): void => { sessionEdits.set(scopeId, Date.now()); };
-export const scopeLastEdit = (scopeId: string): number | null => sessionEdits.get(scopeId) ?? null;

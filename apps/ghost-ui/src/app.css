@@ -480,10 +480,6 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 .chat-empty__starters button { min-height: 36px; padding: 6px 12px; border: 0; border-radius: var(--radius-control); color: var(--ghost-ink2); background: var(--ghost-hover); font: 500 var(--text-ui)/1.4 var(--font-sans); text-align: start; cursor: pointer; }
 .chat-empty__starters button:hover { color: var(--ghost-ink); background: var(--ghost-hover2); }
 .chat-empty__starters button:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
-.chat-loading { display: flex; justify-content: center; gap: 6px; padding: 48px 0; }
-.chat-loading > span:not(.sr-only) { width: 6px; height: 6px; border-radius: 50%; background: var(--ghost-ink3); animation: island-breathe 1.2s ease-in-out infinite; }
-.chat-loading > span:nth-child(2) { animation-delay: .15s; }
-.chat-loading > span:nth-child(3) { animation-delay: .3s; }
 .chat-thinking { display: inline-flex; align-items: center; gap: 10px; color: var(--ghost-ink3); font-size: var(--text-ui); font-weight: 500; animation: fade-in var(--duration-slow) ease both; }
 .chat-thinking > span:not(.presence) { background: linear-gradient(90deg, var(--ghost-ink3) 0%, var(--ghost-ink) 50%, var(--ghost-ink3) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer-text 1.8s linear infinite; }
 .transcript-note { align-self: center; margin: 0; padding: 4px 12px; border-radius: var(--radius-pill); color: var(--ghost-ink3); background: var(--ghost-hover); font-size: var(--text-caption); white-space: pre-wrap; overflow-wrap: anywhere; text-align: center; }

@@ -2,7 +2,7 @@ import { useEffect, useId, useState, type ReactNode } from 'react';
 import { ChevronsUpDown } from 'lucide-react';
 import type { OmpInfo } from '@ghost/contract';
 import { useHost } from '../host/context';
-import { Button, FormField, InlineError, Input, Popover, PopoverContent, PopoverTrigger, SelectField } from '../ui';
+import { Button, FormField, InlineError, Input, Popover, PopoverContent, PopoverTrigger, SelectField, SkeletonText } from '../ui';
 import { approvals, buildOmpArgs, conversationForDirectory, readOmpOptions, rememberOmpOptions } from './ompAgentArgs';
 
 export function useOmpLaunch(active: boolean, directory: string): OmpLaunch {
@@ -75,7 +75,7 @@ export function useOmpLaunch(active: boolean, directory: string): OmpLaunch {
         }}/>}</FormField>
       {yolo && (confirmed ? <span role="status">이번 실행에 한해 승인 없이 실행</span> : <Button type="button" variant="outline"
         className="agent-yolo-confirm" autoFocus={confirmationNeeded} onClick={() => { setConfirmed(true); setConfirmationNeeded(false); }}>이번 실행은 승인 없이 진행</Button>)}
-      {isLoading && <p role="status" className="agent-launch-hint">omp 옵션을 불러오는 중…</p>}
+      {isLoading && <SkeletonText label="omp 옵션을 불러오는 중…" lines={2}/>}
       {current?.error && <InlineError onRetry={() => { setLookup(undefined); setRevision(value => value + 1); }} retryLabel="다시 불러오기">{current.error}</InlineError>}
       {unavailable && <InlineError>이전 대화나 모델을 사용할 수 없습니다. 다시 선택하세요.</InlineError>}
   </>;

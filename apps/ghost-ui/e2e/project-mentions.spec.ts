@@ -11,18 +11,16 @@ for (const viewport of [
     test.use({ viewport: { width: viewport.width, height: viewport.height }, isMobile: viewport.isMobile, hasTouch: viewport.hasTouch });
     const prepare = viewport.isMobile ? mockIPhone : undefined;
 
-    test('project page opens a scoped conversation and hand-off', async ({ page }, info) => {
-      const state = await openScreen(page, { name: 'projects', route: state => `/scopes/${state.scopeId}`, waits: () => ['비행 기록 노트', '회의 정리'], prepare }, 'light');
+    test('project page opens on its conversation, switches tabs and hands off work', async ({ page }, info) => {
+      const state = await openScreen(page, { name: 'projects', route: state => `/scopes/${state.scopeId}`, waits: () => ['회의 메모 요약'], prepare }, 'light');
       await page.screenshot({ path: info.outputPath(`project-page-${viewport.name}.png`), animations: 'disabled' });
-      if (viewport.isMobile) {
-        const manage = page.getByRole('button', { name: '프로젝트 관리', exact: true });
-        const edit = page.getByRole('button', { name: '프로젝트 편집', exact: true });
-        await expect(edit).toBeHidden();
-        await manage.tap();
-        await expect(edit).toBeVisible();
-        await manage.tap();
-        await page.getByRole('combobox', { name: '프로젝트 내용' }).selectOption('conversation');
-      } else await page.getByRole('navigation', { name: '프로젝트 내용' }).getByRole('button', { name: '대화', exact: true }).click();
+      const tabs = page.getByRole('navigation', { name: '프로젝트 내용' });
+      await expect(tabs.getByRole('button', { name: '대화', exact: true })).toHaveAttribute('aria-current', 'page');
+      await expect(tabs.getByRole('button')).toHaveCount(5);
+      await tabs.getByRole('button', { name: '문서', exact: true }).click();
+      await expect(page).toHaveURL(`${state.baseUrl}/#/scopes/${state.scopeId}?view=documents`);
+      await expect(page.getByText('비행 기록 노트', { exact: true })).toBeVisible();
+      await tabs.getByRole('button', { name: '대화', exact: true }).click();
       await expect(page).toHaveURL(`${state.baseUrl}/#/scopes/${state.scopeId}?view=conversation`);
       const chat = page.getByRole('region', { name: '도우미와 대화', exact: true });
       await expect(chat.getByLabel('도우미에게 메시지', { exact: true })).toBeVisible();

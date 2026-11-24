@@ -3,7 +3,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { FileCode2, FileImage, Maximize2, X } from 'lucide-react';
 import { staticHtmlPreview } from '../components/interactive/StaticHtmlBlock';
 import { useHost } from '../host/context';
-import { Dialog, DialogTitle } from '../ui';
+import { Dialog, DialogTitle, SkeletonText } from '../ui';
 import { SheetHandle, useCompact } from '../ui/adaptive';
 import '../components/ArtifactPreview.css';
 
@@ -61,9 +61,9 @@ export function CodingSessionPreview({ id, path, label, kind, thumbnail = false 
   }, [client, id, path, kind]);
 
   return <div className="embedded-preview" data-thumbnail={thumbnail || undefined}>
-    {!url || error ? <span className="embedded-preview__notice" role={error ? 'alert' : 'status'}>
-      <Icon size={16} aria-hidden="true"/>{error ? '미리보기를 불러오지 못했습니다.' : '미리보기 불러오는 중…'}
-    </span> : <>
+    {error ? <span className="embedded-preview__notice" role="alert">
+      <Icon size={16} aria-hidden="true"/>미리보기를 불러오지 못했습니다.
+    </span> : !url ? <SkeletonText label="미리보기 불러오는 중…" lines={2} className="p-2"/> : <>
       {kind === 'html' ? <HtmlThumbnail url={url} label={label}/>
         : <img src={url} alt={label} onError={() => setError(true)}/>}
       <button type="button" ref={trigger} onClick={() => setOpen(true)} aria-label={`${label} 크게 보기`} title={`${label} 크게 보기`}>

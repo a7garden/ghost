@@ -2,7 +2,7 @@ import { useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CompactTitleSlot } from '../components/AppFrame';
 import { ArrowRight, CircleAlert, GitBranch, Monitor, Phone, X } from 'lucide-react';
-import { Button, Conversation, Popover, PopoverContent, PopoverTrigger, Row } from '../ui'
+import { Button, Conversation, Popover, PopoverContent, PopoverTrigger, Row, SkeletonChat } from '../ui'
 import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
@@ -75,7 +75,7 @@ function useBrowserSession(conversationId: string | null, enabled: boolean): Bro
  * the work it takes on branches off as threads (맡긴 일), shown where they started and
  * gathered behind the thread button. Older direct conversations stay readable there.
  */
-export function GhostChat({ ghost, state, conversationId, threadId, navigate, initialScopeIds = [] }: {
+export function GhostChat({ ghost, state, conversationId, threadId, navigate, initialScopeIds = [], toolsHost }: {
   ghost: Ghost;
   state: State;
   /** The conversation on screen; null when this Ghost has none yet. */
@@ -84,12 +84,15 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   threadId: string | null;
   navigate(path: string): void;
   initialScopeIds?: string[];
+  /** Where the tools render when the host screen carries them in its own bar; `null` until that bar mounts. */
+  toolsHost?: HTMLElement | null;
 }) {
   const { client } = useHost();
   const calls = useCallActions();
   const touch = useTouch();
   const compact = useCompact();
   const titleSlot = useContext(CompactTitleSlot);
+  const toolsSlot = toolsHost !== undefined ? toolsHost : compact ? titleSlot : null;
   const now = useNow();
   const conversations = state.conversations
     .filter(conversation => conversation.ghostId === ghost.id && conversation.kind === 'direct')
@@ -184,10 +187,10 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
       </button>}
   </div>;
   return <OpenWorkProvider value={openThread}><div className="chat-layout" data-thread={threadId ? '' : undefined}>
-    {compact && titleSlot && !threadId && createPortal(tools, titleSlot)}
+    {toolsSlot && !threadId && createPortal(tools, toolsSlot)}
     <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
       scrollKey={`${page.messages.length}:${outbox.rows.length}:${live?.running ? 1 : 0}:${live?.partial ? 1 : 0}`} followKey={followKey}
-      header={compact && titleSlot ? null : <div className="chat-corner">{tools}</div>}
+      header={toolsSlot ? null : <div className="chat-corner">{tools}</div>}
       composer={<>
         <BrowserPaneContext.Provider value={conversationId ? { conversationId, open: () => setBrowserOpen(true) } : null}>
           <ChatDecisions state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread}/>
@@ -205,7 +208,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         {ghost.persona.trim() && <div className="chat-empty__starters" role="group" aria-label="대화 시작 제안">{conversationStarters(ghost.persona).map(({ label, prompt }) =>
           <button type="button" key={label} title={prompt} onClick={() => { setDraft(prompt); inputRef.current?.focus(); }}>{label}</button>)}</div>}
       </div>}
-      {loading && <div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">대화 기록을 읽는 중</span></div>}
+      {loading && <SkeletonChat label="대화 기록을 읽는 중"/>}
       {conversationId && page.before && <div className="grid justify-items-center">
         <button type="button" className="link-quiet" disabled={olderLoading} onClick={loadOlder}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</button>
       </div>}

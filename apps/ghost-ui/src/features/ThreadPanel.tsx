@@ -7,7 +7,7 @@ import { InlineText } from '../components/MessageBody';
 import { GhostRunLabel, LiveReply, Transcript, endsInGhostRun } from '../components/TranscriptMessage';
 import { useHost } from '../host/context';
 import { HostError } from '../host/client';
-import { InlineError, Row } from '../ui';
+import { InlineError, Row, SkeletonChat } from '../ui';
 import { DecisionCard } from './Decision';
 import { useConversationFeed } from './conversationFeed';
 import { liveWork, toneFor } from './ghostState';
@@ -114,7 +114,7 @@ export function ThreadPanel({ workId, state, closing = false, onClosed, onClose,
       <section className="thread-panel__section">
         <h3 className="section-title">작업 대화</h3>
         {!work.conversationId ? <p className="work-aside__empty">{liveWork(work) ? '아직 시작 전' : '기록 없음'}</p>
-          : loading ? <div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">대화 기록을 읽는 중</span></div>
+          : loading ? <SkeletonChat label="대화 기록을 읽는 중"/>
             : <div className="ghost-conversation__messages work-stream thread-panel__transcript">
               <Transcript messages={feed.messages} runLabel={carrier}
                 speaker={message => message.role === 'user' ? `${carrier}에게 전달` : message.role === 'tool' ? '도구 기록' : message.role === 'note' ? '기록' : carrier}/>

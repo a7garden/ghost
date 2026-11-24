@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ChevronRight, Pencil, Play, Square } from 'lucide-react';
-import { Button, Page, InlineError, Input, Textarea, FormField } from '../ui'
+import { Button, Page, InlineError, Input, SkeletonChat, SkeletonText, Textarea, FormField } from '../ui'
 import type { CodingRun, Effect, Message, State, Verdict, Work, WorkDetail as WorkDetailData } from '@ghost/contract';
 import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { LifecycleTrack, StateGlyph, glyphLabel, workGlyph, type GlyphState } from '../components/agent';
@@ -80,7 +80,7 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
   </Page>;
   const loadAlert = loadError && <InlineError onRetry={retry} retryLabel="다시 시도" pending={reloading}>맡긴 일을 새로 읽지 못했습니다 · {loadError}</InlineError>;
   if (!detail && loadAlert) return <Page className="grid content-start gap-4">{loadAlert}</Page>;
-  if (!detail) return <Page><div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">읽는 중</span></div></Page>;
+  if (!detail) return <Page><SkeletonText label="읽는 중" lines={5}/></Page>;
 
   const { work, children, effects, artifacts, ancestors, decisions } = detail;
   const brief = { text: work.brief, scopes: work.scopeReferences ?? [] };
@@ -327,7 +327,7 @@ function WorkTranscript({ conversationId, ghostId, ghostName, onEdit }: { conver
     {feed.before && <div className="grid justify-items-center">
       <button type="button" className="link-quiet" disabled={olderLoading} onClick={() => { setError(''); loadOlder(); }}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</button>
     </div>}
-    {loading && !feed.messages.length ? <div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">대화 기록을 읽는 중</span></div>
+    {loading && !feed.messages.length ? <SkeletonChat label="대화 기록을 읽는 중"/>
       : feed.messages.length || running ? <div className="ghost-conversation__messages work-stream">
         <Transcript messages={feed.messages} speaker={speaker} runLabel={ghostName}/>
         {running && !endsInGhostRun(feed.messages) && <GhostRunLabel name={ghostName}/>}

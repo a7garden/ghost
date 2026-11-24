@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import { ArrowUp, Folder, FolderGit2, Plus, X } from 'lucide-react';
 import type { FolderListing } from '@ghost/contract';
 import { useHost } from '../host/context';
-import { Button, InlineError } from '../ui';
+import { Button, InlineError, Skeleton } from '../ui';
 import { Modal } from './Modal';
 import './FolderPicker.css';
 
@@ -38,6 +38,7 @@ export function FolderPicker({ initial, title = '폴더 선택', onPick, onClose
       </div>
       {error && <InlineError>{error}</InlineError>}
       <ul className="folder-list" aria-label="하위 폴더" aria-busy={!listing}>
+        {!listing && !error && [0, 1, 2, 3].map(index => <li key={index} aria-hidden="true" className="flex items-center gap-2 px-3 py-2"><Skeleton className="size-4 flex-none rounded-full"/><Skeleton className={index % 2 ? 'h-3 w-1/3' : 'h-3 w-1/2'}/></li>)}
         {listing?.entries.map(entry => <li key={entry.path}><button type="button" onClick={() => setAt(entry.path)}>
           {entry.git ? <FolderGit2 aria-hidden="true"/> : <Folder aria-hidden="true"/>}<span>{entry.name}</span>
         </button></li>)}

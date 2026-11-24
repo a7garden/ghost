@@ -191,7 +191,7 @@ for (const theme of ['light', 'dark'] as const) {
       });
     }
     test('project editor and command palette', async ({ page }, info) => {
-      await openScreen(page, { name: 'project', route: state => `/scopes/${state.scopeId}`, waits: () => ['비행 기록 노트', '회의 정리'] }, theme);
+      await openScreen(page, { name: 'project', route: state => `/scopes/${state.scopeId}?view=documents`, waits: () => ['비행 기록 노트', '회의 정리'] }, theme);
       await capture(page, 'project', theme, info.project.name);
       await page.getByRole('button', { name: /비행 기록 노트/ }).click();
       await expect(page.getByRole('dialog').getByRole('textbox', { name: '제목', exact: true })).toHaveValue('비행 기록 노트');

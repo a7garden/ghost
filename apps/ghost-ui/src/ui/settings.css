@@ -21,4 +21,14 @@
   box-shadow: none;
 }
 .ghost-settings__section[aria-selected="true"] svg { color: var(--ghost-ink); }
+
+/* Group headings split the rail into what a person does every day and the rare machinery;
+   the narrow strip is one row of tabs, so headings drop out there. */
+.ghost-settings__group-label { margin: 14px 10px 4px; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 600; }
+.ghost-settings__section-list > .ghost-settings__group-label:first-child { margin-top: 0; }
+.ghost-settings__fold { margin-top: 14px; color: var(--ghost-ink3); }
+@container ghost-settings (max-width: 700px) {
+  .ghost-settings__group-label { display: none; }
+  .ghost-settings__fold { margin-top: 0; }
+}
 }

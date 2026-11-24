@@ -40,3 +40,20 @@ export class TailscaleIdentity {
     return login !== undefined && this.logins.has(login) ? login : null;
   }
 }
+
+/** How long the entry page waits for the tailnet origin before it falls back to the Access login. */
+const PROBE_MS = 3000;
+
+/**
+ * `<web origin>/go`: the one Access-bypassed page. It holds no data; it asks the browser whether the tailnet
+ * origin answers (Tailscale is on) and sends it there, otherwise on to the Access login. Both origins are
+ * fixed in the page, so nothing request-controlled reaches it.
+ */
+export function goPage(tailnetOrigin: string, webOrigin: string): { html: string; csp: string } {
+  const script = `const t=${JSON.stringify(tailnetOrigin)},w=${JSON.stringify(webOrigin)};`
+    + `const c=new AbortController(),k=setTimeout(()=>c.abort(),${PROBE_MS});`
+    + `fetch(t+"/api/health",{mode:"no-cors",cache:"no-store",signal:c.signal}).then(()=>location.replace(t+"/"),()=>location.replace(w+"/")).finally(()=>clearTimeout(k));`;
+  const digest = new Bun.CryptoHasher("sha256").update(script).digest("base64");
+  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Ghost</title></head><body><script>${script}</script><noscript><a href="${webOrigin}/">Ghost</a></noscript></body></html>`;
+  return { html, csp: `default-src 'none'; script-src 'sha256-${digest}'; connect-src ${tailnetOrigin}; base-uri 'none'` };
+}
