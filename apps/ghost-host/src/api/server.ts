@@ -70,7 +70,7 @@ import { OAuthLogins } from "./oauth.ts";
 import { ProviderQuotas } from "../integrations/provider-quota.ts";
 import { ConnectionOAuth } from "./connection-oauth.ts";
 import { CloudflareAccessVerifier } from "./cloudflare-access.ts";
-import { TailscaleIdentity } from "./tailscale-identity.ts";
+import { goPage, TailscaleIdentity } from "./tailscale-identity.ts";
 import { Access } from "../core/access.ts";
 import { execute, hashSecret } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
@@ -189,6 +189,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   if (edge !== null) allowedHosts.add(edge.host);
   const tailnet = config.tailscaleIdentity ? new TailscaleIdentity(config.tailscaleIdentity) : null;
   if (tailnet !== null) allowedHosts.add(tailnet.host);
+  const entry = tailnet !== null && config.cloudflareAccess ? goPage(tailnet.config.origin, config.cloudflareAccess.origin) : null;
   const connectionOAuth = new ConnectionOAuth(core, { root: config.root, publicOrigin });
   core.activitySources?.setOAuthRefresher?.(connection => connectionOAuth.refresh(connection));
 
@@ -485,6 +486,10 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (!allowedHosts.has(host)) return error("forbidden", "untrusted host", 403);
     // The Access web origin admits nothing, UI included, without a verified Access session; that session is the owner.
     const viaEdge = edge !== null && host === edge.host;
+    // The single exception: a data-free page that sends a Tailscale-connected browser to the tailnet origin.
+    if (viaEdge && entry !== null && request.method === "GET" && new URL(request.url).pathname === "/go") {
+      return new Response(entry.html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": entry.csp, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
+    }
     if (viaEdge && (await edge.verify(request)) === null) return error("forbidden", "Cloudflare Access login required", 401);
     const peer = bound.requestIP(request);
     const injectToken = loopbackHosts.has(host) && peer !== null && isLoopbackAddress(peer.address);

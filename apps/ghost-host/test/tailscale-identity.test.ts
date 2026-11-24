@@ -45,6 +45,7 @@ describe("Tailnet web origin", () => {
   } satisfies Engine);
   const config: Config = {
     root, host: "127.0.0.1", port: 0, publicOrigin: TAILNET.origin, tailscaleIdentity: parseTailscaleIdentity(TAILNET), uiDir,
+    cloudflareAccess: { origin: "https://ghost.example.com", teamDomain: "team.cloudflareaccess.com", audience: "795d0d71e9c7647aaed3b12dd8f6a7f96a0e2555e9ec14e62410858ebd092d38", emails: ["owner@example.com"] },
     sandbox: { kind: "local" }, voice: null, apns: null, skills: null, reach: null, browser: null,
   };
   const server = startServer({ core, config, ownerToken: "owner-test-token", documents: null, skills: null });
@@ -81,5 +82,14 @@ describe("Tailnet web origin", () => {
     expect((await raw("/api/state", {})).status).toBe(401);
     for (const site of ["cross-site", "same-site"]) expect((await raw("/api/state", { ...owner, "sec-fetch-site": site })).status).toBe(401);
     expect((await raw("/api/state", owner, `localhost:${server.port}`)).status).toBe(401);
+  });
+
+  test("the Access host serves only the data-free /go page without a session", async () => {
+    const page = await raw("/go", {}, "ghost.example.com");
+    expect(page.status).toBe(200);
+    expect(page.body).toContain(`"${TAILNET.origin}"`);
+    expect(page.body).toContain('"https://ghost.example.com"');
+    expect(page.body).not.toContain("owner-test-token");
+    for (const path of ["/", "/go/", "/api/state", "/api/health"]) expect((await raw(path, {}, "ghost.example.com")).status).toBe(401);
   });
 });
