@@ -21,3 +21,12 @@ describe('ghostAgenda', () => {
     expect(items).toEqual([]);
   });
 });
+
+it('inside a project the agenda keeps only that project’s activities', () => {
+  const items = ghostAgenda(state({
+    schedules: [schedule('mine', 100)],
+    activities: [{ id: 'in', ghostId: 'g1', scopeId: 's1', name: '이 프로젝트', paused: false, nextAt: 200, deletedAt: null }, { id: 'out', ghostId: 'g1', scopeId: 's2', name: '다른 프로젝트', paused: false, nextAt: 100, deletedAt: null }, { id: 'none', ghostId: 'g1', scopeId: null, name: '프로젝트 없음', paused: false, nextAt: 50, deletedAt: null }],
+    autonomy: [{ ghostId: 'g1', enabled: true, nextAt: 10, intent: '', setBy: 'self', watch: [], lastWakeAt: null, wakesToday: 0 }],
+  } as never), 'g1', 's1');
+  expect(items.map(item => item.id)).toEqual(['in']);
+});

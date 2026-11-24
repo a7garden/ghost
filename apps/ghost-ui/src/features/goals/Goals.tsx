@@ -35,9 +35,10 @@ export function Goals({ state, navigate }: { state: State; navigate(path: string
 export function ScopeGoals({ state, navigate, scopeId }: { state: State; navigate(path: string): void; scopeId: string }) {
   const [editing, setEditing] = useState<Editing>(null);
   const atCap = goalsAtCap(state, scopeId);
+  const started = (state.goals ?? []).some(goal => goal.scopeId === scopeId);
   return <section className="goals-page" aria-label="프로젝트 목표">
-    <div className="goals-add"><Button disabled={atCap} aria-describedby={atCap ? 'goal-cap-reason' : undefined} onClick={() => setEditing({ scopeId })}><Plus/>목표 추가</Button>
-      {atCap && <span id="goal-cap-reason">진행 중이거나 일시정지한 목표는 {goalLimit(state, scopeId)}개까지 둘 수 있습니다.</span>}</div>
+    {started && <div className="goals-add"><Button disabled={atCap} aria-describedby={atCap ? 'goal-cap-reason' : undefined} onClick={() => setEditing({ scopeId })}><Plus/>목표 추가</Button>
+      {atCap && <span id="goal-cap-reason">진행 중이거나 일시정지한 목표는 {goalLimit(state, scopeId)}개까지 둘 수 있습니다.</span>}</div>}
     <GoalsBody state={state} navigate={navigate} scopeId={scopeId} editing={editing} setEditing={setEditing}/>
   </section>;
 }
@@ -60,7 +61,7 @@ function GoalsBody({ state, navigate, scopeId, editing, setEditing }: {
       {labelled && <h2 className="section-title goal-group__title">{group.name}</h2>}
       {group.goals.map(goal => <GoalSection key={goal.id} goal={goal} state={state} grouped={labelled} onEdit={() => setEditing({ goal })}/>)}
     </section>)}
-    {!goals.length && <div className="calm"><p>목표 없음</p>{scopeId === undefined && <Button variant="outline" onClick={() => setEditing({ scopeId: null })}>목표 추가</Button>}</div>}
+    {!goals.length && <div className="calm"><p>목표 없음</p><Button variant="outline" size="sm" className="ml-auto" onClick={() => setEditing({ scopeId: scopeId ?? null })}>목표 추가</Button></div>}
     {closed.length > 0 && <details className="goals-closed"><summary>종료된 목표 <span>{closed.length}</span></summary>
       {closed.map(goal => <details className="goals-closed__goal" key={goal.id}>
         <summary><span>{goal.title}{scopeId === undefined && goal.scopeId !== null && <span className="goal-closed__scope"> · {scopeName(state, goal.scopeId)}</span>}</span>

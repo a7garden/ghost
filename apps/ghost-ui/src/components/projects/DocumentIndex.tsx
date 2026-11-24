@@ -7,7 +7,7 @@ import type { PageSummary } from '@ghost/contract';
  * The project's saved documents as a calm index: hairline rows in a quiet
  * card, the format profile as a mono mark on the right, search on top.
  */
-export function DocumentIndex({ pages, total, search, onSearch, loading, error, onOpen, onCreate }: {
+export function DocumentIndex({ pages, total, search, onSearch, loading, error, onOpen, onCreate, activeId }: {
   pages: PageSummary[];
   /** Document count before filtering. */
   total: number;
@@ -17,6 +17,8 @@ export function DocumentIndex({ pages, total, search, onSearch, loading, error, 
   error?: string;
   onOpen(pageId: string): void;
   onCreate(): void;
+  /** The document open beside the index; the rest open in a drawer. */
+  activeId?: string | null;
 }) {
   const query = search.trim();
   return <section className="doc" aria-label="저장된 문서">
@@ -40,7 +42,7 @@ export function DocumentIndex({ pages, total, search, onSearch, loading, error, 
       {pages.map(item => {
         const legacy = !isEditableProfile(item.profile);
         return <li key={item.pageId}>
-          <Row className="doc__row" aria-haspopup="dialog"
+          <Row className="doc__row" aria-haspopup={activeId === undefined ? 'dialog' : undefined} aria-current={item.pageId === activeId ? 'true' : undefined}
             aria-label={`${item.title}, ${item.profile}${legacy ? ', 읽기 전용' : ''}`}
             onClick={() => onOpen(item.pageId)}>
             <span className="doc__title">{item.title}</span>

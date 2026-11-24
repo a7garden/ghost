@@ -16,7 +16,7 @@ const screens: Screen[] = [
   { name: 'conversation', route: state => `/ghosts/${encodeURIComponent(state.defaultGhostId)}`, waits: () => ['맡긴 일에서 볼 수 있어요'] },
   { name: 'team', route: () => '/settings?tab=team', waits: () => ['연구원', '기록가', '새 Ghost'] },
   { name: 'projects', route: state => `/scopes/${encodeURIComponent(state.scopeId)}?view=documents`, waits: () => ['비행 기록 노트', '회의 정리'] },
-  { name: 'project-chat', route: state => `/scopes/${encodeURIComponent(state.scopeId)}`, waits: () => ['회의 메모 요약'] },
+  { name: 'project-chat', route: state => `/scopes/${encodeURIComponent(state.scopeId)}`, waits: () => ['세 가지 요청'] },
   { name: 'vault', route: () => '/settings?tab=vault', waits: () => ['서비스 로그인', '업무 카드', '거래처 연락처', '배포 API 키'], prepare: page => mockVaultApi(page) },
   { name: 'decision-secure', route: () => `/inbox?decision=${visualSecureDecisionId}`, waits: () => ['금고에 전달', 'app.example.com'], prepare: page => mockStateDecisions(page) },
   { name: 'decision-handoff', route: () => `/inbox?decision=${visualHandoffDecisionId}`, waits: () => ['다 했어요', 'subscribe.example.com'], prepare: page => mockStateDecisions(page) },

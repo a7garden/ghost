@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, SkeletonText, Textarea } from '../ui';
 import { MarkdownEditor } from '../editor/MarkdownEditor';
 import '../editor/styles.css';
@@ -12,13 +12,17 @@ const MAX_BODY_BYTES = 1_048_576;
 const EMPTY_DRAFT = { title: '', body: '', profile: 'pdc-markdown/1' as EditableProfile };
 
 /** One page in a drawer: legacy profiles read-only, edits guarded by the content hash. */
-export function PageEditorDrawer({ scopeId, pageId, onClose, onSaved }: {
+export function PageEditorDrawer({ scopeId, pageId, onClose, onSaved, onDirtyChange, inline = false }: {
   scopeId: string;
   /** null creates a new page. */
   pageId: string | null;
   onClose(): void;
   /** Refreshes the document list after a save. */
   onSaved(): void;
+  /** Render in place beside the list instead of in a drawer over it. */
+  inline?: boolean;
+  /** Whether the open document holds edits that are not saved yet; a brand-new empty document holds none. */
+  onDirtyChange?(dirty: boolean): void;
 }) {
   const { client } = useHost();
   const [view, setView] = useState<PageView | null>(null);
@@ -43,6 +47,8 @@ export function PageEditorDrawer({ scopeId, pageId, onClose, onSaved }: {
   useEffect(() => { if (pageId !== null) load(pageId); }, [pageId, scopeId]);
   const editable = view === null ? true : isEditableProfile(view.profile);
   const dirty = !view || draft.title !== view.title || draft.body !== view.body || (isEditableProfile(view.profile) && draft.profile !== view.profile);
+  const unsaved = editable && (view ? dirty : Boolean(draft.title.trim() || draft.body.trim()));
+  useEffect(() => { onDirtyChange?.(unsaved); }, [unsaved]);
   const save = async () => {
     if (saving || !dirty) return;
     if (!draft.title.trim()) { setError('문서 제목을 입력해 주세요.'); return; }
@@ -76,7 +82,11 @@ export function PageEditorDrawer({ scopeId, pageId, onClose, onSaved }: {
     if (view) load(view.pageId);
     else { setDraft(EMPTY_DRAFT); setHash(null); setConflict(false); setError(''); }
   };
-  return <Modal title={view ? draft.title || '제목 없음' : '새 문서'} onClose={onClose} drawer focusClose className="sm:max-w-[760px]">
+  const title = view ? draft.title || '제목 없음' : '새 문서';
+  const frame = (content: ReactNode) => inline
+    ? <section className="doc-pane" aria-label={title}>{content}</section>
+    : <Modal title={title} onClose={onClose} drawer focusClose className="sm:max-w-[760px]">{content}</Modal>;
+  return frame(
     <div className="grid gap-4">
       {loading && <SkeletonText label="문서를 불러오는 중…" lines={6}/>}
       {loadError && <InlineError>{loadError}</InlineError>}
@@ -118,6 +128,6 @@ export function PageEditorDrawer({ scopeId, pageId, onClose, onSaved }: {
         </div>}
       </>}
     </div>
-  </Modal>;
+  );
 }
 export default PageEditorDrawer;

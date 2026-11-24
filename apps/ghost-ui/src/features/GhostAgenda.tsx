@@ -18,30 +18,31 @@ export type AgendaItem =
  * What this Ghost will do on its own next: the owner's schedules, its automatic activities and its own
  * planned look, soonest first; paused ones last. Finished schedules and deleted activities leave.
  */
-export function ghostAgenda(state: State, ghostId: string): AgendaItem[] {
+export function ghostAgenda(state: State, ghostId: string, projectId?: string): AgendaItem[] {
   const items: AgendaItem[] = [];
   for (const schedule of state.schedules) {
-    if (schedule.ghostId !== ghostId || schedule.state === 'done') continue;
+    // Schedules and the Ghost's own plan belong to the Ghost, not to a project.
+    if (projectId !== undefined || schedule.ghostId !== ghostId || schedule.state === 'done') continue;
     items.push({ kind: 'schedule', id: schedule.id, at: schedule.nextAt, title: schedule.prompt, detail: specLabel(schedule.spec), paused: schedule.state === 'paused' });
   }
   for (const activity of state.activities ?? []) {
-    if (activity.ghostId !== ghostId || activity.deletedAt !== null) continue;
+    if (activity.ghostId !== ghostId || activity.deletedAt !== null || (projectId !== undefined && activity.scopeId !== projectId)) continue;
     items.push({ kind: 'activity', id: activity.id, at: activity.paused ? null : activity.nextAt, title: activity.name, detail: uiTerms.activities, paused: activity.paused });
   }
-  const plan = state.autonomy?.find(item => item.ghostId === ghostId);
+  const plan = projectId === undefined ? state.autonomy?.find(item => item.ghostId === ghostId) : undefined;
   if (plan?.enabled && plan.nextAt !== null) items.push({ kind: 'plan', id: `plan:${ghostId}`, at: plan.nextAt, title: plan.intent || '스스로 다음 할 일을 살핍니다', detail: '스스로 확인', paused: false });
   return items.sort((a, b) => Number(a.paused) - Number(b.paused) || (a.at ?? Infinity) - (b.at ?? Infinity));
 }
 
 /** Upcoming work and schedules, beside the conversation's thread control. */
-export function GhostAgenda({ ghost, state, navigate }: { ghost: Ghost; state: State; navigate(path: string): void }) {
+export function GhostAgenda({ ghost, state, navigate, projectId }: { ghost: Ghost; state: State; navigate(path: string): void; projectId?: string }) {
   const { client } = useHost();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState('');
   const [error, setError] = useState('');
-  const items = ghostAgenda(state, ghost.id);
+  const items = ghostAgenda(state, ghost.id, projectId);
   const waiting = items.filter(item => !item.paused && item.kind !== 'plan').length;
-  const plan = state.autonomy?.find(item => item.ghostId === ghost.id);
+  const plan = projectId === undefined ? state.autonomy?.find(item => item.ghostId === ghost.id) : undefined;
   const offDuty = state.duty ? !state.duty.onDuty : false;
   const go = (path: string) => () => { setOpen(false); navigate(path); };
   const toggle = async (scheduleId: string, paused: boolean) => {

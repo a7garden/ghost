@@ -50,39 +50,55 @@ export function ScopeMetrics({ scopeId }: { scopeId?: string | null }) {
   const note = metrics
     ? [!metrics.usageComplete && '사용량 기록이 일부 없어 비용·토큰이 적게 보일 수 있습니다.', !metrics.observationHistoryComplete && '이전 관측 기록이 일부 없습니다.'].filter(Boolean).join(' ')
     : '';
+  const ghostOptions = [{ value: '', label: '모두' }, ...(state?.ghosts ?? []).map(ghost => ({ value: ghost.id, label: ghost.name }))];
   return <section className="grid gap-6">
     <SettingsGroup title={uiTerms.metrics} actions={<Button variant="outline" disabled={loading} onClick={() => setReload(value => value + 1)}>새로고침</Button>}>
       <div className="infra-editor">
         {scopeId === undefined && <Choice label="범위" value={selectedScope} onChange={setSelectedScope}
           options={[{ value: 'all', label: '모든 범위' }, { value: 'global', label: '전체 (프로젝트 없음)' }, ...(state?.scopes ?? []).map(scope => ({ value: scope.id, label: scope.name }))]} />}
-        <Choice label="Ghost" value={ghostId} onChange={setGhostId}
-          options={[{ value: '', label: '모두' }, ...(state?.ghosts ?? []).map(ghost => ({ value: ghost.id, label: ghost.name }))]} />
+        {scopeId === undefined
+          ? <Choice label="Ghost" value={ghostId} onChange={setGhostId} options={ghostOptions}/>
+          : <details className="infra-fold"><summary>Ghost별로 보기{ghostId ? ' · 고름' : ''}</summary><Choice label="Ghost" value={ghostId} onChange={setGhostId} options={ghostOptions}/></details>}
         {loading && <SkeletonText label="불러오는 중…" lines={2} />}
         {error && <InlineError>{error}</InlineError>}
       </div>
     </SettingsGroup>
     {metrics && <>
-      <SettingsGroup title="결과">
-        <SettingsRow label="맡긴 일">{value(number(metrics.works))}</SettingsRow>
-        <SettingsRow label="완료">{value(number(metrics.completed))}</SettingsRow>
-        <SettingsRow label="반려">{value(number(metrics.rejected))}</SettingsRow>
-        <SettingsRow label="완료율">{value(percent(metrics.completionRate))}</SettingsRow>
-        <SettingsRow label="반려율">{value(percent(metrics.rejectionRate))}</SettingsRow>
-      </SettingsGroup>
-      <SettingsGroup title="일 하나당" description="수용된 일 기준">
-        <SettingsRow label="평균 걸린 시간">{value(duration(metrics.elapsedMsPerAcceptedWork))}</SettingsRow>
-        <SettingsRow label="평균 토큰">{value(number(metrics.tokensPerAcceptedWork))}</SettingsRow>
-        <SettingsRow label="평균 비용(USD)">{value(cost(metrics.costPerAcceptedWork))}</SettingsRow>
-      </SettingsGroup>
-      <SettingsGroup title="그 밖">
-        <SettingsRow label="내가 뒤집은 검토 결과">{value(`${metrics.ownerOverturnedVerdicts.toLocaleString('ko-KR')}번`)}</SettingsRow>
-        <SettingsRow label="사용량 한도 때문에 기다린 시간">{value(duration(metrics.quotaWaitMs))}</SettingsRow>
-        <SettingsRow label="같은 시도를 되풀이해 막은 횟수">{value(`${metrics.repeatGuardHits.toLocaleString('ko-KR')}번`)}</SettingsRow>
-      </SettingsGroup>
+      {metrics.works === 0 && <p className="m-0 text-caption text-ink-2">아직 집계할 일이 없습니다.</p>}
+      {metrics.works > 0 && <OutcomeBand works={metrics.works} completed={metrics.completed} rejected={metrics.rejected}/>}
+      {metrics.works > 0 && (metrics.elapsedMsPerAcceptedWork !== null || metrics.tokensPerAcceptedWork !== null || metrics.costPerAcceptedWork !== null) && <SettingsGroup title="일 하나당" description="수용된 일 기준">
+        {metrics.elapsedMsPerAcceptedWork !== null && <SettingsRow label="평균 걸린 시간">{value(duration(metrics.elapsedMsPerAcceptedWork))}</SettingsRow>}
+        {metrics.tokensPerAcceptedWork !== null && <SettingsRow label="평균 토큰">{value(number(metrics.tokensPerAcceptedWork))}</SettingsRow>}
+        {metrics.costPerAcceptedWork !== null && <SettingsRow label="평균 비용(USD)">{value(cost(metrics.costPerAcceptedWork))}</SettingsRow>}
+      </SettingsGroup>}
+      {(metrics.ownerOverturnedVerdicts > 0 || metrics.quotaWaitMs > 0 || metrics.repeatGuardHits > 0) && <SettingsGroup title="그 밖">
+        {metrics.ownerOverturnedVerdicts > 0 && <SettingsRow label="내가 뒤집은 검토 결과">{value(`${metrics.ownerOverturnedVerdicts.toLocaleString('ko-KR')}번`)}</SettingsRow>}
+        {metrics.quotaWaitMs > 0 && <SettingsRow label="사용량 한도 때문에 기다린 시간">{value(duration(metrics.quotaWaitMs))}</SettingsRow>}
+        {metrics.repeatGuardHits > 0 && <SettingsRow label="같은 시도를 되풀이해 막은 횟수">{value(`${metrics.repeatGuardHits.toLocaleString('ko-KR')}번`)}</SettingsRow>}
+      </SettingsGroup>}
       {ruleRows.length > 0 && <SettingsGroup title="승인 요청 처리" description="규칙이 승인·거절한 요청의 누적 횟수입니다.">
         {ruleRows.map(row => <SettingsRow key={row.key} label={row.subject} description={row.description}>{value(`승인 ${row.counts.approved.toLocaleString('ko-KR')} · 거절 ${row.counts.denied.toLocaleString('ko-KR')}`)}</SettingsRow>)}
       </SettingsGroup>}
       {note && <p className="m-0 text-caption text-ink-3">{note}</p>}
     </>}
+  </section>;
+}
+
+/**
+ * Finished Work as one band: solid for accepted, red for sent back, hatched for what is still open or
+ * ended otherwise. The counts under it say the same in words.
+ */
+function OutcomeBand({ works, completed, rejected }: { works: number; completed: number; rejected: number }) {
+  const rest = Math.max(0, works - completed - rejected);
+  const share = (count: number) => `${((count / works) * 100).toFixed(1)}%`;
+  const parts = [{ kind: 'done', label: '완료', count: completed }, { kind: 'rejected', label: '반려', count: rejected }, { kind: 'rest', label: '진행 중·기타', count: rest }];
+  return <section className="outcome" aria-label="결과">
+    <div className="outcome__band" role="img" aria-label={`맡긴 일 ${works}건 중 ${parts.map(part => `${part.label} ${part.count}건`).join(', ')}`}>
+      {parts.filter(part => part.count > 0).map(part => <span key={part.kind} data-kind={part.kind} style={{ flexGrow: part.count }}/>)}
+    </div>
+    <dl className="outcome__legend">
+      <div><dt>맡긴 일</dt><dd className="tabular">{works.toLocaleString('ko-KR')}</dd></div>
+      {parts.map(part => <div key={part.kind} data-kind={part.kind}><dt>{part.label}</dt><dd className="tabular">{part.count.toLocaleString('ko-KR')} · {share(part.count)}</dd></div>)}
+    </dl>
   </section>;
 }

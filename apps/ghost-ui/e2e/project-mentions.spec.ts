@@ -12,11 +12,14 @@ for (const viewport of [
     const prepare = viewport.isMobile ? mockIPhone : undefined;
 
     test('project page opens on its conversation, switches tabs and hands off work', async ({ page }, info) => {
-      const state = await openScreen(page, { name: 'projects', route: state => `/scopes/${state.scopeId}`, waits: () => ['회의 메모 요약'], prepare }, 'light');
+      const state = await openScreen(page, { name: 'projects', route: state => `/scopes/${state.scopeId}`, waits: () => ['세 가지 요청'], prepare }, 'light');
       await page.screenshot({ path: info.outputPath(`project-page-${viewport.name}.png`), animations: 'disabled' });
       const tabs = page.getByRole('navigation', { name: '프로젝트 내용' });
       await expect(tabs.getByRole('button', { name: '대화', exact: true })).toHaveAttribute('aria-current', 'page');
-      await expect(tabs.getByRole('button')).toHaveCount(5);
+      await expect(tabs.getByRole('button', { name: '설정', exact: true })).toBeVisible();
+      // The seeded Work and its decision belong to no project, so this room neither lists them nor shows a progress strip.
+      await expect(page.getByRole('region', { name: '이 프로젝트의 진행 상황' })).toHaveCount(0);
+      await expect(page.locator('.project__body').getByText('회의 메모 요약')).toHaveCount(0);
       await tabs.getByRole('button', { name: '문서', exact: true }).click();
       await expect(page).toHaveURL(`${state.baseUrl}/#/scopes/${state.scopeId}?view=documents`);
       await expect(page.getByText('비행 기록 노트', { exact: true })).toBeVisible();

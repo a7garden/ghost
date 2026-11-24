@@ -200,10 +200,12 @@ for (const theme of ['light', 'dark'] as const) {
       await openScreen(page, { name: 'project', route: state => `/scopes/${state.scopeId}?view=documents`, waits: () => ['비행 기록 노트', '회의 정리'] }, theme);
       await capture(page, 'project', theme, info.project.name);
       await page.getByRole('button', { name: /비행 기록 노트/ }).click();
-      await expect(page.getByRole('dialog').getByRole('textbox', { name: '제목', exact: true })).toHaveValue('비행 기록 노트');
-      await expect(page.getByRole('dialog').locator('.cm-editor')).toBeVisible();
+      // Wide screens open the document beside the index; narrow ones in a drawer.
+      const editor = page.getByRole('region', { name: '비행 기록 노트' }).or(page.getByRole('dialog'));
+      await expect(editor.getByRole('textbox', { name: '제목', exact: true })).toHaveValue('비행 기록 노트');
+      await expect(editor.locator('.cm-editor')).toBeVisible();
       await capture(page, 'document-editor', theme, info.project.name);
-      await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
+      await editor.getByRole('button', { name: '닫기', exact: true }).last().click();
       await page.getByRole('button', { name: '명령 검색', exact: true }).click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await capture(page, 'command-palette', theme, info.project.name);

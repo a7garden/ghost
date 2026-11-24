@@ -20,7 +20,10 @@ export function PolicySettings({ scopeId }: { scopeId?: string }) {
   const [removing, setRemoving] = useState<string | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const rules = (state?.policyRules ?? []).filter(rule => scopeId === undefined || !rule.scopeId || rule.scopeId === scopeId);
-  const own = rules.filter(rule => !isSystemRule(rule)), builtIn = rules.filter(isSystemRule);
+  const severity: Record<PolicyDecision, number> = { deny: 0, owner: 1, review: 2, allow: 3 };
+  const own = rules.filter(rule => !isSystemRule(rule)).sort((a, b) => severity[a.decision] - severity[b.decision]), builtIn = rules.filter(isSystemRule);
+  // Inside a project, what was written for it comes before what it inherits from the whole team.
+  const here = scopeId === undefined ? [] : own.filter(rule => rule.scopeId === scopeId), inherited = scopeId === undefined ? [] : own.filter(rule => rule.scopeId !== scopeId);
   const remove = async (ruleId: string) => {
     setBusy(true); setError('');
     try { await client.send({ type: 'rule.delete', ruleId }); setRemoving(null); }
@@ -46,7 +49,10 @@ export function PolicySettings({ scopeId }: { scopeId?: string }) {
       {error && <InlineError className="m-4">{error}</InlineError>}
       {editing && <RuleEditor key={editing === 'new' ? 'new' : editing.id} rule={editing === 'new' ? null : editing} scopeId={scopeId} onClose={() => setEditing(null)}/>}
       {!own.length && !editing && <p className="m-0 p-4 text-caption text-ink-2">직접 만든 규칙이 없습니다. 기본 안전 규칙만 적용됩니다. 자동 승인 시간은 「승인과 언어」에서 바꿉니다.</p>}
-      {own.map(row)}
+      {scopeId === undefined ? own.map(row) : <>
+        {here.length > 0 && <><p className="menu-heading">이 프로젝트만</p>{here.map(row)}</>}
+        {inherited.length > 0 && <><p className="menu-heading">전체에서 상속</p>{inherited.map(row)}</>}
+      </>}
     </SettingsGroup>
     {builtIn.length > 0 && <details className="infra-fold">
       <summary>기본 안전 규칙 {builtIn.length}개</summary>

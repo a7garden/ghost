@@ -5,10 +5,10 @@ import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Choice, errorText, TextField } from './InfrastructureFields';
 
-export function DocAttachments({ value, onChange, scopeId }: { value: DocRef[]; onChange(value: DocRef[]): void; scopeId?: string }) {
+export function DocAttachments({ value, onChange, scopeId, label = '붙임' }: { value: DocRef[]; onChange(value: DocRef[]): void; scopeId?: string; label?: string }) {
   const { store } = useHost();
   const { state } = useHostState(store);
-  return <fieldset className="infra-list"><legend>붙임</legend>
+  return <fieldset className="infra-list"><legend>{label}</legend>
     <div className="infra-attachments">{value.map((ref, index) => <div className="infra-attachment" key={index}>
       <Choice label={`붙임 ${index + 1} 종류`} value={ref.kind} onChange={kind => onChange(value.map((item, at) => at !== index ? item : kind === 'skill' ? { kind: 'skill', name: '' } : { kind: 'page', scopeId: scopeId ?? state?.scopes[0]?.id ?? '', locator: '' }))} options={[{ value: 'page', label: '문서' }, { value: 'skill', label: '스킬' }]}/>
       {ref.kind === 'page' ? <>

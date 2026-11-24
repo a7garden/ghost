@@ -93,11 +93,15 @@ test('scope, document, slot, MCP, policy and conflict-aware history use the real
   await projectTabs.getByRole('button', { name: '문서', exact: true }).click();
   await page.reload();
   await page.getByRole('button', { name: '검증 문서, pdc-markdown/1', exact: true }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await page.keyboard.press('Escape');
+  await expect(page.getByRole('region', { name: '검증 문서' }).getByRole('textbox', { name: '제목', exact: true })).toHaveValue('검증 문서');
   await projectTabs.getByRole('button', { name: '설정', exact: true }).click();
+  await page.locator('.project-bar__name').getByRole('button').click();
   await page.getByRole('textbox', { name: '프로젝트 이름', exact: true }).fill('수정한 프로젝트');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await snapshot(page)).scopes.find(item => item.id === scope.id)?.name).toBe('수정한 프로젝트');
   await page.getByLabel('상태', { exact: true }).selectOption('paused');
+  await expect(page.getByRole('status').filter({ hasText: '저장됨' })).toBeVisible();
+  await page.getByRole('button', { name: '추가', exact: true }).click();
   await page.getByRole('button', { name: '붙임 추가', exact: true }).click();
   await page.getByRole('combobox', { name: '붙임 1 프로젝트', exact: true }).selectOption(scope.id);
   await page.getByRole('combobox', { name: '붙임 1 문서', exact: true }).selectOption({ label: '검증 문서' });

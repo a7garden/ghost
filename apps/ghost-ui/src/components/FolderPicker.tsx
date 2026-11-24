@@ -71,10 +71,10 @@ export function FolderField({ label, value, onChange, optional = false, disabled
 }
 
 /** A list of chosen folders: add one with the picker, remove any. */
-export function FolderList({ label, values, onChange, disabled = false }: { label: string; values: string[]; onChange(paths: string[]): void; disabled?: boolean }) {
+export function FolderList({ label, values, onChange, disabled = false, showLabel = true }: { label: string; values: string[]; onChange(paths: string[]): void; disabled?: boolean; showLabel?: boolean }) {
   const [open, setOpen] = useState(false);
   return <div className="folder-field">
-    <span className="folder-field-label">{label}</span>
+    {showLabel && <span className="folder-field-label">{label}</span>}
     <ul className="folder-chosen">
       {values.map(path => <li key={path}><Folder aria-hidden="true"/><span title={path}>{path}</span>
         <Button variant="ghost" size="icon" type="button" aria-label={`${path} 제거`} disabled={disabled} onClick={() => onChange(values.filter(entry => entry !== path))}><X aria-hidden="true"/></Button></li>)}

@@ -19,6 +19,7 @@ import { BrowserPaneContext } from './BrowserPaneContext';
 import { GhostDesignEditor } from './GhostDesign';
 import { ThreadPanel } from './ThreadPanel';
 import { GhostAgenda } from './GhostAgenda';
+import { decisionScopeId } from './scopeState';
 import { useConversationFeed } from './conversationFeed';
 import { useOutbox } from './outbox';
 import { conversationStarters } from './conversationSuggestions';
@@ -75,7 +76,7 @@ function useBrowserSession(conversationId: string | null, enabled: boolean): Bro
  * the work it takes on branches off as threads (맡긴 일), shown where they started and
  * gathered behind the thread button. Older direct conversations stay readable there.
  */
-export function GhostChat({ ghost, state, conversationId, threadId, navigate, initialScopeIds = [], toolsHost }: {
+export function GhostChat({ ghost, state, conversationId, threadId, navigate, initialScopeIds = [], toolsHost, projectId }: {
   ghost: Ghost;
   state: State;
   /** The conversation on screen; null when this Ghost has none yet. */
@@ -86,6 +87,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   initialScopeIds?: string[];
   /** Where the tools render when the host screen carries them in its own bar; `null` until that bar mounts. */
   toolsHost?: HTMLElement | null;
+  /** Set inside a project: decisions, thread cards, threads and the agenda show only what belongs to it. */
+  projectId?: string;
 }) {
   const { client } = useHost();
   const calls = useCallActions();
@@ -151,11 +154,14 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   const names = new Map(state.ghosts.map(item => [item.id, item.name]));
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
   // What this screen needs from the owner, answered above the composer; an open thread's own decisions sit in its panel.
-  const decisions = chatDecisions(state, ghost.id, conversationId).filter(decision => !threadId || decision.workId !== threadId);
+  const decisions = chatDecisions(state, ghost.id, conversationId)
+    .filter(decision => !threadId || decision.workId !== threadId)
+    // A question asked in this conversation stays; a decision on Work answers to the project the Work belongs to.
+    .filter(decision => projectId === undefined || decision.workId === null || decisionScopeId(decision, state) === projectId);
   const openWork = (id: string) => navigate(`/work/${encodeURIComponent(id)}`);
   // Threads begun here appear where they started, kept live, with the Ghosts they delegated to beneath.
   const extras: TranscriptExtra[] = conversationId ? state.works
-    .filter(work => work.originConversationId === conversationId && !work.parentId)
+    .filter(work => work.originConversationId === conversationId && !work.parentId && (projectId === undefined || work.scopeId === projectId))
     .map(work => {
       const delegates = state.works.filter(child => child.rootId === work.id && child.id !== work.id)
         .sort((a, b) => a.createdAt - b.createdAt)
@@ -176,10 +182,10 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
       isMain={ghost.isDefault}/>
     {calls && <button type="button" className="chat-tool chat-call" aria-disabled={Boolean(callBlocked)} aria-label={callLabel} title={callLabel}
       onClick={event => { if (!callBlocked) calls.start(ghost, event.currentTarget); }}><Phone aria-hidden="true"/></button>}
-    <Threads ghost={ghost} state={state} conversations={conversations} currentId={conversationId} waiting={waiting} now={now}
+    <Threads ghost={ghost} state={state} conversations={conversations} currentId={conversationId} waiting={waiting} now={now} projectId={projectId}
       onOpenWork={openThread} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
       onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
-    <GhostAgenda ghost={ghost} state={state} navigate={navigate}/>
+    <GhostAgenda ghost={ghost} state={state} navigate={navigate} projectId={projectId}/>
     {conversationId && browserCapable && (browserSession || browserOpen) &&
       <button type="button" className="chat-tool chat-browser" aria-pressed={browserOpen} data-live={browserSession ? '' : undefined}
         aria-label="브라우저 화면" title="브라우저 화면" onClick={() => setBrowserOpen(value => !value)}>
@@ -246,19 +252,20 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
  * The threads this Ghost carries: its live 맡긴 일 first, then the latest settled ones, then
  * any older direct conversation kept from before conversations became one durable thread.
  */
-function Threads({ ghost, state, conversations, currentId, waiting, now, onOpenWork, onOpenConversation, onOpenAll }: {
+function Threads({ ghost, state, conversations, currentId, waiting, now, projectId, onOpenWork, onOpenConversation, onOpenAll }: {
   ghost: Ghost;
   state: State;
   conversations: ConversationRow[];
   currentId: string | null;
   waiting: ReadonlySet<string>;
   now: number;
+  projectId?: string;
   onOpenWork(id: string): void;
   onOpenConversation(id: string): void;
   onOpenAll(): void;
 }) {
   const [open, setOpen] = useState(false);
-  const mine = state.works.filter(work => !work.parentId && (work.ghostId === ghost.id || conversations.some(conversation => conversation.id === work.originConversationId)));
+  const mine = state.works.filter(work => !work.parentId && (projectId === undefined || work.scopeId === projectId) && (work.ghostId === ghost.id || conversations.some(conversation => conversation.id === work.originConversationId)));
   const live = mine.filter(work => !TERMINAL_WORK_STATES.includes(work.state)).sort((a, b) => b.updatedAt - a.updatedAt);
   const settled = mine.filter(work => TERMINAL_WORK_STATES.includes(work.state)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5);
   const earlier = conversations.filter(conversation => conversation.id !== ghost.directConversationId);
