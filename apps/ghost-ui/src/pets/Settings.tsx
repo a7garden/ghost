@@ -5,6 +5,7 @@ import type { Preferences } from './preferences';
 import { ModelSettings } from './ModelSettings';
 import { ApprovalSettings } from './ApprovalSettings';
 import { blurTouchSearchOnEnter, useCompact } from '../ui/adaptive';
+import { uiTerms } from '../uiText';
 
 export interface SettingsSection { id: string; label: string; icon: LucideIcon; content: ReactNode }
 
@@ -12,11 +13,12 @@ const themes: { value: Preferences['theme']; label: string }[] = [
   { value: 'system', label: '시스템' }, { value: 'light', label: '밝게' }, { value: 'dark', label: '어둡게' },
 ];
 
-const settingsGroups = [
-  { label: 'Ghost와 실행', ids: ['team', 'models', 'voice', 'approvals', 'duty', 'schedules', 'activities'] },
-  { label: '연결과 기기', ids: ['devices', 'connections', 'vault', 'coding', 'mcp'] },
-  { label: '화면과 앱', ids: ['appearance', 'desktop', 'update'] },
-  { label: '호스트 운영', ids: ['slots', 'limits', 'rules', 'history', 'metrics', 'host'] },
+/** Daily settings first; the machinery a person rarely needs sits behind one 「고급」 fold. */
+const settingsGroups: { label: string; folded?: boolean; ids: string[] }[] = [
+  { label: 'Ghost와 일', ids: ['team', 'models', 'approvals', 'duty', 'schedules', 'activities', 'voice'] },
+  { label: '연결과 기기', ids: ['connections', 'vault', 'devices', 'coding'] },
+  { label: '앱', ids: ['appearance', 'desktop', 'host', 'update'] },
+  { label: uiTerms.advanced, folded: true, ids: ['rules', 'history', 'limits', 'metrics', 'slots', 'mcp'] },
 ];
 
 function SettingsIndex({ items, select }: { items: { id: string; label: string; icon: LucideIcon }[]; select(id: string): void }) {
@@ -33,7 +35,10 @@ function SettingsIndex({ items, select }: { items: { id: string; label: string; 
     {needle ? matches.length ? matches.map(row) : <p className="conversations__empty" role="status">일치하는 설정이 없습니다.</p>
       : <>{settingsGroups.map(group => {
         const entries = items.filter(item => group.ids.includes(item.id));
-        return entries.length > 0 && <section key={group.label}><h2>{group.label}</h2>{entries.map(row)}</section>;
+        if (!entries.length) return null;
+        return group.folded
+          ? <details key={group.label} className="settings-index-fold"><summary>{group.label}</summary>{entries.map(row)}</details>
+          : <section key={group.label}><h2>{group.label}</h2>{entries.map(row)}</section>;
       })}{ungrouped.map(row)}</>}
   </section>;
 }
@@ -48,7 +53,8 @@ export function Settings({ route, navigate, preferences, updatePreferences, stor
 }) {
   const params = new URLSearchParams(route.split('?')[1]);
   const compact = useCompact();
-  const items = [...sections.slice(0, 1), { id: 'models', label: '모델', icon: Cpu }, { id: 'approvals', label: '승인과 언어', icon: ShieldCheck }, ...sections.slice(1), { id: 'appearance', label: '화면', icon: Palette }];
+  const unordered = [...sections.slice(0, 1), { id: 'models', label: '모델', icon: Cpu }, { id: 'approvals', label: '승인과 언어', icon: ShieldCheck }, ...sections.slice(1), { id: 'appearance', label: '화면', icon: Palette }];
+  const items = [...settingsGroups.flatMap(group => group.ids.flatMap(id => unordered.filter(item => item.id === id))), ...unordered.filter(item => !settingsGroups.some(group => group.ids.includes(item.id)))];
   const requested = params.get('tab');
   const tab = items.some(item => item.id === requested) ? requested! : items[0].id;
   const ghost = params.get('ghost');
@@ -56,7 +62,7 @@ export function Settings({ route, navigate, preferences, updatePreferences, stor
   const shellSection = sections.find(section => section.id === tab);
   if (compact && !requested) return <SettingsIndex items={items} select={changeTab}/>;
   return <SettingsLayout title="설정" compactDetail={compact} strings={{ navigationLabel: '설정 항목', contentLabel: '설정 내용' }}
-    sections={items.map(item => ({ id: item.id, label: item.label, icon: <item.icon aria-hidden="true"/> }))}
+    sections={items.map(item => { const group = settingsGroups.find(entry => entry.ids.includes(item.id)); return { id: item.id, label: item.label, icon: <item.icon aria-hidden="true"/>, group: group?.label, folded: group?.folded }; })} foldedLabel={uiTerms.advanced}
     activeSection={tab} onSectionChange={changeTab}>
     {shellSection?.content}
     {storageError && <InlineError className="mt-4">{storageError}</InlineError>}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import type { ConnectionOAuthView, Ghost } from '@ghost/contract';
-import { Button, Checkbox, FormField, InlineError, Input } from '../ui';
+import { Button, Checkbox, FormField, InlineError, Input, SkeletonText } from '../ui';
 import { ExternalAnchor } from '../components/ExternalAnchor';
 import { useHost } from '../host/context';
 import type { ConnectionService } from './connection-services';
@@ -84,7 +84,7 @@ export function ConnectionOAuthPanel({ service, ghosts, defaultUsername = '', on
       </div>}
       {view.message && <p className="m-0 text-caption text-ink-2" role={view.state === 'error' ? 'alert' : 'status'}>{view.message}</p>}
     </>}
-    {!view && !error && <p className="m-0 text-caption text-ink-2" role="status">로그인 설정을 확인하는 중…</p>}
+    {!view && !error && <SkeletonText label="로그인 설정을 확인하는 중…" lines={2}/>}
     {error && <><InlineError>{error}</InlineError><div><Button variant="outline" type="button" onClick={() => setReload(value => value + 1)}>다시 확인</Button></div></>}
   </section>;
 }

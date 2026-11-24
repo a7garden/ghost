@@ -7,8 +7,8 @@ export interface Crumb { label: string; path: string | null }
 const settingsTabs: Record<string, string> = {
   team: 'Ghost', models: '모델', approvals: '승인과 언어', duty: '근무 시간', update: '업데이트', vault: '금고', devices: '기기', schedules: uiTerms.schedules,
   activities: uiTerms.activities, connections: uiTerms.connections,
-  slots: '모델 자리', limits: '한도', mcp: 'MCP 서버', rules: uiTerms.rules, history: uiTerms.configHistory, metrics: uiTerms.metrics,
-  host: routeLabels.host, coding: routeLabels.coding, voice: '음성', desktop: '데스크톱 아바타', appearance: '화면',
+  slots: uiTerms.modelCombos, limits: uiTerms.limits, mcp: uiTerms.mcp, rules: uiTerms.rules, history: uiTerms.configHistory, metrics: uiTerms.metrics,
+  host: uiTerms.connectionStatus, coding: routeLabels.coding, voice: '음성', desktop: '데스크톱 아바타', appearance: '화면',
 };
 
 /** A Work and the Works above it, root first. Stops at a missing or cyclic parent. */

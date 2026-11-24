@@ -5,7 +5,7 @@ import {
   type CodingSession, type OrchestrationConfig, type OrchestrationImportPreview, type OrchestrationView,
 } from '@ghost/contract';
 import { useHost } from '../host/context';
-import { Button, InlineError } from '../ui';
+import { Button, InlineError, SkeletonRows } from '../ui';
 import { OrchestrationGraph } from './OrchestrationGraph';
 import { OrchestrationInspector } from './OrchestrationInspector';
 import { addNode, connectAgents, issueText, moveNode, removeNode, renameNode, type NodeKey } from './OrchestrationModel';
@@ -83,7 +83,7 @@ export function Orchestration() {
         onChange={event => change({ ...config, enabled: event.target.checked })}/>위임 사용</label>}
     </header>
     {error && <InlineError>{error}</InlineError>}
-    {!config && (error ? <Button onClick={() => { setError(''); setReload(value => value + 1); }}>다시 불러오기</Button> : <p aria-busy="true">설정 불러오는 중…</p>)}
+    {!config && (error ? <Button onClick={() => { setError(''); setReload(value => value + 1); }}>다시 불러오기</Button> : <SkeletonRows label="설정 불러오는 중…" rows={4}/>)}
     {config && stored && <>
       <div className="orchestration-toolbar">
         <div className="orchestration-actions">

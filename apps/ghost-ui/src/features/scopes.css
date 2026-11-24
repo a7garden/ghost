@@ -29,7 +29,7 @@
 .doc__clear { position: absolute; right: 4px; display: grid; width: 22px; height: 22px; place-items: center; border: 0; border-radius: 50%; color: var(--ghost-ink3); background: none; cursor: pointer; }
 .doc__clear:hover { color: var(--ghost-ink); }
 .doc__clear svg { width: 13px; height: 13px; }
-.doc__status { margin: 0; padding-inline: 4px; color: var(--ghost-ink3); font-size: var(--text-caption); }
+.doc__index[aria-busy] { opacity: .6; transition: opacity var(--duration-base); }
 .doc__index { display: grid; gap: 1px; margin: 0; padding: 4px; list-style: none; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
 .doc__index > li { min-width: 0; animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .doc__index > :nth-child(2) { animation-delay: 30ms; }

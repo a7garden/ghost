@@ -1,50 +1,88 @@
 import { useEffect, useState } from 'react';
 import type { MetricsView } from '@ghost/contract';
-import { Button, InlineError, SettingsGroup } from '../ui';
+import { Button, InlineError, SettingsGroup, SettingsRow, SkeletonText } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Choice, errorText } from './InfrastructureFields';
 import { uiTerms } from '../uiText';
+import { describeRule } from './policyText';
 
-const percent = (value: number | null) => value === null ? '집계 없음' : `${(value * 100).toFixed(1)}%`;
-const number = (value: number | null) => value === null ? '집계 없음' : value.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
+const percent = (value: number | null) => value === null ? '아직 없음' : `${(value * 100).toFixed(1)}%`;
+const number = (value: number | null) => value === null ? '아직 없음' : value.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
+const cost = (value: number | null) => value === null ? '아직 없음' : `$${value.toLocaleString('ko-KR', { maximumFractionDigits: 4 })}`;
+const duration = (ms: number | null) => {
+  if (ms === null) return '아직 없음';
+  const seconds = Math.round(ms / 100) / 10;
+  if (seconds < 60) return `${seconds.toLocaleString('ko-KR')}초`;
+  const minutes = Math.floor(seconds / 60), rest = Math.round(seconds % 60);
+  if (minutes < 60) return rest ? `${minutes}분 ${rest}초` : `${minutes}분`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 ? `${hours}시간 ${minutes % 60}분` : `${hours}시간`;
+};
+const value = (text: string) => <span className="text-ui font-medium text-ink">{text}</span>;
 
+/** 「성과와 비용」: Ghost들이 맡은 일의 결과와, 일 하나당 든 시간·토큰·비용을 한눈에 보여 준다. */
 export function ScopeMetrics({ scopeId }: { scopeId?: string | null }) {
   const { store, client } = useHost();
   const { state } = useHostState(store);
   const [metrics, setMetrics] = useState<MetricsView | null>(null);
-  const [ghostId, setGhostId] = useState(''), [slot, setSlot] = useState(''), [ruleId, setRuleId] = useState('');
+  const [ghostId, setGhostId] = useState('');
   const [error, setError] = useState(''), [loading, setLoading] = useState(true), [reload, setReload] = useState(0);
   const [selectedScope, setSelectedScope] = useState('all');
   const effectiveScopeId = scopeId !== undefined ? scopeId : selectedScope === 'all' ? undefined : selectedScope === 'global' ? null : selectedScope;
   useEffect(() => {
     let alive = true;
     setLoading(true); setError(''); setMetrics(null);
-    client.metrics({ scopeId: effectiveScopeId, ...(ghostId ? { ghostId } : {}), ...(slot ? { slot } : {}), ...(ruleId ? { ruleId } : {}) })
-      .then(value => { if (alive) setMetrics(value); })
+    client.metrics({ scopeId: effectiveScopeId, ...(ghostId ? { ghostId } : {}) })
+      .then(view => { if (alive) setMetrics(view); })
       .catch(reason => { if (alive) setError(errorText(reason)); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [client, effectiveScopeId, ghostId, slot, ruleId, reload]);
-  const rows: [string, string][] = metrics ? [
-    ['맡긴 일', number(metrics.works)], ['완료', number(metrics.completed)], ['반려', number(metrics.rejected)],
-    ['완료율', percent(metrics.completionRate)], ['반려율', percent(metrics.rejectionRate)],
-    ['수용된 일 하나의 시간', metrics.elapsedMsPerAcceptedWork === null ? '집계 없음' : `${number(metrics.elapsedMsPerAcceptedWork / 1000)}초`],
-    ['수용된 일 하나의 토큰', number(metrics.tokensPerAcceptedWork)], ['수용된 일 하나의 비용 (USD)', number(metrics.costPerAcceptedWork)],
-    ['소유자가 뒤집은 판정', number(metrics.ownerOverturnedVerdicts)], ['한도 대기 시간', `${number(metrics.quotaWaitMs / 1000)}초`], ['반복 차단', number(metrics.repeatGuardHits)],
-  ] : [];
-  return <SettingsGroup title={uiTerms.metrics} actions={<Button variant="outline" disabled={loading} onClick={() => setReload(value => value + 1)}>새로고침</Button>}>
-    <div className="infra-form">
-      {scopeId === undefined && <Choice label="범위" value={selectedScope} onChange={value => { setSelectedScope(value); setRuleId(''); }} options={[{ value: 'all', label: '모든 범위' }, { value: 'global', label: '전체 (프로젝트 없음)' }, ...(state?.scopes ?? []).map(scope => ({ value: scope.id, label: scope.name }))]}/>}
-      <div className="infra-columns"><Choice label="Ghost" value={ghostId} onChange={setGhostId} options={[{ value: '', label: '모두' }, ...(state?.ghosts ?? []).map(ghost => ({ value: ghost.id, label: ghost.name }))]}/>
-        <Choice label="모델 자리" value={slot} onChange={setSlot} options={[{ value: '', label: '모두' }, ...Object.keys(state?.settings.slots ?? {}).map(name => ({ value: name, label: name }))]}/></div>
-      <Choice label="규칙" value={ruleId} onChange={setRuleId} options={[{ value: '', label: '모두' }, ...(state?.policyRules ?? []).filter(rule => effectiveScopeId === undefined || !rule.scopeId || rule.scopeId === effectiveScopeId).map(rule => ({ value: rule.id, label: `${rule.tool} · ${rule.decision}` }))]}/>
-      {loading && <p role="status">불러오는 중…</p>}{error && <InlineError>{error}</InlineError>}
-      {metrics && <>
-        <dl className="infra-metrics">{rows.map(([label, value]) => <div className="contents" key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-        {Object.entries(metrics.rules).map(([id, counts]) => <div className="infra-record" key={id}><p className="infra-record__meta">{state?.policyRules.find(rule => rule.id === id)?.tool ?? id}</p><dl className="infra-metrics"><dt>승인</dt><dd>{counts.approved}</dd><dt>거절</dt><dd>{counts.denied}</dd></dl></div>)}
-        {(!metrics.usageComplete || !metrics.observationHistoryComplete) && <p className="infra-record__meta">{[!metrics.usageComplete && '사용량 기록 일부 없음', !metrics.observationHistoryComplete && '이전 관측 기록 일부 없음'].filter(Boolean).join(' · ')}</p>}
-      </>}
-    </div>
-  </SettingsGroup>;
+  }, [client, effectiveScopeId, ghostId, reload]);
+  const ruleRows = metrics ? Object.entries(metrics.rules)
+    .filter(([, counts]) => counts.approved !== 0 || counts.denied !== 0)
+    .map(([id, counts]) => {
+      const rule = state?.policyRules.find(item => item.id === id);
+      if (!rule) return { key: id, subject: '삭제된 규칙', description: '', counts };
+      const text = describeRule(rule, state ?? null);
+      return { key: id, subject: text.subject, description: text.conditions.length ? text.conditions.join(' · ') : text.reach, counts };
+    }) : [];
+  const note = metrics
+    ? [!metrics.usageComplete && '사용량 기록이 일부 없어 비용·토큰이 적게 보일 수 있습니다.', !metrics.observationHistoryComplete && '이전 관측 기록이 일부 없습니다.'].filter(Boolean).join(' ')
+    : '';
+  return <section className="grid gap-6">
+    <SettingsGroup title={uiTerms.metrics} actions={<Button variant="outline" disabled={loading} onClick={() => setReload(value => value + 1)}>새로고침</Button>}>
+      <div className="infra-editor">
+        {scopeId === undefined && <Choice label="범위" value={selectedScope} onChange={setSelectedScope}
+          options={[{ value: 'all', label: '모든 범위' }, { value: 'global', label: '전체 (프로젝트 없음)' }, ...(state?.scopes ?? []).map(scope => ({ value: scope.id, label: scope.name }))]} />}
+        <Choice label="Ghost" value={ghostId} onChange={setGhostId}
+          options={[{ value: '', label: '모두' }, ...(state?.ghosts ?? []).map(ghost => ({ value: ghost.id, label: ghost.name }))]} />
+        {loading && <SkeletonText label="불러오는 중…" lines={2} />}
+        {error && <InlineError>{error}</InlineError>}
+      </div>
+    </SettingsGroup>
+    {metrics && <>
+      <SettingsGroup title="결과">
+        <SettingsRow label="맡긴 일">{value(number(metrics.works))}</SettingsRow>
+        <SettingsRow label="완료">{value(number(metrics.completed))}</SettingsRow>
+        <SettingsRow label="반려">{value(number(metrics.rejected))}</SettingsRow>
+        <SettingsRow label="완료율">{value(percent(metrics.completionRate))}</SettingsRow>
+        <SettingsRow label="반려율">{value(percent(metrics.rejectionRate))}</SettingsRow>
+      </SettingsGroup>
+      <SettingsGroup title="일 하나당" description="수용된 일 기준">
+        <SettingsRow label="평균 걸린 시간">{value(duration(metrics.elapsedMsPerAcceptedWork))}</SettingsRow>
+        <SettingsRow label="평균 토큰">{value(number(metrics.tokensPerAcceptedWork))}</SettingsRow>
+        <SettingsRow label="평균 비용(USD)">{value(cost(metrics.costPerAcceptedWork))}</SettingsRow>
+      </SettingsGroup>
+      <SettingsGroup title="그 밖">
+        <SettingsRow label="내가 뒤집은 검토 결과">{value(`${metrics.ownerOverturnedVerdicts.toLocaleString('ko-KR')}번`)}</SettingsRow>
+        <SettingsRow label="사용량 한도 때문에 기다린 시간">{value(duration(metrics.quotaWaitMs))}</SettingsRow>
+        <SettingsRow label="같은 시도를 되풀이해 막은 횟수">{value(`${metrics.repeatGuardHits.toLocaleString('ko-KR')}번`)}</SettingsRow>
+      </SettingsGroup>
+      {ruleRows.length > 0 && <SettingsGroup title="승인 요청 처리" description="규칙이 승인·거절한 요청의 누적 횟수입니다.">
+        {ruleRows.map(row => <SettingsRow key={row.key} label={row.subject} description={row.description}>{value(`승인 ${row.counts.approved.toLocaleString('ko-KR')} · 거절 ${row.counts.denied.toLocaleString('ko-KR')}`)}</SettingsRow>)}
+      </SettingsGroup>}
+      {note && <p className="m-0 text-caption text-ink-3">{note}</p>}
+    </>}
+  </section>;
 }

@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import type { McpServer } from '@ghost/contract';
-import { Button, InlineError, SettingsGroup } from '../ui';
+import { Button, Checkbox, InlineError, SettingsGroup, SettingsRow } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
+import { uiTerms } from '../uiText';
 import { Choice, EditorActions, errorText, StringList, TextField } from './InfrastructureFields';
 
 export function McpSettings() {
@@ -16,19 +17,30 @@ export function McpSettings() {
     try { await client.send({ type: 'mcp.delete', serverId }); setRemoving(null); }
     catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };
-  return <section className="infra-records" aria-label="MCP 서버">
-    <SettingsGroup title="MCP 서버" actions={<Button onClick={() => { setEditing('new'); setError(''); }}>서버 추가</Button>}>
-      {error && <InlineError>{error}</InlineError>}
-      {editing && <McpEditor key={typeof editing === 'string' ? editing : editing.id} server={editing === 'new' ? null : editing} onClose={() => setEditing(null)}/>}
-      {!state?.mcpServers.length && !editing && <p className="infra-record__meta">등록된 서버가 없습니다.</p>}
-      {state?.mcpServers.map(server => <article className="infra-record" key={server.id}>
-        <div className="infra-record__head"><h3>{server.name}</h3><div className="flex gap-2"><Button variant="ghost" size="sm" onClick={() => setEditing(server)}>편집</Button><Button variant="ghost" size="sm" disabled={busy} onClick={() => setRemoving(server.id)}>삭제</Button></div></div>
-        <p className="infra-record__meta">{server.enabled ? '사용 중' : '중지'} · {server.transport.kind === 'stdio' ? server.transport.command : server.transport.url}</p>
-        <p className="infra-record__meta">읽기 도구 {server.readTools.length ? server.readTools.join(', ') : '없음'}</p>
-        {removing === server.id && <div className="infra-delete"><p>{server.name} 서버 등록을 삭제할까요?</p><div className="infra-actions"><Button variant="ghost" disabled={busy} onClick={() => setRemoving(null)}>취소</Button><Button variant="destructive" disabled={busy} onClick={() => void remove(server.id)}>서버 삭제</Button></div></div>}
-      </article>)}
-    </SettingsGroup>
-  </section>;
+  return <SettingsGroup title={uiTerms.mcp} actions={<Button onClick={() => { setEditing('new'); setError(''); }}>서버 추가</Button>}
+    description="Ghost가 쓸 수 있는 외부 도구를 연결합니다. 개발자가 준 MCP 서버의 실행 명령이나 주소가 있을 때만 필요합니다.">
+    {error && <InlineError>{error}</InlineError>}
+    {editing && <div className="px-4 py-3"><McpEditor key={typeof editing === 'string' ? editing : editing.id} server={editing === 'new' ? null : editing} onClose={() => setEditing(null)}/></div>}
+    {!state?.mcpServers.length && !editing && <p className="m-0 p-4 text-caption text-ink-2">연결해 둔 외부 도구가 없습니다.</p>}
+    {state?.mcpServers.map(server => <article className="min-w-0 border-b border-line last:border-b-0" key={server.id}>
+      <SettingsRow label={server.name} description={<>
+        <span className="block">{server.enabled ? '사용 중' : '중지'} · {server.transport.kind === 'stdio' ? server.transport.command : server.transport.url}</span>
+        {server.readTools.length > 0 && <span className="block">읽기 전용 도구: {server.readTools.join(', ')}</span>}
+      </>}>
+        <span className="flex gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setEditing(server)}>편집</Button>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRemoving(server.id)}>삭제</Button>
+        </span>
+      </SettingsRow>
+      {removing === server.id && <div className="grid gap-3 px-4 pb-4">
+        <p className="m-0">{server.name} 서버를 삭제할까요?</p>
+        <div className="infra-actions">
+          <Button variant="ghost" disabled={busy} onClick={() => setRemoving(null)}>취소</Button>
+          <Button variant="destructive" disabled={busy} onClick={() => void remove(server.id)}>서버 삭제</Button>
+        </div>
+      </div>}
+    </article>)}
+  </SettingsGroup>;
 }
 
 function McpEditor({ server, onClose }: { server: McpServer | null; onClose(): void }) {
@@ -57,20 +69,26 @@ function McpEditor({ server, onClose }: { server: McpServer | null; onClose(): v
     } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };
   return <form className="infra-form" onSubmit={event => void save(event)} aria-label={server ? 'MCP 서버 편집' : 'MCP 서버 추가'}>
-    <fieldset disabled={busy} className="infra-form border-0 p-0 m-0">
+    <fieldset disabled={busy} className="infra-form border-0 p-0 m-0 min-w-0">
       <TextField label="서버 이름" value={name} onChange={setName} required maxLength={128}/>
-      <label className="flex items-center gap-2"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)}/>사용</label>
-      <Choice label="연결 방식" value={kind} onChange={value => setKind(value as 'stdio' | 'http')} options={[{ value: 'stdio', label: '표준 입출력 (stdio)' }, { value: 'http', label: 'HTTP' }]}/>
+      <label className="flex items-center gap-2"><Checkbox checked={enabled} disabled={busy} onCheckedChange={checked => setEnabled(checked === true)}/>사용</label>
+      <Choice label="연결 방식" value={kind} onChange={value => setKind(value as 'stdio' | 'http')} options={[{ value: 'stdio', label: '내 Mac에서 실행 (stdio)' }, { value: 'http', label: '인터넷 주소 (HTTP)' }]}/>
       {kind === 'stdio' ? <>
         <TextField label="실행 파일" value={command} onChange={setCommand} required/>
-        <StringList label="인수" values={args} onChange={setArgs} max={256}/>
-        <TextField label="작업 디렉터리" value={cwd} onChange={setCwd} placeholder="Host 기본 디렉터리"/>
-        <StringList label="환경 변수 이름" values={env} onChange={setEnv} max={64} placeholder="API_TOKEN"/>
+        <StringList label="실행 옵션" values={args} onChange={setArgs} max={256}/>
+        <TextField label="실행 폴더" value={cwd} onChange={setCwd} placeholder="비워 두면 기본 폴더"/>
+        <div className="grid gap-1 min-w-0">
+          <StringList label="환경 변수 이름" values={env} onChange={setEnv} max={64} placeholder="API_TOKEN"/>
+          <p className="m-0 text-caption text-ink-2">값은 입력하지 않습니다. 이름만 적으면 Host가 가진 값을 전달합니다.</p>
+        </div>
       </> : <>
         <TextField label="서버 URL" type="url" required value={url} onChange={setUrl}/>
-        <Choice label="인증 연결" value={connectionId} onChange={setConnectionId} options={[{ value: '', label: '없음' }, ...(state?.connections ?? []).map(connection => ({ value: connection.id, label: connection.name }))]}/>
+        <Choice label="로그인에 쓸 연결 계정" value={connectionId} onChange={setConnectionId} options={[{ value: '', label: '없음' }, ...(state?.connections ?? []).map(connection => ({ value: connection.id, label: connection.name }))]}/>
       </>}
-      <StringList label="읽기 도구" values={readTools} onChange={setReadTools} max={1024}/>
+      <div className="grid gap-1 min-w-0">
+        <StringList label="읽기 도구" values={readTools} onChange={setReadTools} max={1024}/>
+        <p className="m-0 text-caption text-ink-2">데이터를 바꾸지 않는 도구의 이름. 여기 적은 도구는 묻지 않고 쓸 수 있습니다.</p>
+      </div>
     </fieldset>
     {error && <InlineError>{error}</InlineError>}
     <EditorActions busy={busy} onCancel={onClose}/>

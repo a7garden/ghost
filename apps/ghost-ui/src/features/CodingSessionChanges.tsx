@@ -3,7 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import type { CodingSessionChanges as Changes } from '../host/client';
 import { useHost } from '../host/context';
 import { Modal } from '../components/Modal';
-import { Button, InlineError } from '../ui';
+import { Button, InlineError, SkeletonRows } from '../ui';
 import { HerdrDiffText } from './HerdrChanges';
 import { changeStatus } from './herdrChangesDisplay';
 import { codingError } from './CodingSessionModel';
@@ -27,7 +27,7 @@ export function CodingSessionChanges({ id, revision, onClose }: { id: string; re
 
   return <Modal title="작업 변경" onClose={onClose} drawer className="embedded-changes-sheet">
     {error && <InlineError onRetry={refresh} retryLabel="다시 불러오기">{error}</InlineError>}
-    {!result && !error && <p className="embedded-muted" role="status">변경 사항을 불러오는 중…</p>}
+    {!result && !error && <SkeletonRows label="변경 사항을 불러오는 중…"/>}
     {result && <>
       <div className="embedded-changes__bar">
         <span>{result.files.length ? `${result.files.length}개 파일` : '변경된 파일 없음'}</span>

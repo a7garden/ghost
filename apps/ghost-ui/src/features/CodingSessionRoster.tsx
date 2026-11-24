@@ -4,7 +4,7 @@ import type { CodingSession, CodingThinking } from '@ghost/contract';
 import { Modal } from '../components/Modal';
 import { useHost } from '../host/context';
 import { FolderField } from '../components/FolderPicker';
-import { Button, InlineError } from '../ui';
+import { Button, InlineError, Skeleton, SkeletonRows } from '../ui';
 import { directoryName } from './CodingModel';
 import { useEmbeddedModels } from './CodingSessionLive';
 import { codingError, codingThinkingLabels, codingThinkingOptions, embeddedSessionPath, modelKey } from './CodingSessionModel';
@@ -63,13 +63,14 @@ export function StartSession({ directories, allowDirect = false, onCreated, onCl
         별도 worktree에서 작업
       </label>}
       <label htmlFor={`${fields}-model`}>모델</label>
-      <select id={`${fields}-model`} disabled={pending || !models?.length} value={model ? modelKey(model) : ''} onChange={event => {
-        selectModel(event.target.value);
-        selectThinking(undefined);
-      }}>
-        <option value="">{modelError ? '불러오지 못함' : models?.length ? '코딩 기본값' : models ? '사용할 모델 없음' : '불러오는 중…'}</option>
-        {models?.map(candidate => <option key={modelKey(candidate)} value={modelKey(candidate)}>{candidate.name} · {candidate.provider}</option>)}
-      </select>
+      {!models && !modelError ? <Skeleton className="h-8 w-full" role="status" aria-label="모델 불러오는 중…"/>
+        : <select id={`${fields}-model`} disabled={pending || !models?.length} value={model ? modelKey(model) : ''} onChange={event => {
+          selectModel(event.target.value);
+          selectThinking(undefined);
+        }}>
+          <option value="">{modelError ? '불러오지 못함' : models?.length ? '코딩 기본값' : '사용할 모델 없음'}</option>
+          {models?.map(candidate => <option key={modelKey(candidate)} value={modelKey(candidate)}>{candidate.name} · {candidate.provider}</option>)}
+        </select>}
       {model && levels.length > 0 && <>
         <label htmlFor={`${fields}-thinking`}>생각 수준</label>
         <select id={`${fields}-thinking`} value={level ?? ''} disabled={pending} onChange={event => selectThinking(levels.find(candidate => candidate === event.target.value))}>
@@ -118,7 +119,7 @@ export function CodingSessionRoster({ directories, selected, observed, onOpen }:
       <Button type="button" variant="ghost" size="sm" onClick={() => setAdding(true)}><Plus aria-hidden="true"/>새 세션</Button>
     </header>
     {error ? <InlineError onRetry={reload} retryLabel="다시 불러오기">{error}</InlineError>
-      : !sessions && <span className="sr-only" role="status">내장 세션 불러오는 중…</span>}
+      : !sessions && <SkeletonRows label="내장 세션 불러오는 중…" rows={2} className="px-2 pt-2"/>}
     {rows.length > 0 && <ul>{rows.map(session => <li key={session.id}>
       <a href={`#${embeddedSessionPath(session.id)}`} aria-current={selected === session.id ? 'page' : undefined}
         onClick={event => {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileUp, KeyRound, Pencil, Plus, Trash2 } from 'lucide-react';
-import { Badge, Button, Checkbox, FormField, InlineError, Input, SegmentedControl, SettingsGroup, SettingsRow, Textarea } from '../ui'
+import { Badge, Button, Checkbox, FormField, InlineError, Input, SegmentedControl, SettingsGroup, SettingsRow, SkeletonRows, Textarea } from '../ui'
 import type { Ghost, VaultItem, VaultItemKind } from '@ghost/contract';
 import type { VaultItemWrite } from '../host/client';
 import { useHost } from '../host/context';
@@ -185,7 +185,7 @@ export function VaultView() {
       </span>
     </div>
     {loadError && <InlineError>{loadError}</InlineError>}
-    {items === null && !loadError && <p className="m-0 text-ui text-ink-2" role="status">금고를 불러오는 중…</p>}
+    {items === null && !loadError && <SkeletonRows label="금고를 불러오는 중…" rows={4}/>}
     {items?.length
       ? <SettingsGroup title={<span className="sr-only">금고</span>}>{items.map(item => <SettingsRow key={item.id}
         label={<span className="flex min-w-0 flex-col gap-1.5">

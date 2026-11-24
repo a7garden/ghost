@@ -2,7 +2,7 @@ import { useEffect, useMemo, useReducer, useState } from 'react';
 import { ArrowLeft, ChevronRight, GitBranch, RefreshCw, WrapText } from 'lucide-react';
 import type { HerdrChanges, HerdrDiff, HerdrPaneView } from '@ghost/contract';
 import { useHost } from '../host/context';
-import { Button, InlineError } from '../ui';
+import { Button, InlineError, SkeletonRows, SkeletonText } from '../ui';
 import { changeStatus, diffLines } from './herdrChangesDisplay';
 
 export function usePaneChanges(pane: HerdrPaneView) {
@@ -62,7 +62,7 @@ export function HerdrChangesView({ pane, compact, data, error, onRefresh, revisi
       <Button type="button" variant="ghost" size="icon" aria-label="변경 새로고침" title="변경 새로고침" onClick={onRefresh}><RefreshCw aria-hidden="true"/></Button>
     </header>}
     {error && <InlineError onRetry={onRefresh} retryLabel="다시 불러오기">{error}</InlineError>}
-    {!data && !error && <p role="status" className="coding-pane-status">변경을 불러오는 중…</p>}
+    {!data && !error && <SkeletonRows label="변경을 불러오는 중…" className="p-6"/>}
     {data && <div className="herdr-change-work" data-file={Boolean(path) || undefined}>
       {(!compact || !path) && <div className="herdr-change-index">
         {data.commits.length > 0 && <details className="herdr-commits">
@@ -92,7 +92,7 @@ export function HerdrChangesView({ pane, compact, data, error, onRefresh, revisi
           {compact && <Button type="button" variant="ghost" size="icon" aria-label="변경 새로고침" title="변경 새로고침" onClick={onRefresh}><RefreshCw aria-hidden="true"/></Button>}
         </header>
         {diffError ? <InlineError onRetry={onRefresh} retryLabel="다시 불러오기">{diffError}</InlineError>
-          : !diff ? <p role="status" className="coding-pane-status">파일 차이를 불러오는 중…</p>
+          : !diff ? <SkeletonText label="파일 차이를 불러오는 중…" lines={5} className="p-6"/>
           : <>
             {diff.diff ? <HerdrDiffText value={diff.diff} wrap={wrap}/> : <p className="coding-pane-status">표시할 파일 차이가 없습니다.</p>}
             {diff.truncated && <p className="coding-hint">파일 차이의 일부만 표시합니다.</p>}

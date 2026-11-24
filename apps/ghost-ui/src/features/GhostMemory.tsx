@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, FileText, History, Pencil, Plus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react';
 import type { Ghost, MemoryFile, MemoryRevision, MemoryView } from '@ghost/contract';
-import { Button, InlineError, Input, SettingsRow } from '../ui';
+import { Button, InlineError, Input, SettingsRow, SkeletonText } from '../ui';
 import { Modal } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useHost } from '../host/context';
@@ -277,7 +277,7 @@ function RevisionHistory({ ghostId, path, now, onClose }: { ghostId: string; pat
   }, [client, ghostId, path]);
   return <Modal title={`${path} 버전 기록`} onClose={onClose} className="sm:max-w-[560px]">
     {error && <InlineError>{error}</InlineError>}
-    {!revisions && !error && <p className="m-0 text-caption text-ink-2">읽는 중…</p>}
+    {!revisions && !error && <SkeletonText label="읽는 중…" lines={3}/>}
     {revisions?.length === 0 && <p className="m-0 text-caption text-ink-2">기록이 없습니다.</p>}
     {revisions?.map(revision => <div key={revision.revision} className="memory-revision">
       <p className="memory-revision__line">

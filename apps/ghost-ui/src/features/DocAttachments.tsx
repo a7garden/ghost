@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { DocRef, PageSummary } from '@ghost/contract';
-import { Button, InlineError } from '../ui';
+import { Button, FormField, InlineError, Skeleton } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Choice, errorText, TextField } from './InfrastructureFields';
@@ -33,7 +33,8 @@ function PageChoice({ scopeId, locator, onChange, label }: { scopeId: string; lo
     return () => { alive = false; };
   }, [client, scopeId]);
   return <div className="infra-form">
-    <Choice label={label} value={locator} onChange={onChange} required options={[{ value: '', label: loading ? '불러오는 중…' : '선택' }, ...(!pages.some(page => page.locator === locator) && locator ? [{ value: locator, label: locator }] : []), ...pages.map(page => ({ value: page.locator, label: page.title }))]}/>
+    {loading ? <FormField label={label} required>{() => <Skeleton className="h-9 w-full" role="status" aria-label="불러오는 중…"/>}</FormField>
+      : <Choice label={label} value={locator} onChange={onChange} required options={[{ value: '', label: '선택' }, ...(!pages.some(page => page.locator === locator) && locator ? [{ value: locator, label: locator }] : []), ...pages.map(page => ({ value: page.locator, label: page.title }))]}/>}
     {error && <InlineError>{error}</InlineError>}
   </div>;
 }

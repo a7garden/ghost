@@ -6,7 +6,7 @@ import { CompactTitleSlot } from '../components/AppFrame';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { CodingSessionPatch } from '../host/client';
 import { useHost } from '../host/context';
-import { Button, Conversation, InlineError, Input, Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { Button, Conversation, InlineError, Input, Popover, PopoverContent, PopoverTrigger, SkeletonText } from '../ui';
 import { CodingSessionChanges } from './CodingSessionChanges';
 import { CodingSessionComposer } from './CodingSessionComposer';
 import { CodingSessionDialog } from './CodingSessionDialog';
@@ -138,7 +138,7 @@ export function CodingSession({ id, onUpdate }: { id: string; onUpdate(session: 
         }}/>}
     >
       {!session && error && <InlineError onRetry={reconnect} retryLabel="다시 연결">{error}</InlineError>}
-      {!ready && !error && <p className="embedded-muted" role="status">코딩 기록을 불러오는 중…</p>}
+      {!ready && !error && <SkeletonText label="코딩 기록을 불러오는 중…" lines={4} className="py-2"/>}
       {ready && !items.length && !dialog && <p className="embedded-muted">{closed ? '기록 없음' : '아직 지시가 없습니다.'}</p>}
       <CodingSessionTranscript id={id} items={items}/>
       {dialog && !closed && <CodingSessionDialog key={dialog.id} sessionId={id} dialog={dialog} disabled={!connected}

@@ -195,7 +195,7 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
     </Panel>
     <SkillsPanel catalog={catalog} skills={ghost.skills} onChange={skills => void update({ skills })}/>
     <Panel title="도구"><CapabilityBoard tools={ghost.tools} onChange={tools => void update({ tools })}/></Panel>
-    <Panel title="추가 도구"><PatternGrants key={JSON.stringify(ghost.tools)} tools={ghost.tools} onSave={tools => update({ tools })}/></Panel>
+    <Panel title={uiTerms.advanced}><PatternGrants key={JSON.stringify(ghost.tools)} tools={ghost.tools} onSave={tools => update({ tools })}/></Panel>
     <Panel title="붙임"><GhostAttachments key={JSON.stringify(ghost.attachments)} ghost={ghost}/></Panel>
     <Panel title="기억"><GhostMemory ghost={ghost}/></Panel>
     <Panel title="운영">
@@ -212,7 +212,7 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
           <Crown aria-hidden="true"/>메인으로 지정
         </Button>
       </SettingsRow>}
-      <SettingsRow label="PC 직접 실행" description="이 Ghost가 샌드박스 없이 이 Mac의 파일과 셸 명령을 직접 실행합니다. Mac 전체와 네트워크에 영향을 줄 수 있고, 활동의 PR 댓글·메일 회신 승인 설정으로 제한되지 않습니다. 허용을 끄면 진행 중인 PC 작업도 중지됩니다.">
+      <SettingsRow label="PC 직접 실행" description="이 Ghost가 보호 장치 없이 이 Mac의 파일과 명령을 직접 실행합니다. Mac 전체와 인터넷에 영향을 줄 수 있습니다. 끄면 진행 중인 PC 작업도 멈춥니다.">
         <Switch checked={ghost.hostExecution === true} disabled={saving} aria-label="PC 직접 실행 허용"
           onCheckedChange={next => void update({ hostExecution: next })}/>
       </SettingsRow>
