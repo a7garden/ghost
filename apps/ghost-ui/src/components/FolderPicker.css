@@ -1,0 +1,23 @@
+.folder-picker-sheet { max-width: 480px; }
+.folder-picker { display: grid; gap: 10px; min-width: 0; }
+.folder-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; }
+.folder-shortcuts button { padding: 4px 10px; border-radius: 999px; font-size: var(--text-ui); color: var(--ghost-ink2); background: var(--ghost-hover); }
+.folder-shortcuts button[data-selected] { color: var(--ghost-ink); font-weight: 650; }
+.folder-current { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: var(--text-ui); color: var(--ghost-ink2); }
+.folder-current span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: start; }
+.folder-list { display: grid; align-content: start; gap: 1px; height: min(46vh, 340px); margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; }
+.folder-list button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px; border-radius: var(--radius-control); text-align: start; font-size: var(--text-ui); }
+.folder-list button:hover, .folder-list button:focus-visible { background: var(--ghost-hover); }
+.folder-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-list svg, .folder-field svg { flex: none; }
+.folder-empty { padding: 7px 9px; color: var(--ghost-ink3); font-size: var(--text-ui); }
+.folder-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.folder-actions label { display: flex; align-items: center; gap: 6px; font-size: var(--text-ui); color: var(--ghost-ink2); }
+.folder-field { display: grid; gap: 5px; font-size: var(--text-ui); min-width: 0; }
+.folder-field-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.folder-field-button { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; padding: 8px 10px; border: 1px solid var(--ghost-line-strong); border-radius: var(--radius-control); text-align: start; }
+.folder-field-button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-field-button span[data-empty] { color: var(--ghost-ink3); }
+.folder-chosen { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.folder-chosen li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.folder-chosen span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

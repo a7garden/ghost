@@ -196,7 +196,7 @@ function HerdrCodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, on
     {embeddedSessionId !== null ? <div className="coding-pane"><CodingSession key={embeddedSessionId} id={embeddedSessionId} onUpdate={setEmbeddedView}/></div>
       : showDetail ? <div className="coding-pane" data-enter key={creating ? 'new' : paneId}>
       {(required || (compact && errors)) && <div className="coding-pane-setup">{errors}{required && panel}</div>}
-      {creating ? <NewHerdrWorkspace scopes={scopes} setup={setup} onCancel={onCancel} onStarted={changed}/>
+      {creating ? <NewHerdrWorkspace setup={setup} onCancel={onCancel} onStarted={changed}/>
         : !paneId ? <div className="coding-pane-status"><InlineError>herdr 패널 주소가 올바르지 않습니다.</InlineError></div>
         : paneUnavailable || sessionChanged || missing ? null
         : pane && paneSession ? <OpenHerdrPane key={`${paneSession}/${paneId}`} pane={pane} compact={compact} onChanged={refresh} onGone={paneGone}

@@ -1,6 +1,7 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
-import { Check, ChevronDown, FolderOpen, Plus } from 'lucide-react';
-import { type CodingSetup, type HerdrAgentKind, type HerdrPaneView, type HerdrWorkspaceCreate, type Scope } from '@ghost/contract';
+import { Check, ChevronDown, Plus } from 'lucide-react';
+import { type CodingSetup, type HerdrAgentKind, type HerdrPaneView, type HerdrWorkspaceCreate } from '@ghost/contract';
+import { FolderField } from '../components/FolderPicker';
 import { Button, FormField, InlineError, Input, Popover, PopoverContent, PopoverTrigger, SelectField, Switch, Textarea } from '../ui';
 import { useHost } from '../host/context';
 import { submitCodingOnShortcut } from './herdrDisplay';
@@ -91,26 +92,15 @@ export function TaskField() {
     className="field-sizing-fixed min-h-20 resize-y" aria-keyshortcuts="Meta+Enter Control+Enter" onKeyDown={submitCodingOnShortcut}/>}</FormField>;
 }
 
-function RepositoryField({ scopes, repo, onChange }: { scopes: Scope[]; repo: string; onChange(path: string): void }) {
-  const [open, setOpen] = useState(false);
-  const paths = new Map<string, string>();
-  for (const scope of scopes) for (const path of scope.paths) if (path.startsWith('/') && !paths.has(path)) paths.set(path, scope.name);
-  return <FormField label="디렉터리" required>{props => <div className="coding-repo">
-    <Input {...props} name="cwd" value={repo} onChange={event => onChange(event.currentTarget.value)}
-      placeholder="/Users/…" maxLength={4096} autoCapitalize="none" autoCorrect="off" spellCheck={false}/>
-    {paths.size > 0 && <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild><Button variant="outline" size="icon" type="button" aria-label="프로젝트 경로 선택"><FolderOpen aria-hidden="true"/></Button></PopoverTrigger>
-      <PopoverContent className="coding-repo-picker" align="end" aria-label="프로젝트 경로 선택">
-        {[...paths].map(([path, name]) => <button className="coding-repo-option" type="button" key={path} onClick={() => { onChange(path); setOpen(false); }}>
-          <strong>{name}</strong><code>{path}</code>
-        </button>)}
-      </PopoverContent>
-    </Popover>}
-  </div>}</FormField>;
+function RepositoryField({ repo, onChange }: { repo: string; onChange(path: string): void }) {
+  return <>
+    <FolderField label="디렉터리" value={repo} onChange={onChange}/>
+    <input type="hidden" name="cwd" value={repo}/>
+  </>;
 }
 
-export function NewHerdrWorkspace({ scopes, setup, onStarted, onCancel }: {
-  scopes: Scope[]; setup: CodingSetup | null; onStarted(pane: HerdrPaneView): void; onCancel(): void;
+export function NewHerdrWorkspace({ setup, onStarted, onCancel }: {
+  setup: CodingSetup | null; onStarted(pane: HerdrPaneView): void; onCancel(): void;
 }) {
   const { client } = useHost();
   const [agent, setAgent] = useState<HerdrAgentKind | 'shell'>();
@@ -152,7 +142,7 @@ export function NewHerdrWorkspace({ scopes, setup, onStarted, onCancel }: {
     <form className="coding-new-form" onSubmit={event => void start(event)} aria-busy={pending || undefined}>
       <h2 id={titleId}>새 스페이스</h2>
       <fieldset disabled={pending}>
-        <RepositoryField scopes={scopes} repo={repo} onChange={setRepo}/>
+        <RepositoryField repo={repo} onChange={setRepo}/>
         <AgentFields setup={setup} value={selected} pending={pending} onChange={value => setAgent(value ?? 'shell')}/>
         {selected && <TaskField/>}
         <AgentOptionsSection launch={launch} risks={worktree ? [] : [{ label: '직접 쓰기', danger: true }]}>

@@ -64,6 +64,7 @@ import { mergeFrames } from "../integrations/herdr.ts";
 import { HERDR_PANE } from "../integrations/herdr-state.ts";
 import type { OmpInfoProvider } from "../integrations/omp.ts";
 import { checkUploads, saveUpload, UPLOAD_MAX_BYTES } from "../integrations/uploads.ts";
+import { listFolders } from "./folders.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
 import { ProviderQuotas } from "../integrations/provider-quota.ts";
@@ -547,6 +548,16 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       }
     }
 
+    if (pathname === "/api/folders" && request.method === "GET") {
+      try {
+        if (access.principal.kind !== "owner" && access.principal.kind !== "device") throw new CommandError("forbidden", "폴더 목록은 소유자만 볼 수 있습니다.");
+        const spaces = deps.workbench?.read().spaces ?? [];
+        const known = [...core.ledger.scopes().flatMap((scope) => scope.paths), ...spaces.map((space) => space.root).filter((root): root is string => root !== null)];
+        return json(listFolders(url.searchParams.get("path"), { stateRoot: config.root, known, hidden: url.searchParams.get("hidden") === "1" }));
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
     if (pathname === "/api/state" && request.method === "GET") {
       try {
         return json(snapshot(core, access));

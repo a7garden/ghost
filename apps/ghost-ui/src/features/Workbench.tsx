@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'rea
 import { ArrowLeftRight, ChevronDown, Ellipsis, Folder, Plus, SquareTerminal, MessagesSquare } from 'lucide-react';
 import type { Pane, Scope, Space, Tab, WorkbenchDirection, WorkbenchPaneCreate, WorkbenchState } from '@ghost/contract';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { FolderField } from '../components/FolderPicker';
 import { Modal } from '../components/Modal';
 import { HostError } from '../host/client';
 import { useHost } from '../host/context';
@@ -45,8 +46,7 @@ function NameSheet({ title, initial = '', withRoot, onSave, onClose }: {
         .finally(() => { formed.current = false; setPending(false); });
     }}>
       <label>이름<Input value={name} required maxLength={200} disabled={pending} onChange={event => setName(event.target.value)}/></label>
-      {withRoot && <label>작업 폴더 (선택)<Input value={root} maxLength={4096} disabled={pending} autoCapitalize="none" autoCorrect="off"
-        spellCheck={false} placeholder="/Projects/…" onChange={event => setRoot(event.target.value)}/></label>}
+      {withRoot && <FolderField label="작업 폴더 (선택)" optional value={root} disabled={pending} onChange={setRoot}/>}
       {error && <InlineError>{error}</InlineError>}
       <Button className="justify-self-end" disabled={pending || !name.trim()} type="submit">{pending ? '저장 중…' : '저장'}</Button>
     </form>

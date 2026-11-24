@@ -74,7 +74,7 @@ import type {
   WorkDetail,
   VoiceSettings,
 } from '@ghost/contract';
-import type { WorkbenchState, WorkbenchTerminalBinding } from '@ghost/contract';
+import type { FolderListing, WorkbenchState, WorkbenchTerminalBinding } from '@ghost/contract';
 import { TERMINAL_BEARER_PREFIX, TERMINAL_PROTOCOL, type TerminalCreate, type TerminalView } from '@ghost/contract';
 
 declare global {
@@ -337,6 +337,11 @@ export class HostClient {
       ...(enabled === undefined ? { cache: 'no-store' } : { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }),
       signal,
     });
+  }
+
+  folders(path: string | null, hidden: boolean, signal?: AbortSignal): Promise<FolderListing> {
+    const query = new URLSearchParams({ ...(path ? { path } : {}), ...(hidden ? { hidden: '1' } : {}) });
+    return this.json(`/api/folders${query.size ? `?${query}` : ''}`, { signal });
   }
 
   codingSessions(signal?: AbortSignal): Promise<CodingSession[]> {

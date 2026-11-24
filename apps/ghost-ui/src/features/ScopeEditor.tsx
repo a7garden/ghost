@@ -3,7 +3,8 @@ import type { DocRef, Limits, Scope } from '@ghost/contract';
 import { Button, InlineError } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
-import { Choice, EditorActions, errorText, StringList, TextField } from './InfrastructureFields';
+import { Choice, EditorActions, errorText, TextField } from './InfrastructureFields';
+import { FolderField, FolderList } from '../components/FolderPicker';
 import { DocAttachments } from './DocAttachments';
 import { LimitFields } from './LimitSettings';
 import { DEFAULT_LIMITS } from '@ghost/contract';
@@ -34,8 +35,8 @@ export function ScopeEditor({ scope, onClose, onSaved }: { scope?: Scope; onClos
     <fieldset className="infra-form border-0 p-0 m-0" disabled={busy}>
       <TextField label="프로젝트 이름" required value={name} onChange={setName} maxLength={128}/>
       <Choice label="받을 Ghost" value={ghostId} onChange={setGhostId} options={[{ value: '', label: '기본 Ghost' }, ...(state?.ghosts ?? []).filter(ghost => ghost.state === 'active' && !ghost.deletedAt).map(ghost => ({ value: ghost.id, label: ghost.name }))]}/>
-      <StringList label="읽기 경로" values={paths} onChange={setPaths} placeholder="/Users/…"/>
-      <TextField label="문서 금고 경로 (선택)" value={vaultPath} onChange={setVaultPath} placeholder="/Users/…"/>
+      <FolderList label="읽기 경로" values={paths} onChange={setPaths}/>
+      <FolderField label="문서 금고 경로 (선택)" optional value={vaultPath} onChange={setVaultPath}/>
       <Choice label="상태" value={status} onChange={value => setStatus(value as Scope['state'])} options={[{ value: 'active', label: '진행' }, { value: 'paused', label: '멈춤' }]}/>
       <DocAttachments value={attachments} onChange={setAttachments} scopeId={scope?.id}/>
       <details><summary>프로젝트 한도</summary><div className="infra-form pt-4"><p className="infra-record__meta">비운 항목은 전체 한도를 따릅니다.</p><LimitFields value={limits} onChange={setLimits} inherited={state?.settings.limits ?? DEFAULT_LIMITS}/><Button type="button" variant="ghost" onClick={() => setLimits({})}>전체 한도 따르기</Button></div></details>

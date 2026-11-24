@@ -3,7 +3,8 @@ import { GitBranch, Plus } from 'lucide-react';
 import type { CodingSession, CodingThinking } from '@ghost/contract';
 import { Modal } from '../components/Modal';
 import { useHost } from '../host/context';
-import { Button, InlineError, Input } from '../ui';
+import { FolderField } from '../components/FolderPicker';
+import { Button, InlineError } from '../ui';
 import { directoryName } from './CodingModel';
 import { useEmbeddedModels } from './CodingSessionLive';
 import { codingError, codingThinkingLabels, codingThinkingOptions, embeddedSessionPath, modelKey } from './CodingSessionModel';
@@ -54,10 +55,9 @@ export function StartSession({ directories, allowDirect = false, onCreated, onCl
       <label htmlFor={`${fields}-repo`}>{allowDirect ? '작업 폴더' : '저장소'}</label>
       {directories.length > 0 && <select id={`${fields}-repo`} value={directory} disabled={pending} onChange={event => selectDirectory(event.target.value)}>
         {directories.map(path => <option key={path} value={path}>{directoryName(path)} · {path}</option>)}
-        <option value={OTHER}>경로 직접 입력</option>
+        <option value={OTHER}>다른 폴더 선택…</option>
       </select>}
-      {directory === OTHER && <Input id={directories.length ? `${fields}-path` : `${fields}-repo`} aria-label={directories.length ? (allowDirect ? '작업 폴더 경로' : '저장소 경로') : undefined}
-        value={custom} maxLength={4096} placeholder="/Projects/…" autoCapitalize="none" autoCorrect="off" spellCheck={false} disabled={pending} onChange={event => setCustom(event.target.value)}/>}
+      {directory === OTHER && <FolderField label={allowDirect ? '작업 폴더' : '저장소'} showLabel={false} value={custom} disabled={pending} onChange={setCustom}/>}
       {allowDirect && <label className="flex items-center gap-2">
         <input type="checkbox" checked={worktree} disabled={pending} onChange={event => setWorktree(event.target.checked)}/>
         별도 worktree에서 작업

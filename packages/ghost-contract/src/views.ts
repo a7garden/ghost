@@ -269,3 +269,18 @@ export const MetricsView = Type.Object({
   rules: Type.Record(Type.String(), Type.Object({ approved: Type.Integer({ minimum: 0 }), denied: Type.Integer({ minimum: 0 }) })),
 });
 export type MetricsView = Static<typeof MetricsView>;
+
+/** GET /api/folders?path=&hidden=: the sub-folders of one directory on the Host's Mac, for choosing a work folder. */
+export const FolderListing = Type.Object({
+  /** The directory shown, resolved to its real path. */
+  path: Type.String(),
+  /** Null at the filesystem root. */
+  parent: nullable(Type.String()),
+  home: Type.String(),
+  /** True when the listing was cut at the entry limit. */
+  truncated: Type.Boolean(),
+  entries: Type.Array(Type.Object({ name: Type.String(), path: Type.String(), git: Type.Boolean() })),
+  /** Places to start from: the home folder and the folders the owner already uses. */
+  shortcuts: Type.Array(Type.Object({ label: Type.String(), path: Type.String() })),
+});
+export type FolderListing = Static<typeof FolderListing>;

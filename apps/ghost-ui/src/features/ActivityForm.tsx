@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button, FormField, InlineError, Input, SegmentedControl, SelectField, Switch, Textarea } from '../ui';
 import { type Activity, type ActivityConfig, type ActivitySource, type Connection, type ExecutionTarget, type Ghost, type State } from '@ghost/contract';
+import { FolderField } from '../components/FolderPicker';
 import { Modal } from '../components/Modal';
 import { toolLabels } from './toolLabels';
 import { visibleGhosts } from './ghostState';
@@ -173,10 +174,8 @@ export function ActivityFormDialog({ state, connections, activity, initialScopeI
       </FormField>
       {draft.executionKind === 'host'
         ? <>
-          <FormField label="작업 폴더" required description="이 폴더 안에서 파일과 명령을 곧바로 실행합니다.">
-            {control => <Input {...control} value={draft.hostCwd} placeholder="/Users/garden/Workspace" maxLength={4096} disabled={saving}
-              onChange={event => set({ hostCwd: event.target.value })}/>}
-          </FormField>
+          <FolderField label="작업 폴더" value={draft.hostCwd} disabled={saving} onChange={hostCwd => set({ hostCwd })}/>
+          <p className="infra-record__meta">이 폴더 안에서 파일과 명령을 곧바로 실행합니다.</p>
           <p className="activity-warn">이 Mac 실행은 샌드박스 없이 셸을 씁니다. PC 전체와 네트워크에 영향을 줄 수 있고 아래 PR 댓글·메일 회신 승인 설정으로 제한되지 않습니다.</p>
         </>
         : <p className="activity-warn activity-warn--calm">{draft.executionKind === 'workspace' ? '분리된 작업 공간에서 실행됩니다.' : '컨테이너에서 실행됩니다.'}</p>}
