@@ -70,6 +70,7 @@ import { OAuthLogins } from "./oauth.ts";
 import { ProviderQuotas } from "../integrations/provider-quota.ts";
 import { ConnectionOAuth } from "./connection-oauth.ts";
 import { CloudflareAccessVerifier } from "./cloudflare-access.ts";
+import { TailscaleIdentity } from "./tailscale-identity.ts";
 import { Access } from "../core/access.ts";
 import { execute, hashSecret } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
@@ -186,6 +187,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   }
   const edge = config.cloudflareAccess ? new CloudflareAccessVerifier(config.cloudflareAccess, fetch, Date.now, core.log) : null;
   if (edge !== null) allowedHosts.add(edge.host);
+  const tailnet = config.tailscaleIdentity ? new TailscaleIdentity(config.tailscaleIdentity) : null;
+  if (tailnet !== null) allowedHosts.add(tailnet.host);
   const connectionOAuth = new ConnectionOAuth(core, { root: config.root, publicOrigin });
   core.activitySources?.setOAuthRefresher?.(connection => connectionOAuth.refresh(connection));
 
@@ -485,6 +488,11 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (viaEdge && (await edge.verify(request)) === null) return error("forbidden", "Cloudflare Access login required", 401);
     const peer = bound.requestIP(request);
     const injectToken = loopbackHosts.has(host) && peer !== null && isLoopbackAddress(peer.address);
+    // Tailnet identity is ambient like a cookie: only the tailnet Host, a loopback peer (tailscaled) and a
+    // same-origin or non-browser request may use it, so no other site or tailnet service can ride it.
+    const siteOfRequest = request.headers.get("sec-fetch-site");
+    const tailnetOwner = tailnet !== null && host === tailnet.host && peer !== null && isLoopbackAddress(peer.address)
+      && siteOfRequest !== "cross-site" && siteOfRequest !== "same-site" && tailnet.login(request.headers) !== null;
 
     const url = new URL(request.url);
     const pathname = url.pathname;
@@ -508,7 +516,9 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     }
 
     const terminalsRoute = pathname === "/api/terminals" || pathname.startsWith("/api/terminals/");
-    const access = viaEdge ? new Access({ kind: "owner" }) : authenticate(request, terminalsRoute ? terminalStreamBearer(request, pathname) : null);
+    const bearerAccess = viaEdge ? null : authenticate(request, terminalsRoute ? terminalStreamBearer(request, pathname) : null);
+    const viaIdentity = !viaEdge && bearerAccess === null && tailnetOwner;
+    const access = viaEdge || viaIdentity ? new Access({ kind: "owner" }) : bearerAccess;
     if (access === null) return error("forbidden", "missing or invalid bearer token", 401);
     const controlRoute = pathname === "/api/herdr/control" || pathname.startsWith("/api/herdr/control/");
     const fetchSite = request.headers.get("sec-fetch-site");
@@ -516,7 +526,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     const controlPrincipal = access.principal.kind === "owner" ? "owner" : `device:${access.principal.deviceId}`;
     if (terminalsRoute) {
       if (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site")) return error("forbidden", "다른 사이트에서는 터미널을 조작할 수 없습니다.", 403);
-      const expectedOrigin = viaEdge ? `https://${host}` : terminalPublicOrigin?.host === host ? terminalPublicOrigin.origin : url.origin;
+      const expectedOrigin = viaEdge ? `https://${host}` : tailnet !== null && host === tailnet.host ? tailnet.config.origin : terminalPublicOrigin?.host === host ? terminalPublicOrigin.origin : url.origin;
       try { return await serveTerminals(request, url, bound, deps.terminals ?? null, expectedOrigin); }
       catch (caught) { return failure(caught); }
     }
@@ -534,7 +544,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       try { return await serveUpdate(request, url, updater); } catch (caught) { return failure(caught); }
     }
     if (pathname === "/api/vault" || pathname.startsWith("/api/vault/")) return serveVault(request, url, core, vault);
-    if (pathname.startsWith("/api/browser/")) return serveBrowser(request, url, core, browser, () => viaEdge || authenticate(request) !== null);
+    if (pathname.startsWith("/api/browser/")) return serveBrowser(request, url, core, browser, () => viaEdge || viaIdentity || authenticate(request) !== null);
     if (pathname.startsWith("/api/mail/")) return serveMail(request, url, deps.mail ?? null);
     if (pathname.startsWith("/api/calls/")) {
       try { return await core.calls.serve(request, url, access) ?? error("not_found", "not found", 404); }

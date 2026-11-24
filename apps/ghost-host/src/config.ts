@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { releaseDirectoryOf } from "./update/storage.ts";
 import { parseCloudflareAccess, type CloudflareAccessConfig } from "./api/cloudflare-access.ts";
+import { parseTailscaleIdentity, type TailscaleIdentityConfig } from "./api/tailscale-identity.ts";
 
 /** Everything the process reads at startup. Nothing else reads the environment. */
 export interface Config {
@@ -15,6 +16,8 @@ export interface Config {
   publicOrigin: string | null;
   /** Optional public web origin behind Cloudflare Access; requests on its host must carry a valid Access JWT. */
   cloudflareAccess?: CloudflareAccessConfig | null;
+  /** Optional tailnet web origin (`tailscale serve`); a request from an allowed Tailscale login on its host is the owner. */
+  tailscaleIdentity?: TailscaleIdentityConfig | null;
   /** Built web UI served at `/`; null serves no UI. */
   uiDir: string | null;
   sandbox:
@@ -72,7 +75,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const root = resolve(rootOverride ?? env.GHOST_ROOT ?? DEFAULT_ROOT);
   const path = join(root, "config.json");
   const file = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Partial<Config>) : {};
-  const allowed = ["host", "port", "publicOrigin", "cloudflareAccess", "uiDir", "sandbox", "voice", "apns", "skills", "mac", "reach", "browser", "desktop", "coding"];
+  const allowed = ["host", "port", "publicOrigin", "cloudflareAccess", "tailscaleIdentity", "uiDir", "sandbox", "voice", "apns", "skills", "mac", "reach", "browser", "desktop", "coding"];
   for (const key of Object.keys(file)) if (!allowed.includes(key)) throw new Error(`config.json: unknown key ${key}`);
   const port = Number(env.GHOST_PORT ?? file.port ?? DEFAULT_PORT);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("GHOST_PORT must be a TCP port (0 picks a free one)");
@@ -118,6 +121,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port,
     publicOrigin: env.GHOST_PUBLIC_ORIGIN ?? file.publicOrigin ?? null,
     cloudflareAccess: file.cloudflareAccess == null ? null : parseCloudflareAccess(file.cloudflareAccess),
+    tailscaleIdentity: file.tailscaleIdentity == null ? null : parseTailscaleIdentity(file.tailscaleIdentity),
     uiDir: env.GHOST_UI_DIR ?? file.uiDir ?? null,
     sandbox: file.sandbox ?? { kind: "local" },
     mac: file.mac ? { roots: (file.mac.roots ?? ["~/Workspace/Projects"]).map(expandHome), watch: file.mac.watch ?? null } : null,
