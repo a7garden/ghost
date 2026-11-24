@@ -112,6 +112,12 @@ for (const theme of ['light', 'dark'] as const) {
         await openScreen(page, { name: tab, route: () => `/settings?tab=${tab}`, waits: () => [], prepare: async page => {
           await mockIPhone(page);
           if (tab === 'vault') await mockVaultApi(page);
+          if (tab === 'connections') {
+            // Never turn this Mac's GitHub CLI sign-in into a visual baseline.
+            await page.route('**/api/connect/local', route => route.fulfill({ json: { accounts: [
+              { source: 'gh', serviceId: 'github', login: 'ghost-owner', scopes: ['gist', 'repo'], connectionId: null },
+            ] } }));
+          }
           if (tab === 'models') {
             // Never turn the Mac account's live quota into a visual baseline.
             const { fixedNow } = readRunState();
@@ -206,7 +212,7 @@ for (const theme of ['light', 'dark'] as const) {
           await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
         }
         if (tab === 'connections') {
-          await page.getByRole('button', { name: 'iCloud', exact: true }).click();
+          await page.getByRole('button', { name: 'iCloud 연결', exact: true }).click();
           await expect(page.getByRole('dialog')).toBeVisible();
           await capture(page, 'connection-mail-dialog', theme, info.project.name);
           await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();

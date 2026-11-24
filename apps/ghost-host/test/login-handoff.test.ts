@@ -1,17 +1,21 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserLoginShelf, LoginChoice, MailDiscovery, ShadeStatus } from "@ghost/contract";
 import type { Config } from "../src/config.ts";
 import { startServer } from "../src/api/server.ts";
 import type { CliResult, CliRunner } from "../src/integrations/cli.ts";
+import { SourceConnections } from "../src/integrations/activity-sources.ts";
+import { Core } from "../src/core/core.ts";
+import { Ledger } from "../src/ledger/ledger.ts";
 import { LocalAccounts } from "../src/integrations/local-accounts.ts";
 import { LoginShelf } from "../src/integrations/login-shelf.ts";
 import { discoverMail, type MailDiscoveryDeps } from "../src/integrations/mail-discovery.ts";
 import type { BrowserCommandResult, BrowserLiveInput, BrowserPort, BrowserSessionRef } from "../src/integrations/ports.ts";
 import { Shade } from "../src/integrations/shade.ts";
 import { createVault } from "../src/stores/vault.ts";
-import { harness, tempDir } from "./support.ts";
+import { FakeEngine, MemoryArtifacts, MemorySecrets, harness, noSandbox, tempDir } from "./support.ts";
 
 const ok = (stdout: unknown): CliResult => ({ code: 0, stdout: Buffer.from(typeof stdout === "string" ? stdout : JSON.stringify(stdout)), stderr: "" });
 const fail = (): CliResult => ({ code: 1, stdout: Buffer.alloc(0), stderr: "" });
@@ -172,10 +176,16 @@ afterEach(async () => { for (const close of cleanup.splice(0)) await close(); })
 class FakeBrowser implements BrowserPort {
   url: string | null = "https://app.example.com/login";
   inputs: BrowserLiveInput[] = [];
+  /** What the focus probe reports: the page's focused editable field, or why there is none. */
+  focus: Record<string, unknown> = { origin: "https://app.example.com", password: false };
   constructor(readonly refs: BrowserSessionRef[]) {}
   sessions() { return this.refs.map((ref) => ({ ...ref, engine: "chrome" as const, headed: false })); }
   pageUrl() { return this.url; }
-  async run(_ref: BrowserSessionRef, argv: string[]): Promise<BrowserCommandResult> { return argv[0] === "get" && argv[1] === "url" ? { ok: true, data: this.url, error: null } : { ok: false, data: null, error: "unsupported" }; }
+  async run(_ref: BrowserSessionRef, argv: string[]): Promise<BrowserCommandResult> {
+    if (argv[0] === "get" && argv[1] === "url") return { ok: true, data: this.url, error: null };
+    if (argv[0] === "eval") return { ok: true, data: { result: this.focus }, error: null };
+    return { ok: false, data: null, error: "unsupported" };
+  }
   async input(_ref: BrowserSessionRef, input: BrowserLiveInput) { this.inputs.push(input); }
   async captureCredential(): Promise<string> { throw new Error("unused"); }
   async handoff() {}
@@ -236,16 +246,36 @@ describe("login shelf", () => {
     const ungranted = f.vault.create({ kind: "login", title: "Other's", origin: "https://app.example.com", username: "z", password: SECRET, ghostIds: [f.other.id] });
     const fill = (itemId: string, field: string) => f.request(`${f.session}/fill`, "POST", { itemId, field });
 
+    f.browser.focus = { origin: "https://app.example.com", password: true };
     expect((await fill(mine.id, "password")).status).toBe(200);
+    f.browser.focus = { origin: "https://app.example.com", password: false };
     expect((await fill(mine.id, "username")).status).toBe(200);
     expect(f.browser.inputs).toEqual([{ type: "text", text: SECRET }, { type: "text", text: "owner@example.com" }]);
 
     expect((await fill(mine.id, "totp")).status).toBe(404); // nothing saved for that field
     expect((await fill(ungranted.id, "password")).status).toBe(403);
     f.browser.url = "https://evil.example.com/login";
-    expect((await fill(mine.id, "password")).status).toBe(403);
+    expect((await fill(mine.id, "username")).status).toBe(403);
+    f.browser.url = "https://app.example.com/login";
     expect((await f.request(`${f.session}/fill`, "POST", { itemId: mine.id, field: "card_number" })).status).toBe(400);
     expect(f.browser.inputs).toHaveLength(2);
+  });
+
+  test("filling refuses a frame, an unfocused page, a foreign frame origin and the wrong kind of field", async () => {
+    const f = fixture();
+    const mine = f.vault.create({ kind: "login", title: "Mine", origin: "https://app.example.com", username: "owner@example.com", password: SECRET, ghostIds: [f.ghost.id] });
+    const fill = (field: string) => f.request(`${f.session}/fill`, "POST", { itemId: mine.id, field });
+    f.browser.focus = { reason: "frame" };
+    expect((await fill("password")).status).toBe(400);
+    f.browser.focus = { reason: "no_field" };
+    expect(await (await fill("username")).json()).toMatchObject({ error: { message: "입력할 칸을 먼저 눌러 주세요." } });
+    f.browser.focus = { origin: "https://evil.example.com", password: true };
+    expect((await fill("password")).status).toBe(403);
+    f.browser.focus = { origin: "https://app.example.com", password: false };
+    expect((await fill("password")).status).toBe(400); // a password only goes into a password field
+    f.browser.focus = { origin: "https://app.example.com", password: true };
+    expect((await fill("username")).status).toBe(400); // and an identifier never into one
+    expect(f.browser.inputs).toHaveLength(0);
   });
 
   test("importing a Shade login grants a copy to this Ghost and moves it out of the Shade list", async () => {
@@ -297,5 +327,62 @@ describe("owner routes", () => {
     expect(await (await f.request("/api/connect/local")).json()).toEqual({ accounts: [] });
     expect((await f.request("/api/connect/local", "POST", { source: "gh", login: "a7garden" })).status).toBe(404);
     expect((await f.request("/api/connect/mail?email=a@naver.com")).status).toBe(200);
+  });
+});
+
+describe("one-click GitHub from this Mac", () => {
+  const TOKEN = "gho_SYNTHETICabcdefghijklmnopqrstuvwxyz0123";
+  function connectFixture() {
+    const root = mkdtempSync(join(tmpdir(), "ghost-local-account-"));
+    const ledger = new Ledger(":memory:");
+    const sources = new SourceConnections({ root, fetch: (async () => Response.json({ login: "a7garden" })) as never, currentConnection: (id) => ledger.findConnection(id) });
+    const core = new Core({ ledger, artifacts: new MemoryArtifacts(), sandbox: noSandbox, secrets: new MemorySecrets(), activitySources: sources, log: () => {} });
+    core.attach(new FakeEngine());
+    core.createGhost({ name: "Main", persona: "" }); // a credential command is journaled in the main Ghost's conversation
+    const tokenReads: string[][] = [];
+    const run: CliRunner = async (_program, args) => {
+      if (args[0] === "auth" && args[1] === "status") return ok({ hosts: { "github.com": [{ state: "success", login: "a7garden", scopes: "repo, gist" }] } });
+      tokenReads.push(args);
+      return ok(`${TOKEN}\n`);
+    };
+    const config: Config = { root, host: "127.0.0.1", port: 0, publicOrigin: "http://127.0.0.1", uiDir: null, sandbox: { kind: "local" }, voice: null, apns: null, skills: null, reach: null, browser: null };
+    const server = startServer({ core, config, ownerToken: "owner-test", documents: null, skills: null, localAccounts: new LocalAccounts({ program: "/fake/gh", run }) });
+    cleanup.push(async () => { await server.stop(); ledger.close(); rmSync(root, { recursive: true, force: true }); });
+    const request = (method: string, body?: unknown) => fetch(`http://127.0.0.1:${server.port}/api/connect/local`, { method, headers: { authorization: "Bearer owner-test", "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { root, ledger, tokenReads, request };
+  }
+
+  test("connects the signed-in account once, keeps the token out of every response, and then reads as connected", async () => {
+    const f = connectFixture();
+    expect(await (await f.request("GET")).json()).toEqual({ accounts: [{ source: "gh", serviceId: "github", login: "a7garden", scopes: ["repo", "gist"], connectionId: null }] });
+
+    const created = await f.request("POST", { source: "gh", login: "a7garden" });
+    expect(created.status).toBe(201);
+    const body = await created.text();
+    expect(body).not.toContain(TOKEN);
+    const { connectionId } = JSON.parse(body) as { connectionId: string };
+    expect(f.ledger.connection(connectionId)).toMatchObject({ name: "GitHub · a7garden", serviceId: "github", config: { kind: "github", baseUrl: "https://api.github.com" }, hasCredential: true });
+    expect(f.tokenReads).toEqual([["auth", "token", "--hostname", "github.com", "--user", "a7garden"]]);
+
+    // The credential reaches only the Host's secret store, never the ledger or a state snapshot.
+    expect(JSON.stringify(f.ledger.connections())).not.toContain(TOKEN);
+    const secrets = join(f.root, "secrets", "connections");
+    expect(readdirSync(secrets).map((name) => readFileSync(join(secrets, name), "utf8")).some((text) => text.includes(TOKEN))).toBe(true);
+
+    expect(await (await f.request("GET")).json()).toMatchObject({ accounts: [{ login: "a7garden", connectionId }] });
+    const again = await f.request("POST", { source: "gh", login: "a7garden" });
+    expect(await again.json()).toEqual({ connectionId });
+    expect(f.ledger.connections()).toHaveLength(1);
+    expect(f.tokenReads).toHaveLength(1);
+  });
+
+  test("two taps at once make one connection, and a login the Mac does not have is refused", async () => {
+    const f = connectFixture();
+    const [first, second] = await Promise.all([f.request("POST", { source: "gh", login: "a7garden" }), f.request("POST", { source: "gh", login: "a7garden" })]);
+    const ids = [(await first.json() as { connectionId: string }).connectionId, (await second.json() as { connectionId: string }).connectionId];
+    expect(ids[0]).toBe(ids[1]);
+    expect(f.ledger.connections()).toHaveLength(1);
+    expect((await f.request("POST", { source: "gh", login: "someone-else" })).status).toBe(404);
+    expect((await f.request("POST", { source: "gh" })).status).toBe(400);
   });
 });

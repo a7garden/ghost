@@ -313,15 +313,18 @@ test('closing a pending read invalidates it before the same UID is opened again'
   expect(api.updates).toHaveLength(1);
 });
 
-test('mail empty-state opens the shared account setup with service-specific mail and custom server options', async ({ page }) => {
+test('mail empty-state opens the shared account setup, where an address brings its servers and a seeded provider asks only for the name', async ({ page }) => {
   await page.route('**/api/mail/accounts', route => json(route, { accounts: [] }));
   await openMail(page);
   await page.getByRole('button', { name: '메일 계정 연결', exact: true }).click();
   await expect(page).toHaveURL(/#\/settings\?tab=connections$/);
-  await page.getByRole('button', { name: 'Gmail', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Gmail 연결', exact: true });
-  await expect(dialog.getByRole('textbox', { name: '메일 주소', exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: '고급 설정', exact: true }).click();
+  await page.getByRole('button', { name: 'Gmail 연결', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '이메일 연결', exact: true });
+  const address = dialog.getByRole('textbox', { name: '이메일 주소', exact: true });
+  await expect(address).toHaveAttribute('placeholder', '이름@gmail.com');
+  await address.fill('owner');
+  await expect(dialog.locator('.mail-provider')).toContainText('owner@gmail.com');
+  await dialog.getByRole('button', { name: '서버 설정', exact: true }).click();
   await expect(dialog.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toHaveValue('imap.gmail.com');
   await expect(dialog.getByRole('textbox', { name: 'SMTP 서버', exact: true })).toHaveValue('smtp.gmail.com');
 });

@@ -2,12 +2,15 @@ import type { BrowserLoginFill, BrowserLoginShelf, LoginChoice, VaultItem } from
 import { forbidden, invalid, notFound } from "../core/errors.ts";
 import { Vault, originsOf } from "../stores/vault.ts";
 import { normalizeOrigin } from "../stores/vault/model.ts";
+import { isRecord } from "./cli.ts";
 import type { BrowserLogin, BrowserPort, BrowserSessionRef } from "./ports.ts";
 import type { Shade } from "./shade.ts";
 
 interface Recent { itemId: string; username: string; origin: string; at: number; created: boolean; shade: boolean }
 
 const MAX_FILL = 2000;
+/** Read-only probe of where typing would land: the top document's focused editable field, never a frame's. */
+const FOCUS_SCRIPT = `(() => { if (window.top !== window) return { reason: "frame" }; const e = document.activeElement; if (!e || e === document.body) return { reason: "no_field" }; if (e instanceof HTMLIFrameElement || e instanceof HTMLFrameElement) return { reason: "frame" }; if (!(e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement) || e.readOnly || e.disabled) return { reason: "not_editable" }; return { origin: location.origin, password: e instanceof HTMLInputElement && e.type === "password" }; })()`;
 const choice = (item: VaultItem): LoginChoice => ({ id: item.id, title: item.title, username: item.username, hasPassword: item.hasPassword, hasTotp: item.hasTotp });
 
 /**
@@ -65,6 +68,13 @@ export class LoginShelf {
     const item = this.deps.vault.itemFor(session.ghostId, input.itemId);
     if (item.kind !== "login" || !originsOf(item).includes(origin)) throw forbidden("이 사이트의 로그인이 아니에요.");
     if (input.field === "username" ? !item.username : input.field === "password" ? !item.hasPassword : !item.hasTotp) throw notFound("저장된 값이 없어요.");
+    // The owner chose the field; the Host only makes sure the value cannot land in a frame, a read-only box or a field of the wrong kind.
+    const probe = await this.deps.browser.run(session, ["eval", FOCUS_SCRIPT]);
+    const focused = probe.ok && isRecord(probe.data) ? probe.data.result : null;
+    if (!isRecord(focused)) throw invalid("입력할 칸을 확인하지 못했어요.");
+    if (typeof focused.origin !== "string") throw invalid(focused.reason === "frame" ? "이 칸에는 입력할 수 없어요." : "입력할 칸을 먼저 눌러 주세요.");
+    if (focused.origin !== origin) throw forbidden("이 사이트의 로그인이 아니에요.");
+    if ((input.field === "password") !== (focused.password === true)) throw invalid(input.field === "password" ? "비밀번호는 비밀번호 칸에만 넣을 수 있어요." : "이 칸에는 입력할 수 없어요.");
     const value = this.deps.vault.reveal(session.ghostId, item.id, input.field);
     if (!value || value.length > MAX_FILL) throw invalid("입력할 수 없는 값이에요.");
     await this.deps.browser.input(session, { type: "text", text: value });

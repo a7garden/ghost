@@ -249,10 +249,6 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 .decision__document-body > .message-body { font-size: var(--text-ui); line-height: 1.8; }
 .decision__document-source { margin: 0; font: var(--text-caption)/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .decision__document-empty { margin: 0; color: var(--ghost-ink3); font-size: var(--text-ui); }
-.decision__handoff { display: grid; min-width: 0; gap: 6px; }
-.decision__handoff-note { display: flex; align-items: flex-start; gap: 7px; margin: 0; color: var(--ghost-ink2); font-size: var(--text-ui); line-height: 1.5; }
-.decision__handoff-note svg { flex: none; margin-top: 2px; color: var(--ghost-ink3); }
-.decision__handoff-url { margin: 0; color: var(--ghost-ink3); font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
 .decision__facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; margin: 0; }
 .decision__facts > div { display: contents; }
 .decision__facts dt { color: var(--ghost-ink3); font-size: var(--text-ui); }

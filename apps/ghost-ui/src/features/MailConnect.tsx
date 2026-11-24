@@ -49,7 +49,8 @@ export function MailConnect({ seed, initialAddress = '', canAssist, onAssist, on
       // A newer keystroke won the race, or the Host answered a different address.
       if (seq !== requestSeq.current || !sameMailAddress(result.email, target)) return;
       setDiscovery(result);
-      setDraft(draftFromMailDiscovery(target, result));
+      // Fixing a typo in the address must not cost the owner the secret already typed.
+      setDraft(prev => ({ ...draftFromMailDiscovery(target, result), credential: prev?.credential ?? '' }));
       setServerOpen(result.imap === null);
     }).catch(() => {
       if (seq !== requestSeq.current) return;
