@@ -1,33 +1,43 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { ChevronRight, Folder, FolderPlus, BriefcaseBusiness } from 'lucide-react';
-import { Button, InlineError, Page, PageHeader, Row } from '../ui';
-import type { PageSummary } from '@ghost/contract';
+import { ChevronRight, Folder, FolderPlus } from 'lucide-react';
+import { Button, Page, PageHeader, Row } from '../ui';
+import type { PageSummary, Scope, State } from '@ghost/contract';
+import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { routeLabels } from '../uiText';
-import { noteScopeEdit, pathCrumb, scopeLastEdit } from './scopePages';
 import { useNow } from './time';
 import { Modal } from '../components/Modal';
 import { HandoffComposer } from '../components/HandoffComposer';
 import { DocumentIndex } from '../components/projects/DocumentIndex';
-import { HoldButton } from '../components/projects/HoldButton';
-import { ProjectHeader } from '../components/projects/ProjectHeader';
-import { WorkLane } from '../components/agent';
+import { ProjectBar } from '../components/projects/ProjectBar';
+import { ProjectWork } from '../components/projects/ProjectWork';
 import { ScopeEditor } from './ScopeEditor';
 import { GhostChat } from './GhostChat';
-import { InboxView } from './Inbox';
-import { Activities } from './Activities';
 import { ScopeGoals } from './goals/Goals';
-import { PolicySettings } from './PolicySettings';
-import { ScopeMetrics } from './ScopeMetrics';
-import { ConfigHistory } from './ConfigHistory';
+import { ProjectSettings, settingsParts } from './ProjectSettings';
 import { decisionScopeId } from './scopeState';
 import './scopes.css';
 
 const PageEditorDrawer = lazy(() => import('./PageEditorDrawer'));
-const destinations = [{ id: 'conversation', label: '대화' }, { id: 'goals', label: '목표' }, { id: 'work', label: '맡긴 일' }, { id: 'decisions', label: '결정' }, { id: 'documents', label: '문서' }, { id: 'triggers', label: '계기' }, { id: 'rules', label: '규칙' }, { id: 'metrics', label: '계측' }, { id: 'history', label: '구성 기록' }];
 
-export function ScopesView({ selectedScope, onSelectScope, createRequested, onCreateClosed, navigate, section = 'documents', onSectionChange }: {
+/** The view ids a project address may carry; the standing machinery lives under 설정, and 결정 became part of 맡긴 일. */
+function tabOf(view: string | undefined, fallback: string): string {
+  if (view === 'decisions') return 'work';
+  if (settingsParts.some(part => part.id === view)) return 'settings';
+  return ['conversation', 'work', 'documents', 'goals', 'settings'].includes(view ?? '') ? view! : fallback;
+}
+
+/** What a project row says at a glance: who carries it, what runs, what waits on the owner. */
+function rowSummary(scope: Scope, state: State | null): string {
+  if (!state) return '';
+  const carrier = state.ghosts.find(ghost => ghost.id === scope.ghostId) ?? state.ghosts.find(ghost => ghost.isDefault);
+  const live = state.works.filter(work => work.scopeId === scope.id && !TERMINAL_WORK_STATES.includes(work.state)).length;
+  const waiting = state.decisions.filter(decision => decision.state === 'pending' && decisionScopeId(decision, state) === scope.id).length;
+  return [scope.state === 'paused' && '멈춤', carrier?.name ?? '받을 Ghost 없음', live > 0 && `진행 중 ${live}`, waiting > 0 && `확인 필요 ${waiting}`].filter(Boolean).join(' · ');
+}
+
+export function ScopesView({ selectedScope, onSelectScope, createRequested, onCreateClosed, navigate, section, onSectionChange }: {
   selectedScope?: string; onSelectScope?(id: string): void; createRequested?: boolean; onCreateClosed?(): void;
   navigate(path: string): void; section?: string; onSectionChange?(section: string): void;
 }) {
@@ -37,18 +47,16 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
   const scope = scopes.find(item => item.id === selectedScope);
   const ghosts = (state?.ghosts ?? []).filter(ghost => ghost.state === 'active' && ghost.deletedAt === null);
   const receiver = scope?.ghostId ? ghosts.find(ghost => ghost.id === scope.ghostId) : ghosts.find(ghost => ghost.isDefault);
-  const [creating, setCreating] = useState(Boolean(createRequested)), [editing, setEditing] = useState(false);
-  const [armed, setArmed] = useState(false), [pending, setPending] = useState(false), [error, setError] = useState('');
-  const [details, setDetails] = useState(false);
+  const [creating, setCreating] = useState(Boolean(createRequested));
   const [search, setSearch] = useState(''), [pages, setPages] = useState<PageSummary[]>([]), [total, setTotal] = useState(0);
   const [pagesLoading, setPagesLoading] = useState(false), [listError, setListError] = useState(''), [reload, setReload] = useState(0);
   const [open, setOpen] = useState<{ pageId: string | null }>(), [handoff, setHandoff] = useState(false);
+  const [toolsHost, setToolsHost] = useState<HTMLDivElement | null>(null);
   const now = useNow();
-  const active = destinations.some(item => item.id === section) ? section : 'documents';
+  const active = tabOf(section, receiver ? 'conversation' : 'work');
   const select = (id: string) => onSelectScope ? onSelectScope(id) : navigate(id ? `/scopes/${encodeURIComponent(id)}` : '/scopes');
   const changeSection = (id: string) => onSectionChange ? onSectionChange(id) : navigate(`/scopes/${encodeURIComponent(scope!.id)}?view=${id}`);
   useEffect(() => { if (createRequested) setCreating(true); }, [createRequested]);
-  useEffect(() => { setArmed(false); setDetails(false); }, [scope?.id]);
   useEffect(() => {
     setPages([]); setListError('');
     if (!scope?.vaultPath || creating || active !== 'documents') return;
@@ -67,71 +75,32 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
   if (creating) return <Page width="reading"><PageHeader title="새 프로젝트"/><ScopeEditor onClose={closeCreate} onSaved={id => { setCreating(false); select(id); }}/></Page>;
   if (selectedScope && !scope) return <Page width="reading"><PageHeader title="프로젝트를 찾을 수 없습니다"/><Button variant="outline" onClick={() => select('')}>프로젝트 목록</Button></Page>;
   if (scope && state) {
-    const works = state.works.filter(work => work.scopeId === scope.id).sort((a, b) => b.updatedAt - a.updatedAt);
-    const decisions = state.decisions.filter(decision => decisionScopeId(decision, state) === scope.id);
-    const remove = async () => {
-      setPending(true); setError('');
-      try { await client.send({ type: 'scope.delete', scopeId: scope.id }); select(''); }
-      catch (reason) { setError(reason instanceof Error ? reason.message : '삭제하지 못했습니다.'); } finally { setPending(false); }
-    };
-    const path = scope.vaultPath ?? scope.paths[0];
-    const crumb = pathCrumb(path ?? '');
-    const deleteBlock = (triggerSize?: 'sm') => (!armed ? <Button variant="ghost" size={triggerSize} disabled={pending} onClick={() => setArmed(true)}>프로젝트 삭제</Button>
-      : <div className="place-end__strip"><p>{scope.name} 프로젝트 등록을 지울까요? 보관함의 문서는 지워지지 않습니다.</p><div className="place-end__row"><Button variant="outline" size="sm" disabled={pending} onClick={() => setArmed(false)}>취소</Button><HoldButton label="삭제" holdingLabel="누르는 중" disabled={pending} onComplete={() => void remove()}/></div></div>);
-    return <Page width={active === 'conversation' ? 'full' : 'reading'}>
-      <div className="grid min-w-0 gap-4 min-[56rem]:gap-7">
-        <div className="place-top">
-          <ProjectHeader space={scope} total={total} lastEditAt={scopeLastEdit(scope.id)} now={now} disabled={pending}
-            onRename={async name => { await client.send({ type: 'scope.update', scopeId: scope.id, name }); }}/>
-          <div className="infra-record__head place-status">
-            <p className="infra-record__meta place-status__meta">{scope.state === 'paused' ? '멈춤' : '진행'} · {receiver?.name ?? '받을 Ghost 없음'}</p>
-            <div className="flex gap-2 place-status__actions">
-              <span className="place-status__edit"><Button variant="outline" onClick={() => setEditing(value => !value)}>프로젝트 편집</Button></span>
-              <Button disabled={!receiver || scope.state === 'paused'} onClick={() => setHandoff(true)}><BriefcaseBusiness size={16} aria-hidden="true"/>일 맡기기</Button>
-            </div>
-          </div>
-        </div>
-        {editing && <ScopeEditor key={scope.updatedAt} scope={scope} onClose={() => setEditing(false)} onSaved={() => setEditing(false)}/>}
-        <nav className="infra-nav place-tabs" aria-label="프로젝트 내용">{destinations.map(item => <button key={item.id} type="button" aria-current={active === item.id ? 'page' : undefined} onClick={() => changeSection(item.id)}>{item.label}</button>)}</nav>
-        <div className="place-controls">
-        <select className="infra-select place-tabs__select" aria-label="프로젝트 내용" value={active} onChange={event => changeSection(event.target.value)}>
-          {destinations.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-        </select>
-        <section className="place-details" aria-label="프로젝트 관리">
-          <button type="button" className="place-details__toggle" aria-expanded={details} aria-controls="place-details-panel" onClick={() => setDetails(value => !value)}>
-            <span aria-hidden="true" className="fold-mark"/>프로젝트 관리
-          </button>
-          {details && <div id="place-details-panel" className="place-details__panel">
-            {path && <span className="place__crumb place-details__path" title={path} aria-label={`폴더 ${path}`}>
-              {crumb.leading && <span className="place__crumb-seg">{crumb.leading}</span>}
-              {crumb.leading && <span className="place__crumb-gap" aria-hidden="true">…</span>}
-              {crumb.trailing.map(segment => <span className="place__crumb-seg" key={segment}>{segment}</span>)}
-            </span>}
-            <Button variant="outline" onClick={() => setEditing(true)}>프로젝트 편집</Button>
-            <section className="place-details__delete" aria-label="프로젝트 삭제">{deleteBlock()}</section>
-          </div>}
-        </section>
-        </div>
-        {error && <InlineError>{error}</InlineError>}
-        {active === 'conversation' && (receiver ? <div className="scope-conversation"><GhostChat key={`${scope.id}:${receiver.id}`} ghost={receiver} state={state} conversationId={receiver.directConversationId} threadId={null} navigate={navigate} initialScopeIds={[scope.id]}/></div> : <p>프로젝트 편집에서 받을 Ghost를 선택하세요.</p>)}
-        {active === 'documents' && (scope.vaultPath ? <DocumentIndex pages={pages} total={total} search={search} onSearch={setSearch} loading={pagesLoading} error={listError} onOpen={pageId => setOpen({ pageId })} onCreate={() => setOpen({ pageId: null })}/>
-          : <div className="infra-form"><p className="infra-record__meta">문서 금고가 지정되지 않았습니다.</p><div><Button variant="outline" onClick={() => setEditing(true)}>금고 경로 설정</Button></div></div>)}
-        {active === 'goals' && <ScopeGoals state={state} navigate={navigate} scopeId={scope.id}/>}
-        {active === 'work' && <section aria-label="프로젝트 맡긴 일">{works.length ? works.map(work => <WorkLane key={work.id} work={work} ghostName={state.ghosts.find(ghost => ghost.id === work.ghostId)?.name ?? 'Ghost'} needsOwner={decisions.some(decision => decision.workId === work.id && decision.state === 'pending')} now={now} onOpen={() => navigate(`/work/${encodeURIComponent(work.id)}`)}/>) : <p className="infra-record__meta">맡긴 일이 없습니다.</p>}</section>}
-        {active === 'decisions' && <InboxView state={{ ...state, decisions, notifications: state.notifications.filter(item => item.workId ? works.some(work => work.id === item.workId) : item.decisionId ? decisions.some(decision => decision.id === item.decisionId) : false) }} navigate={navigate} focusDecisionId={null}/>}
-        {active === 'triggers' && <Activities scopeId={scope.id} navigate={navigate}/>}
-        {active === 'rules' && <PolicySettings scopeId={scope.id}/>}
-        {active === 'metrics' && <ScopeMetrics scopeId={scope.id}/>}
-        {active === 'history' && <ConfigHistory scopeId={scope.id}/>}
-        <section className="place-end" aria-label="프로젝트 삭제">{deleteBlock('sm')}</section>
+    const waiting = state.decisions.filter(decision => decision.state === 'pending' && decisionScopeId(decision, state) === scope.id).length;
+    const part = settingsParts.some(item => item.id === section) ? section! : 'settings';
+    const tabs = [{ id: 'conversation', label: '대화' }, { id: 'work', label: '맡긴 일', count: waiting }, { id: 'documents', label: '문서' }, { id: 'goals', label: '목표' }, { id: 'settings', label: '설정' }];
+    return <div className="project" data-view={active}>
+      <ProjectBar scope={scope} receiverName={receiver?.name ?? null} tabs={tabs} active={active} onTab={changeSection} toolsRef={setToolsHost}
+        canHandoff={Boolean(receiver) && scope.state !== 'paused'} onHandoff={() => setHandoff(true)} onManage={() => changeSection('settings')}
+        onRename={async name => { await client.send({ type: 'scope.update', scopeId: scope.id, name }); }}/>
+      <div className="project__body">
+        {active === 'conversation' && (receiver
+          ? <GhostChat key={`${scope.id}:${receiver.id}`} ghost={receiver} state={state} conversationId={receiver.directConversationId} threadId={null} navigate={navigate} initialScopeIds={[scope.id]} toolsHost={toolsHost}/>
+          : <div className="project__page"><div className="calm"><p>받을 Ghost를 정하면 여기서 대화할 수 있습니다.</p><Button variant="outline" size="sm" onClick={() => changeSection('settings')}>설정 열기</Button></div></div>)}
+        {active === 'work' && <div className="project__page"><ProjectWork state={state} scope={scope} now={now} navigate={navigate}/></div>}
+        {active === 'documents' && <div className="project__page">{scope.vaultPath
+          ? <DocumentIndex pages={pages} total={total} search={search} onSearch={setSearch} loading={pagesLoading} error={listError} onOpen={pageId => setOpen({ pageId })} onCreate={() => setOpen({ pageId: null })}/>
+          : <div className="calm"><p>문서 금고가 지정되지 않았습니다.</p><Button variant="outline" size="sm" onClick={() => changeSection('settings')}>금고 경로 설정</Button></div>}</div>}
+        {active === 'goals' && <div className="project__page"><ScopeGoals state={state} navigate={navigate} scopeId={scope.id}/></div>}
+        {active === 'settings' && <div className="project__page"><ProjectSettings scope={scope} part={part} onPart={changeSection} navigate={navigate}
+          onLeave={() => changeSection(receiver ? 'conversation' : 'work')} onDeleted={() => select('')}/></div>}
       </div>
       {handoff && receiver && <Modal title="일 맡기기" onClose={() => setHandoff(false)}><HandoffComposer ghosts={ghosts} navigate={navigate} initialScopeIds={[scope.id]} initialMode="work"/></Modal>}
-      {open && <Suspense fallback={<Modal title="문서" onClose={() => setOpen(undefined)} drawer focusClose><p role="status">편집기를 불러오는 중…</p></Modal>}><PageEditorDrawer scopeId={scope.id} pageId={open.pageId} onClose={() => setOpen(undefined)} onSaved={() => { noteScopeEdit(scope.id); setReload(value => value + 1); }}/></Suspense>}
-    </Page>;
+      {open && <Suspense fallback={<Modal title="문서" onClose={() => setOpen(undefined)} drawer focusClose><p role="status">편집기를 불러오는 중…</p></Modal>}><PageEditorDrawer scopeId={scope.id} pageId={open.pageId} onClose={() => setOpen(undefined)} onSaved={() => setReload(value => value + 1)}/></Suspense>}
+    </div>;
   }
   return <Page width="reading"><PageHeader title={routeLabels.scopes} actions={<Button disabled={!state} onClick={() => setCreating(true)}><FolderPlus size={16}/>새 프로젝트</Button>}/>
     {scopes.length ? <div className="projects">{scopes.map(item => <Row key={item.id} onClick={() => select(item.id)}>
-      <span className="project-row__glyph" aria-hidden="true"><Folder size={17}/></span><span className="project-row__copy"><span className="project-row__name">{item.name}</span><span className="project-row__path">{item.state === 'paused' ? '멈춤' : '진행'} · {(item.ghostId ? state?.ghosts.find(ghost => ghost.id === item.ghostId) : state?.ghosts.find(ghost => ghost.isDefault))?.name ?? '받을 Ghost 없음'}</span></span><ChevronRight className="project-row__go" aria-hidden="true"/>
+      <span className="project-row__glyph" aria-hidden="true"><Folder size={17}/></span><span className="project-row__copy"><span className="project-row__name">{item.name}</span><span className="project-row__path">{rowSummary(item, state)}</span></span><ChevronRight className="project-row__go" aria-hidden="true"/>
     </Row>)}</div> : state && <div className="calm"><FolderPlus size={16}/><p>등록된 프로젝트가 없습니다</p></div>}
   </Page>;
 }

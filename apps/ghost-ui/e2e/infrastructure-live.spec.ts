@@ -78,24 +78,24 @@ test('scope, document, slot, MCP, policy and conflict-aware history use the real
   const errors: string[] = [];
   let conflictExpected = false;
   page.on('pageerror', error => errors.push(error.message));
-  page.on('console', message => { if (message.type() === 'error' && !(conflictExpected && message.text().includes('409'))) errors.push(message.text()); });
-  await page.goto(`${host.baseUrl}/#/scopes?new=1`);
-  await page.getByRole('textbox', { name: '프로젝트 이름', exact: true }).fill('UI 검증 프로젝트');
-  await page.getByLabel('문서 금고 경로 (선택)').fill(host.vault);
-  await page.getByRole('button', { name: '읽기 경로 추가', exact: true }).click();
-  await page.getByLabel('읽기 경로 1', { exact: true }).fill(host.root);
-  await page.getByRole('button', { name: '저장', exact: true }).click();
-  await expect(page.getByRole('button', { name: '프로젝트 편집', exact: true })).toBeVisible();
+  // The test Host has no browser to attach, so the project conversation's session poll answers 503; that is the Host saying "none", not a UI error.
+  page.on('console', message => { if (message.type() === 'error' && !(conflictExpected && message.text().includes('409')) && !message.location().url.endsWith('/api/browser/sessions')) errors.push(message.text()); });
+  await page.goto(`${host.baseUrl}/#/scopes`);
+  const createdId = String((await command(page, { type: 'scope.create', name: 'UI 검증 프로젝트', paths: [host.root], vaultPath: host.vault })).scopeId);
+  await page.goto(`${host.baseUrl}/#/scopes/${createdId}`);
+  const projectTabs = page.getByRole('navigation', { name: '프로젝트 내용', exact: true });
+  await expect(projectTabs).toBeVisible();
   let state = await snapshot(page);
   const scope = state.scopes.find(item => item.name === 'UI 검증 프로젝트')!;
   expect(scope.paths).toEqual([host.root]);
   expect(scope.vaultPath).toBe(host.vault);
   await command(page, { type: 'document.save', scopeId: scope.id, pageId: null, expectedHash: null, title: '검증 문서', body: '# 검증\n\n소유자가 남긴 문서입니다.', profile: 'pdc-markdown/1' });
+  await projectTabs.getByRole('button', { name: '문서', exact: true }).click();
   await page.reload();
   await page.getByRole('button', { name: '검증 문서, pdc-markdown/1', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: '프로젝트 편집', exact: true }).click();
+  await projectTabs.getByRole('button', { name: '설정', exact: true }).click();
   await page.getByRole('textbox', { name: '프로젝트 이름', exact: true }).fill('수정한 프로젝트');
   await page.getByLabel('상태', { exact: true }).selectOption('paused');
   await page.getByRole('button', { name: '붙임 추가', exact: true }).click();
@@ -192,13 +192,11 @@ test('scope, document, slot, MCP, policy and conflict-aware history use the real
   await expect.poll(async () => (await snapshot(page)).policyRules.some(rule => rule.tool === 'conn.smoke')).toBe(false);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${host.baseUrl}/#/scopes/${scope.id}?view=metrics`);
-  await expect(page.getByRole('heading', { name: '계측', exact: true })).toBeVisible();
-  await expect(page.getByRole('status').filter({ hasText: '계측을 불러오는 중' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: '성과와 비용', exact: true })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: '불러오는 중' })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.screenshot({ path: info.outputPath('infrastructure-phone.png'), fullPage: true });
-  await page.goto(`${host.baseUrl}/#/scopes/${scope.id}`);
-  // At phone width deletion lives in the compact 프로젝트 관리 disclosure.
-  await page.getByRole('button', { name: '프로젝트 관리', exact: true }).click();
+  await page.goto(`${host.baseUrl}/#/scopes/${scope.id}?view=settings`);
   await page.getByRole('button', { name: '프로젝트 삭제', exact: true }).click();
   await page.getByRole('button', { name: '삭제', exact: true }).dispatchEvent('click', { detail: 0 });
   await page.getByRole('button', { name: '한 번 더 눌러 삭제', exact: true }).dispatchEvent('click', { detail: 0 });
@@ -217,7 +215,7 @@ test('scope edits retain inherited global rules and generic trigger sources', as
   const ruleId = String((await command(page, { type: 'rule.create', tool: 'conn.scope-regression', when: {}, decision: 'owner' })).ruleId);
   await page.goto(`${host.baseUrl}/#/scopes/${scopeId}?view=rules`);
   await page.locator('article').filter({ hasText: 'conn.scope-regression' }).getByRole('button', { name: '편집', exact: true }).click();
-  const ruleForm = page.getByRole('form', { name: '정책 규칙 편집' });
+  const ruleForm = page.getByRole('form', { name: '승인 규칙 편집' });
   await expect(ruleForm.getByLabel('프로젝트', { exact: true })).toHaveValue('');
   await ruleForm.getByLabel('하루 횟수 한도 (비우면 없음)', { exact: true }).fill('8');
   await ruleForm.getByRole('button', { name: '저장', exact: true }).click();
@@ -226,7 +224,7 @@ test('scope edits retain inherited global rules and generic trigger sources', as
   expect(global?.scopeId).toBeUndefined();
   expect(global?.maxPerDay).toBe(8);
   await page.getByRole('button', { name: '규칙 추가', exact: true }).click();
-  const newRuleForm = page.getByRole('form', { name: '정책 규칙 추가' });
+  const newRuleForm = page.getByRole('form', { name: '승인 규칙 추가' });
   await expect(newRuleForm.getByLabel('프로젝트', { exact: true })).toHaveValue(scopeId);
   await newRuleForm.getByRole('button', { name: '취소', exact: true }).click();
 

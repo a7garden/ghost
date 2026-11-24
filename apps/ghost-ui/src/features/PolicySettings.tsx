@@ -3,6 +3,7 @@ import type { PolicyConditions, PolicyDecision, PolicyReviewer, PolicyRule } fro
 import { Button, InlineError, SettingsGroup } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
+import { uiTerms } from '../uiText';
 import { Choice, EditorActions, errorText, TextField } from './InfrastructureFields';
 
 const decisions: { value: PolicyDecision; label: string }[] = [{ value: 'deny', label: '거부' }, { value: 'owner', label: '소유자' }, { value: 'review', label: '평가 후 허용' }, { value: 'allow', label: '허용' }];
@@ -21,7 +22,7 @@ export function PolicySettings({ scopeId }: { scopeId?: string }) {
     try { await client.send({ type: 'rule.delete', ruleId }); setRemoving(null); }
     catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };
-  return <SettingsGroup title="정책 규칙" actions={<Button onClick={() => setEditing('new')}>규칙 추가</Button>}>
+  return <SettingsGroup title={uiTerms.rules} actions={<Button onClick={() => setEditing('new')}>규칙 추가</Button>}>
     <p className="infra-record__meta">겹치는 규칙은 거부 → 소유자 → 평가 → 허용 순으로 적용됩니다.</p>
     {error && <InlineError>{error}</InlineError>}
     {editing && <RuleEditor key={editing === 'new' ? 'new' : editing.id} rule={editing === 'new' ? null : editing} scopeId={scopeId} onClose={() => setEditing(null)}/>}
@@ -65,13 +66,13 @@ function RuleEditor({ rule, scopeId: initialScope, onClose }: { rule: PolicyRule
       await client.send(rule ? { type: 'rule.update', ruleId: rule.id, ...input, scopeId: input.scopeId ?? null, ghostId: input.ghostId ?? null, triggerId: input.triggerId ?? null, reviewer: input.reviewer ?? null, maxPerDay: input.maxPerDay ?? null, maxAmount: input.maxAmount ?? null, autoResolve: input.autoResolve ?? null } : { type: 'rule.create', ...input }); onClose();
     } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };
-  return <form className="infra-form" onSubmit={event => void save(event)} aria-label={rule ? '정책 규칙 편집' : '정책 규칙 추가'}>
+  return <form className="infra-form" onSubmit={event => void save(event)} aria-label={rule ? `${uiTerms.rules} 편집` : `${uiTerms.rules} 추가`}>
     <fieldset disabled={busy} className="infra-form border-0 m-0 p-0">
       <div className="infra-columns">
         <Choice label="프로젝트" value={scopeId} onChange={setScopeId} options={[{ value: '', label: '전체' }, ...(state?.scopes ?? []).map(scope => ({ value: scope.id, label: scope.name }))]}/>
         <Choice label="실행 Ghost" value={ghostId} onChange={setGhostId} options={[{ value: '', label: '모든 Ghost' }, ...(state?.ghosts ?? []).filter(ghost => !ghost.deletedAt).map(ghost => ({ value: ghost.id, label: ghost.name }))]}/>
       </div>
-      <Choice label="계기" value={triggerId} onChange={setTriggerId} options={[{ value: '', label: '모든 계기' }, ...(state?.activities ?? []).filter(activity => !activity.deletedAt).map(activity => ({ value: activity.id, label: activity.name }))]}/>
+      <Choice label="자동 활동" value={triggerId} onChange={setTriggerId} options={[{ value: '', label: '모든 자동 활동' }, ...(state?.activities ?? []).filter(activity => !activity.deletedAt).map(activity => ({ value: activity.id, label: activity.name }))]}/>
       <TextField label="도구 무늬" value={tool} onChange={setTool} required placeholder="mcp.*"/>
       <div className="infra-columns">
         <Choice label="대상" value={when.targetKind ?? ''} onChange={value => axis('targetKind', value ? value as PolicyConditions['targetKind'] : undefined)} options={targets}/>

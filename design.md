@@ -40,7 +40,7 @@ Respect reduced motion: rings, sheens and streaming carets stop.
 | 확인할 일 | Every decision waiting on the owner as a triage list (recommended answer, hand to the main, put off), what the main is deciding, folded notifications and settled decisions |
 | 맡긴 일 | Delegation trees by state and assignee; detail with lifecycle, decisions, result, delegation map and effects |
 | Conversation | Continuous transcript, tool trails, anchored composer, scoped model choice |
-| 프로젝트 | Where Work, goals, decisions, documents, triggers, rules and metrics of one project gather (대화 · 목표 · 맡긴 일 · 결정 · 문서 · 계기 · 규칙 · 계측 · 구성 기록) |
+| 프로젝트 | One project as a place: a two-line bar (name, who carries it, folder; tabs), then 대화 · 맡긴 일 (what waits on the owner first) · 문서 · 목표, with 자동 활동 · 승인 규칙 · 성과와 비용 · 변경 기록 kept under 설정 |
 | 목표 | Team and per-project directions with their 이정표 lines, grouped by project |
 | 설정 | Ghost settings, models, devices, schedules, host, display, desktop avatar (Mac app) |
 

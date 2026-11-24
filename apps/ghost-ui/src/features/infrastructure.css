@@ -36,6 +36,4 @@
     .infra-record__head { align-items: flex-start; }
     .infra-list__row { align-items: flex-start; }
   }
-  .scope-conversation { height: 70dvh; min-height: 30rem; min-width: 0; position: relative; }
-  .scope-conversation .chat-layout { height: 100%; }
 }

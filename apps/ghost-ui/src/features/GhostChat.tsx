@@ -75,7 +75,7 @@ function useBrowserSession(conversationId: string | null, enabled: boolean): Bro
  * the work it takes on branches off as threads (맡긴 일), shown where they started and
  * gathered behind the thread button. Older direct conversations stay readable there.
  */
-export function GhostChat({ ghost, state, conversationId, threadId, navigate, initialScopeIds = [] }: {
+export function GhostChat({ ghost, state, conversationId, threadId, navigate, initialScopeIds = [], toolsHost }: {
   ghost: Ghost;
   state: State;
   /** The conversation on screen; null when this Ghost has none yet. */
@@ -84,12 +84,15 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   threadId: string | null;
   navigate(path: string): void;
   initialScopeIds?: string[];
+  /** Where the tools render when the host screen carries them in its own bar; `null` until that bar mounts. */
+  toolsHost?: HTMLElement | null;
 }) {
   const { client } = useHost();
   const calls = useCallActions();
   const touch = useTouch();
   const compact = useCompact();
   const titleSlot = useContext(CompactTitleSlot);
+  const toolsSlot = toolsHost !== undefined ? toolsHost : compact ? titleSlot : null;
   const now = useNow();
   const conversations = state.conversations
     .filter(conversation => conversation.ghostId === ghost.id && conversation.kind === 'direct')
@@ -184,10 +187,10 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
       </button>}
   </div>;
   return <OpenWorkProvider value={openThread}><div className="chat-layout" data-thread={threadId ? '' : undefined}>
-    {compact && titleSlot && !threadId && createPortal(tools, titleSlot)}
+    {toolsSlot && !threadId && createPortal(tools, toolsSlot)}
     <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
       scrollKey={`${page.messages.length}:${outbox.rows.length}:${live?.running ? 1 : 0}:${live?.partial ? 1 : 0}`} followKey={followKey}
-      header={compact && titleSlot ? null : <div className="chat-corner">{tools}</div>}
+      header={toolsSlot ? null : <div className="chat-corner">{tools}</div>}
       composer={<>
         <BrowserPaneContext.Provider value={conversationId ? { conversationId, open: () => setBrowserOpen(true) } : null}>
           <ChatDecisions state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread}/>

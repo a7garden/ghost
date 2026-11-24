@@ -234,7 +234,8 @@ function Shell() {
   const selectedScope = section === 'scopes' && path.split('/')[2] ? decodeURIComponent(path.split('/')[2]!) : undefined;
   const embeddedSessionId = section === 'coding' ? params.get('session') : null;
   const codingDetail = section === 'coding' && (embeddedSessionId !== null || params.get('new') === '1' || params.has('herdr'));
-  const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail' || section === 'coding';
+  const projectOpen = section === 'scopes' && selectedScope !== undefined && !params.has('new') && Boolean(state?.scopes.some(scope => scope.id === selectedScope));
+  const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail' || section === 'coding' || projectOpen;
   const closeCodingForm = (next: string) => {
     // A start can finish after the owner leaves the form, without pulling them back.
     if (currentRoute() !== route) return;
@@ -280,7 +281,7 @@ function Shell() {
     { id: 'activities', label: uiTerms.activities, group: '설정', onSelect: go('/settings?tab=activities') },
     { id: 'connections', label: uiTerms.connections, group: '설정', onSelect: go('/settings?tab=connections') },
     { id: 'voice', label: '음성', group: '설정', onSelect: go('/settings?tab=voice') },
-    ...[{ id: 'slots', label: '모델 자리' }, { id: 'limits', label: '한도' }, { id: 'mcp', label: 'MCP 서버' }, { id: 'rules', label: '정책 규칙' }, { id: 'history', label: '구성 기록' }, { id: 'metrics', label: '계측' }].map(item => ({ ...item, group: '설정', onSelect: go(`/settings?tab=${item.id}`) })),
+    ...[{ id: 'slots', label: '모델 자리' }, { id: 'limits', label: '한도' }, { id: 'mcp', label: 'MCP 서버' }, { id: 'rules', label: uiTerms.rules }, { id: 'history', label: uiTerms.configHistory }, { id: 'metrics', label: uiTerms.metrics }].map(item => ({ ...item, group: '설정', onSelect: go(`/settings?tab=${item.id}`) })),
     { id: 'host', label: routeLabels.host, group: '설정', onSelect: go('/settings?tab=host') },
     { id: 'update', label: '업데이트', group: '설정', onSelect: go('/settings?tab=update') },
     { id: 'settings', label: uiTerms.settings, group: '설정', onSelect: go('/settings') },
@@ -302,9 +303,9 @@ function Shell() {
     { id: 'slots', label: '모델 자리', icon: Server, content: <SlotSettings/> },
     { id: 'limits', label: '한도', icon: Clock3, content: <LimitSettings/> },
     { id: 'mcp', label: 'MCP 서버', icon: PlugZap, content: <McpSettings/> },
-    { id: 'rules', label: '정책 규칙', icon: CircleAlert, content: <PolicySettings/> },
-    { id: 'history', label: '구성 기록', icon: RefreshCw, content: <ConfigHistory/> },
-    { id: 'metrics', label: '계측', icon: Server, content: <ScopeMetrics/> },
+    { id: 'rules', label: uiTerms.rules, icon: CircleAlert, content: <PolicySettings/> },
+    { id: 'history', label: uiTerms.configHistory, icon: RefreshCw, content: <ConfigHistory/> },
+    { id: 'metrics', label: uiTerms.metrics, icon: Server, content: <ScopeMetrics/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
     { id: 'coding', label: '코딩', icon: SquareTerminal, content: <><PiConfigSettings/><CodingSettings/></> },
     { id: 'voice', label: '음성', icon: Mic, content: <VoiceSettings/> },
@@ -380,7 +381,7 @@ function Shell() {
               ? <GhostChat key={`${openGhost.id}:${routeConversationId ?? openGhost.directConversationId ?? 'new'}:${params.get('scope') ?? ''}`} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} threadId={params.get('thread')} navigate={navigate} initialScopeIds={params.getAll('scope').slice(0, 8)}/>
               : ghostNotFound)}
             {section === 'scopes' && <ScopesView key={`${selectedScope ?? 'empty'}:${params.get('new') ?? ''}`} selectedScope={selectedScope} navigate={navigate}
-              section={params.get('view') ?? 'documents'} onSectionChange={view => navigate(`/scopes/${encodeURIComponent(selectedScope!)}?view=${view}`)}
+              section={params.get('view') ?? undefined} onSectionChange={view => navigate(`/scopes/${encodeURIComponent(selectedScope!)}?view=${view}`)}
               onSelectScope={id => navigate(id ? `/scopes/${encodeURIComponent(id)}` : '/scopes')} createRequested={params.get('new') === '1'}
               onCreateClosed={() => {
                 const next = path.startsWith('/scopes/') ? path : '/scopes';

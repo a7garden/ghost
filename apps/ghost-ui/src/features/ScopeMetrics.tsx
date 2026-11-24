@@ -4,6 +4,7 @@ import { Button, InlineError, SettingsGroup } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Choice, errorText } from './InfrastructureFields';
+import { uiTerms } from '../uiText';
 
 const percent = (value: number | null) => value === null ? '집계 없음' : `${(value * 100).toFixed(1)}%`;
 const number = (value: number | null) => value === null ? '집계 없음' : value.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
@@ -32,13 +33,13 @@ export function ScopeMetrics({ scopeId }: { scopeId?: string | null }) {
     ['수용된 일 하나의 토큰', number(metrics.tokensPerAcceptedWork)], ['수용된 일 하나의 비용 (USD)', number(metrics.costPerAcceptedWork)],
     ['소유자가 뒤집은 판정', number(metrics.ownerOverturnedVerdicts)], ['한도 대기 시간', `${number(metrics.quotaWaitMs / 1000)}초`], ['반복 차단', number(metrics.repeatGuardHits)],
   ] : [];
-  return <SettingsGroup title="계측" actions={<Button variant="outline" disabled={loading} onClick={() => setReload(value => value + 1)}>새로고침</Button>}>
+  return <SettingsGroup title={uiTerms.metrics} actions={<Button variant="outline" disabled={loading} onClick={() => setReload(value => value + 1)}>새로고침</Button>}>
     <div className="infra-form">
       {scopeId === undefined && <Choice label="범위" value={selectedScope} onChange={value => { setSelectedScope(value); setRuleId(''); }} options={[{ value: 'all', label: '모든 범위' }, { value: 'global', label: '전체 (프로젝트 없음)' }, ...(state?.scopes ?? []).map(scope => ({ value: scope.id, label: scope.name }))]}/>}
       <div className="infra-columns"><Choice label="Ghost" value={ghostId} onChange={setGhostId} options={[{ value: '', label: '모두' }, ...(state?.ghosts ?? []).map(ghost => ({ value: ghost.id, label: ghost.name }))]}/>
         <Choice label="모델 자리" value={slot} onChange={setSlot} options={[{ value: '', label: '모두' }, ...Object.keys(state?.settings.slots ?? {}).map(name => ({ value: name, label: name }))]}/></div>
       <Choice label="규칙" value={ruleId} onChange={setRuleId} options={[{ value: '', label: '모두' }, ...(state?.policyRules ?? []).filter(rule => effectiveScopeId === undefined || !rule.scopeId || rule.scopeId === effectiveScopeId).map(rule => ({ value: rule.id, label: `${rule.tool} · ${rule.decision}` }))]}/>
-      {loading && <p role="status">계측을 불러오는 중…</p>}{error && <InlineError>{error}</InlineError>}
+      {loading && <p role="status">불러오는 중…</p>}{error && <InlineError>{error}</InlineError>}
       {metrics && <>
         <dl className="infra-metrics">{rows.map(([label, value]) => <div className="contents" key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
         {Object.entries(metrics.rules).map(([id, counts]) => <div className="infra-record" key={id}><p className="infra-record__meta">{state?.policyRules.find(rule => rule.id === id)?.tool ?? id}</p><dl className="infra-metrics"><dt>승인</dt><dd>{counts.approved}</dd><dt>거절</dt><dd>{counts.denied}</dd></dl></div>)}

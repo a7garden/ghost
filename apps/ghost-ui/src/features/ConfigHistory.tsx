@@ -5,8 +5,9 @@ import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { absoluteTime } from './time';
 import { Choice, errorText } from './InfrastructureFields';
+import { uiTerms } from '../uiText';
 
-const entities = [{ value: '', label: '전체' }, { value: 'scope', label: '프로젝트' }, { value: 'ghost', label: 'Ghost' }, { value: 'rule', label: '정책 규칙' }, { value: 'slot', label: '모델 자리' }, { value: 'mcp', label: 'MCP 서버' }, { value: 'activity', label: '계기' }, { value: 'limits', label: '한도' }];
+const entities = [{ value: '', label: '전체' }, { value: 'scope', label: '프로젝트' }, { value: 'ghost', label: 'Ghost' }, { value: 'rule', label: uiTerms.rules }, { value: 'slot', label: '모델 자리' }, { value: 'mcp', label: 'MCP 서버' }, { value: 'activity', label: uiTerms.activities }, { value: 'limits', label: '한도' }];
 
 export function ConfigHistory({ scopeId }: { scopeId?: string }) {
   const { store, client } = useHost();
@@ -28,7 +29,7 @@ export function ConfigHistory({ scopeId }: { scopeId?: string }) {
     try { await client.send({ type: 'config.revert', revisionId }); setConfirm(null); setNotice('변경 전 구성으로 되돌렸습니다.'); }
     catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };
-  return <SettingsGroup title="구성 기록">
+  return <SettingsGroup title={uiTerms.configHistory}>
     {!scopeId && <Choice label="구성 종류" value={filter} onChange={setFilter} options={entities.map(item => item.value ? item : { ...item, label: '전체' })}/>}
     {error && <InlineError>{error}</InlineError>}{notice && <p role="status">{notice}</p>}
     {!revisions.length && <p className="infra-record__meta">구성 변경 기록이 없습니다.</p>}
