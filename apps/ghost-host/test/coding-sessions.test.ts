@@ -79,6 +79,12 @@ test("an owner session with no folder works in its own empty sandbox; a Ghost st
     expect(a.cwd.startsWith(join(realpathSync(f.dir), "sandboxes"))).toBe(true);
     expect(readdirSync(a.cwd)).toEqual([]);
     expect(b.cwd).not.toBe(a.cwd);
+    // The first instruction names a sandbox session; a later one and an explicit title do not.
+    await f.sessions.prompt(a.id, { text: "\n## 로그인 화면의 제목과 입력 순서를 정리해서 한 줄로 로그인할 수 있게 해 주세요" });
+    expect(f.sessions.get(a.id)?.title).toBe("로그인 화면의 제목과 입력 순서를 정리해서 한 줄로 로그인할 수 있게 해 주…".slice(0, 39).trimEnd() + "…");
+    const named = await f.sessions.create({ title: "내 이름" }, owner);
+    await f.sessions.prompt(named.id, { text: "다른 이름이 되면 안 됨" });
+    expect(f.sessions.get(named.id)?.title).toBe("내 이름");
     await expect(f.sessions.create({}, { kind: "ghost", ghostId: "g", workId: "w", callId: "c" })).rejects.toMatchObject({ code: "invalid" });
   } finally { await f.close(); }
 });

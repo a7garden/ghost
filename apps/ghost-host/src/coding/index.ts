@@ -29,6 +29,15 @@ type FollowUp = Prompt & { turn: number };
 type Listener = (event: CodingEvent) => void;
 type Settlement = Omit<CodingSettled, "session">;
 type GhostRequester = Extract<CodingRequester, { kind: "ghost" }>;
+const SANDBOX_TITLE = "샌드박스";
+
+/** The first line of an instruction as a short name, or null when there is no text to name it by. */
+function promptTitle(text: string): string | null {
+  const line = text.split("\n").map(part => part.replace(/^[\s#>*`\-]+/, "").replace(/\s+/g, " ").trim()).find(Boolean);
+  if (!line) return null;
+  return line.length > 40 ? `${line.slice(0, 39).trimEnd()}…` : line;
+}
+
 interface CodingSessionOptions extends CodingModelSource {
   root: string;
   ledger: Ledger;
@@ -138,7 +147,7 @@ export class CodingSessions implements CodingSessionsPort {
     const workspace = prepareWorkspace(this.root, sandbox ?? input.repo ?? input.cwd!, directory, id, !!input.repo, input.branch);
     const at = Date.now();
     const session: CodingSession = {
-      ...workspace, id, title: (input.title?.trim() || (sandbox ? "샌드박스" : basename(workspace.repo ?? workspace.cwd) || workspace.cwd)).slice(0, 200),
+      ...workspace, id, title: (input.title?.trim() || (sandbox ? SANDBOX_TITLE : basename(workspace.repo ?? workspace.cwd) || workspace.cwd)).slice(0, 200),
       model: { provider: model.provider, model: model.id }, thinking, workId: requester.kind === "ghost" ? requester.workId : null,
       state: "idle", turn: 0, pendingDialog: null, usage: { input: 0, output: 0, cost: 0 }, createdAt: at, updatedAt: at,
     };
@@ -216,6 +225,9 @@ export class CodingSessions implements CodingSessionsPort {
       const agent = await this.parentAgent(handle);
       this.writable(handle);
       authorize?.();
+      // A sandbox session starts with a placeholder name; its first instruction names it.
+      const named = handle.record.session.title === SANDBOX_TITLE && handle.record.session.turn === 0 ? promptTitle(input.text) : null;
+      if (named) this.save(handle, { title: named });
       handle.record.pending.push(turn);
       this.start(handle, agent, { ...prompt, turn });
       return { disposition: "started" };
