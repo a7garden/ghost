@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Check, ChevronRight, KeyRound, LogIn, ShieldOff, Plus, Trash2 } from 'lucide-react';
+import { Check, ChevronRight, Download, KeyRound, LogIn, ShieldOff, Plus, Trash2 } from 'lucide-react';
 import { Button, SettingsGroup, SettingsRow, InlineError, SelectField, Badge, SegmentedControl, Switch } from '../ui';
-import type { Provider, ProviderPreset, Thinking } from '@ghost/contract';
+import type { LocalAuthResult, LocalAuthSource, Provider, ProviderPreset, Thinking } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
 import { ChatGptLoginDialog } from './ChatGptLogin';
+import { LocalAuthImportDialog } from './LocalAuthImport';
 import { NO_MODEL, modelFromKey, modelSelectOptions } from './ModelPicker';
 import { ProviderEditor } from './ProviderEditor';
 import { ProviderQuotaGroup } from './ProviderQuota';
@@ -21,6 +22,7 @@ export function ModelSettings() {
   const [editor, setEditor] = useState<{ initial?: Provider }>();
   const [remove, setRemove] = useState<Provider>();
   const [login, setLogin] = useState<Provider>();
+  const [importAuth, setImportAuth] = useState(false);
   const [pending, setPending] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const options = modelSelectOptions(settings);
 
@@ -62,11 +64,18 @@ export function ModelSettings() {
     setNotice(`${draft.name} 설정을 저장했습니다.${settings?.defaultModel ? '' : ' 아래에서 기본 모델을 선택해 주세요.'}`);
     if (startLogin) setLogin({ ...draft, hasCredential: false });
   };
+  const authImported = (_result: LocalAuthResult, source: LocalAuthSource) => {
+    setImportAuth(false);
+    setNotice(`${source.agentName}에서 ${source.target.name} 인증 정보를 가져왔습니다.${settings?.defaultModel ? '' : ' 아래에서 기본 모델을 선택해 주세요.'}`);
+  };
 
   return <section className="flex min-w-0 flex-col gap-6" aria-label="모델 설정">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 className="section-title">제공자</h2>
-      <Button variant="outline" type="button" disabled={pending !== '' || !settings || catalogLoading || !catalog.length} onClick={() => { setError(''); setEditor({}); }}><Plus size={15}/>{catalogLoading ? '목록 불러오는 중…' : '제공자 추가'}</Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" type="button" disabled={pending !== '' || !settings} onClick={() => { setError(''); setNotice(''); setImportAuth(true); }}><Download size={15}/>다른 에이전트에서 가져오기</Button>
+        <Button variant="outline" type="button" disabled={pending !== '' || !settings || catalogLoading || !catalog.length} onClick={() => { setError(''); setEditor({}); }}><Plus size={15}/>{catalogLoading ? '목록 불러오는 중…' : '제공자 추가'}</Button>
+      </div>
     </div>
     {catalogError && <InlineError pending={catalogLoading} onRetry={() => setCatalogAttempt(value => value + 1)} retryLabel="다시 불러오기">{catalogError}</InlineError>}
     {(settings?.providers.length ?? 0) > 0
@@ -125,6 +134,7 @@ export function ModelSettings() {
     </SettingsGroup>
     {editor && <ProviderEditor initial={editor.initial} presets={catalog} providerIds={settings?.providers.map(provider => provider.id) ?? []} busy={pending !== ''} onClose={() => setEditor(undefined)} onSave={saveProvider}/>}
     {login && <ChatGptLoginDialog provider={login} onClose={() => setLogin(undefined)}/>}
+    {importAuth && <LocalAuthImportDialog onClose={() => setImportAuth(false)} onImported={authImported}/>}
     {remove && <Modal title="제공자 삭제" onClose={() => pending === '' && setRemove(undefined)}>
       <p className="m-0">{remove.name}의 서버 설정과 저장된 인증 정보를 삭제합니다.</p>
       {error && <div className="mt-3"><InlineError>{error}</InlineError></div>}

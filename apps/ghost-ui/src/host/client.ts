@@ -30,6 +30,9 @@ import type {
   MemoryFile,
   MemoryRevision,
   MemoryView,
+  LocalAuthImport,
+  LocalAuthResult,
+  LocalAuthSource,
   MetricsView,
   MetricsFilter,
   OAuthStatus,
@@ -570,6 +573,18 @@ export class HostClient {
   /** Subscription usage read from each provider's own account; `refresh` skips the Host's short cache. */
   providerQuotas(refresh = false): Promise<ProviderQuota[]> {
     return this.json(`/api/providers/quota${refresh ? '?refresh=1' : ''}`);
+  }
+
+  /** Credentials other agents on the Host's Mac hold and Ghost can use; metadata only, never secret values. */
+  localAuthSources(): Promise<LocalAuthSource[]> {
+    return this.json('/api/providers/local-auth');
+  }
+
+  /** Copy one of them into its Ghost provider; `replace` confirms overwriting a credential that provider already holds. */
+  importLocalAuth(input: LocalAuthImport): Promise<LocalAuthResult> {
+    return this.json('/api/providers/local-auth/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
   }
 
   /** Start a device-code login for one OpenAI provider (owner only); joining a pending session returns it unchanged. */

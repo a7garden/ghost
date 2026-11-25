@@ -39,6 +39,8 @@ import type { BrowserPort, DocumentsPort, SkillsPort } from "../integrations/por
 import { listFolders } from "./folders.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
+import { serveLocalAuth } from "./local-auth.ts";
+import { LocalAuth } from "../integrations/local-auth.ts";
 import { ProviderQuotas } from "../integrations/provider-quota.ts";
 import { ConnectionOAuth } from "./connection-oauth.ts";
 import { serveConnect } from "./connect.ts";
@@ -135,6 +137,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
   const oauth = new OAuthLogins(core);
+  const localAuth = new LocalAuth();
   const suggestions = new Suggestions(core);
 
   const server = Bun.serve({
@@ -561,6 +564,13 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (pathname === "/api/commands" && request.method === "POST") return serveCommand(request, access);
     if (pathname === "/api/artifacts" && request.method === "POST") return uploadArtifact(request);
     if (pathname === "/api/events" && request.method === "GET") return serveEvents(request, url, access);
+
+    if (pathname === "/api/providers/local-auth" || pathname === "/api/providers/local-auth/import") {
+      // Reads other agents' credentials: a page on another site must not be able to trigger it.
+      if (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site")) return error("forbidden", "다른 사이트에서는 인증 정보를 가져올 수 없습니다.", 403);
+      try { return json(await serveLocalAuth(request, pathname, core, localAuth)); }
+      catch (caught) { return failure(caught); }
+    }
 
     if (pathname === "/api/providers/catalog" && request.method === "GET") {
       try {

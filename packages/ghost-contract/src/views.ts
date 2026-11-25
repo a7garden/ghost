@@ -14,6 +14,7 @@ import {
   Avatar,
   Conversation,
   Decision,
+  AuthType,
   Device,
   Effect,
   Ghost,
@@ -22,6 +23,7 @@ import {
   Message,
   Notification,
   ProviderPreset,
+  ProviderKind,
   Sandbox,
   Schedule,
   SkillName,
@@ -56,6 +58,43 @@ export const OAuthStatus = Type.Object({
   message: nullable(Type.String()),
 });
 export type OAuthStatus = Static<typeof OAuthStatus>;
+
+/**
+ * GET /api/providers/local-auth: credentials other agents on the Host's Mac already hold, matched to the Ghost
+ * provider that would receive them. Owner or paired device only; secret values never cross this boundary.
+ */
+export const LocalAuthSource = Type.Object({
+  /** Stable per source credential: `<agent>:<key>`. */
+  id: Type.String({ pattern: "^[a-z]{2,16}:[A-Za-z0-9._-]{1,64}$" }),
+  agent: Type.Union([Type.Literal("codex"), Type.Literal("omp"), Type.Literal("pi")]),
+  /** Display name of the agent, e.g. "Codex CLI". */
+  agentName: Type.String({ maxLength: 64 }),
+  kind: ProviderKind,
+  authType: AuthType,
+  /** Email, or the last characters of an API key, to tell several credentials apart. */
+  account: nullable(Type.String({ maxLength: 256 })),
+  /** The Ghost provider that receives it; `exists: false` means the import adds it from its preset. */
+  target: Type.Object({
+    providerId: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
+    name: Type.String({ maxLength: 128 }),
+    exists: Type.Boolean(),
+    hasCredential: Type.Boolean(),
+  }),
+});
+export type LocalAuthSource = Static<typeof LocalAuthSource>;
+
+/** POST /api/providers/local-auth/import. `replace` is required when the target already holds a credential. */
+export const LocalAuthImport = Type.Object({
+  sourceId: LocalAuthSource.properties.id,
+  replace: Type.Optional(Type.Boolean()),
+}, { additionalProperties: false });
+export type LocalAuthImport = Static<typeof LocalAuthImport>;
+
+export const LocalAuthResult = Type.Object({
+  providerId: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
+  created: Type.Boolean(),
+});
+export type LocalAuthResult = Static<typeof LocalAuthResult>;
 
 /** GET /api/state. Every authenticated principal receives the same snapshot except its own principal field. */
 export const State = Type.Object({
