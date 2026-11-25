@@ -49,6 +49,7 @@ import type {
   WorkDetail,
   VoiceSettings,
 } from '@ghost/contract';
+import { TERMINAL_BEARER_PREFIX, TERMINAL_PROTOCOL, type TerminalCreate, type TerminalView } from '@ghost/contract';
 import type { FolderListing, WorkbenchChanges, WorkbenchFileDiff, WorkbenchState } from '@ghost/contract';
 
 declare global {
@@ -245,6 +246,24 @@ export class HostClient {
   /** Skills a Ghost may be given (owner only); 404 or empty when no skill root is configured. */
   skills(): Promise<SkillCatalog> {
     return this.json('/api/skills');
+  }
+
+  createTerminal(spec: TerminalCreate): Promise<{ id: string }> {
+    return this.json('/api/terminals', codingJson('POST', spec));
+  }
+
+  terminals(signal?: AbortSignal): Promise<TerminalView[]> {
+    return this.json('/api/terminals', { signal });
+  }
+
+  closeTerminal(id: string): Promise<{ ok: true }> {
+    return this.json(`/api/terminals/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  openTerminalSocket(id: string, after: number | undefined): WebSocket {
+    const url = new URL(`/api/terminals/${encodeURIComponent(id)}/stream`, window.location.href);
+    if (after !== undefined) url.searchParams.set('after', String(after));
+    return new WebSocket(url, this.token ? [TERMINAL_PROTOCOL, `${TERMINAL_BEARER_PREFIX}${this.token}`] : [TERMINAL_PROTOCOL]);
   }
 
   workbench(signal?: AbortSignal): Promise<WorkbenchState> {

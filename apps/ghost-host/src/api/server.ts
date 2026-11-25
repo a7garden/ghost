@@ -59,6 +59,8 @@ import { CodingSessions } from "../coding/index.ts";
 import { CodingModels } from "../coding/models.ts";
 import { serveOrchestration } from "../orchestration/routes.ts";
 import { readRegular as readCodingFile } from "../coding/workspace.ts";
+import type { Terminals } from "../terminal/index.ts";
+import { serveTerminals, terminalStreamBearer, terminalWebSocket, type TerminalSocket } from "../terminal/routes.ts";
 import { newId } from "../core/ids.ts";
 import { HOST_VERSION, snapshot, workDetail } from "../core/state.ts";
 import { Suggestions } from "../core/suggestions.ts";
@@ -131,7 +133,7 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; workbench?: Workbench | null; vault?: Vault | null; browser?: BrowserPort | null; logins?: LoginShelf | null; shade?: Shade | null; localAccounts?: LocalAccounts | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null; quotas?: ProviderQuotas }): { port: number; stop(): Promise<void> } {
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; terminals?: Terminals | null; workbench?: Workbench | null; vault?: Vault | null; browser?: BrowserPort | null; logins?: LoginShelf | null; shade?: Shade | null; localAccounts?: LocalAccounts | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null; quotas?: ProviderQuotas }): { port: number; stop(): Promise<void> } {
   const { core, config, ownerToken, documents, skills, vault = null, browser = null, logins = null, shade = null, localAccounts = null, updater = null, memory = null, memoryDreams = null } = deps;
   const quotas = deps.quotas ?? new ProviderQuotas({ providers: () => core.ledger.providers(), secrets: core.secrets });
   const ownerHash = Buffer.from(hashSecret(ownerToken));
@@ -140,19 +142,21 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   const localAuth = new LocalAuth();
   const suggestions = new Suggestions(core);
 
-  const server = Bun.serve({
+  const server = Bun.serve<TerminalSocket>({
     hostname: config.host,
     port: config.port,
     // Bun closes connections idle for 10 s by default; the SSE keepalive is every 15 s.
     idleTimeout: 60,
     fetch: (request, bound) => handle(request, bound),
+    websocket: terminalWebSocket,
   });
-  // API and app HTML share this listener, including for port 0.
+  // API, app HTML and terminal WebSockets share this listener, including for port 0.
   if (core.codingSessions instanceof CodingSessions) core.codingSessions.protectHostPort(server.port!);
 
   const loopbackHosts = new Set([`127.0.0.1:${server.port}`, `localhost:${server.port}`, `[::1]:${server.port}`]);
   const allowedHosts = new Set(loopbackHosts);
   const publicOrigin = config.publicOrigin ?? `http://${config.host}:${server.port}`;
+  const terminalPublicOrigin = URL.parse(publicOrigin);
   try {
     allowedHosts.add(new URL(publicOrigin).host.toLowerCase());
   } catch {
@@ -174,8 +178,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     return error("internal", "internal error", 500);
   }
 
-  function authenticate(request: Request): Access | null {
-    const header = request.headers.get("authorization");
+  function authenticate(request: Request, websocketBearer: string | null = null): Access | null {
+    const header = request.headers.get("authorization") ?? websocketBearer;
     if (header === null || !header.startsWith("Bearer ")) return null;
     const token = header.slice("Bearer ".length).trim();
     if (token.length === 0) return null;
@@ -453,7 +457,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     return fallback ?? error("not_found", "not found", 404);
   }
 
-  async function handle(request: Request, bound: Bun.Server<undefined>): Promise<Response> {
+  async function handle(request: Request, bound: Bun.Server<TerminalSocket>): Promise<Response | undefined> {
     // DNS rebinding: only loopback and the public origin may talk to this server.
     const host = (request.headers.get("host") ?? "").toLowerCase();
     if (!allowedHosts.has(host)) return error("forbidden", "untrusted host", 403);
@@ -493,11 +497,18 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       }
     }
 
-    const bearerAccess = viaEdge ? null : authenticate(request);
+    const terminalsRoute = pathname === "/api/terminals" || pathname.startsWith("/api/terminals/");
+    const bearerAccess = viaEdge ? null : authenticate(request, terminalsRoute ? terminalStreamBearer(request, pathname) : null);
     const viaIdentity = !viaEdge && bearerAccess === null && tailnetOwner;
     const access = viaEdge || viaIdentity ? new Access({ kind: "owner" }) : bearerAccess;
     if (access === null) return error("forbidden", "missing or invalid bearer token", 401);
     const fetchSite = request.headers.get("sec-fetch-site");
+    if (terminalsRoute) {
+      if (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site")) return error("forbidden", "다른 사이트에서는 터미널을 조작할 수 없습니다.", 403);
+      const expectedOrigin = viaEdge ? `https://${host}` : tailnet !== null && host === tailnet.host ? tailnet.config.origin : terminalPublicOrigin?.host === host ? terminalPublicOrigin.origin : url.origin;
+      try { return await serveTerminals(request, url, bound, deps.terminals ?? null, expectedOrigin); }
+      catch (caught) { return failure(caught); }
+    }
     if (pathname.startsWith("/api/workbench/")) {
       if (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site")) return error("forbidden", "다른 사이트에서는 작업대를 조작할 수 없습니다.", 403);
       if (!deps.workbench) return error("unavailable", "이 Host에서는 작업대를 열 수 없습니다.", 503);

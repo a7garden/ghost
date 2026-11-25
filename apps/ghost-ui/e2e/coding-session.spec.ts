@@ -8,9 +8,9 @@ import { mockWorkbench } from './workbench-mock';
 async function openSessionPicker(page: Page, creates: { repo?: string; cwd?: string }[]) {
   const { service } = await mockWorkbench(page, creates);
   service.createSpace({ title: '세션 테스트', root: null, version: 0 });
-  await openScreen(page, { name: 'coding', route: () => '/coding', waits: () => ['에이전트 추가'] }, 'light');
-  await page.locator('.workbench-main').getByRole('button', { name: '에이전트 추가' }).click();
-  return page.getByRole('dialog', { name: '에이전트 추가' });
+  await openScreen(page, { name: 'coding', route: () => '/coding', waits: () => ['새 에이전트'] }, 'light');
+  await page.locator('.workbench-main').getByRole('button', { name: '이전 세션 열기' }).click();
+  return page.getByRole('dialog', { name: '이전 세션 열기' });
 }
 
 async function capture(page: Page, name: string) {
@@ -129,8 +129,10 @@ for (const width of [1440, 390]) {
 
 test('starts from a known repository, patches title and model, then preserves closed history read-only', async ({ page }) => {
   const api = await mockCodingSessions(page);
-  const picker = await openSessionPicker(page, api.creates);
-  await picker.getByRole('button', { name: '새 에이전트' }).click();
+  const { service } = await mockWorkbench(page, api.creates);
+  service.createSpace({ title: '세션 테스트', root: null, version: 0 });
+  await openScreen(page, { name: 'coding', route: () => '/coding', waits: () => ['새 에이전트'] }, 'light');
+  await page.locator('.workbench-main').getByRole('button', { name: '새 에이전트' }).click();
   const create = page.getByRole('dialog', { name: '새 에이전트' });
   const repo = create.getByRole('combobox', { name: '작업 폴더' });
   await expect(repo).toBeVisible();

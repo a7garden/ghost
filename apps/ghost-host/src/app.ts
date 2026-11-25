@@ -40,6 +40,8 @@ import { MailWatcher } from "./integrations/mail-watch.ts";
 import { createHostMcpClients, type McpClients } from "./integrations/mcp.ts";
 import { createLiveCallEngine } from "./integrations/calls-live.ts";
 import { createLocalCallEngine, type LocalCallEngine } from "./integrations/calls-local.ts";
+import { Terminals } from "./terminal/index.ts";
+import { terminalNotifier } from "./terminal/notify.ts";
 import { Workbench } from "./workbench/service.ts";
 
 export interface App {
@@ -48,6 +50,7 @@ export interface App {
   ledger: Ledger;
   documents: DocumentsPort;
   skills: SkillsPort | null;
+  terminals: Terminals | null;
   codingSessions: CodingSessionsPort | null;
   workbench: Workbench | null;
   host: HostPort | null;
@@ -98,6 +101,7 @@ export async function openApp(config: Config): Promise<App> {
   let openedMail: MailService | null = null;
   let openedMailWatcher: MailWatcher | null = null;
   let openedCodingSessions: CodingSessions | null = null;
+  let openedTerminals: Terminals | null = null;
   let openedMcp: McpClients | null = null;
   let openedSourceStore: SourceStore | null = null;
   let openedMemory: MemoryStore | null = null;
@@ -118,6 +122,7 @@ export async function openApp(config: Config): Promise<App> {
     ]);
     await attempt(async () => { await openedDreams?.close(); openedDreams = null; });
     await attempt(async () => { await openedCodingSessions?.shutdown(); openedCodingSessions = null; });
+    await attempt(async () => { await openedTerminals?.shutdown(); openedTerminals = null; });
     if (openedCore && !coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
     await Promise.all([
       attempt(async () => { await openedMailWatcher?.stop(); openedMailWatcher = null; }),
@@ -146,7 +151,7 @@ export async function openApp(config: Config): Promise<App> {
       await attempt(() => { openedSourceStore?.close(); openedSourceStore = null; });
       await attempt(() => { openedMemory?.close(); openedMemory = null; });
       // Live browser or desktop processes keep ownership: close() can retry their shutdown.
-      if (!openedBrowser && !openedDesktop) {
+      if (!openedBrowser && !openedDesktop && !openedTerminals) {
         await attempt(() => { openedLedger?.close(); openedLedger = null; });
         if (!openedLedger) await attempt(() => lock.close());
       }
@@ -193,6 +198,7 @@ export async function openApp(config: Config): Promise<App> {
     const localAccounts = new LocalAccounts();
     const desktop = (openedDesktop = createDesktop(config, { root: config.root }));
     const memory = (openedMemory = new MemoryStore(config.root));
+    const terminals = (openedTerminals = config.coding === false ? null : new Terminals(config.root, { log, onEvent: terminalNotifier(core) }));
     const codingSessions = (openedCodingSessions = config.coding === false ? null : new CodingSessions({
       root: config.root, ledger, settings: () => { core.codexCatalog.sync(); return ledger.settings(); }, secrets: core.secrets, catalog: core.catalog, log,
       authorizeGhost: (requester, id) => core.coding.authorizeEmbeddedCreate(requester, id),
@@ -210,6 +216,7 @@ export async function openApp(config: Config): Promise<App> {
       ledger,
       documents,
       skills,
+      terminals,
       codingSessions,
       workbench,
       host,
@@ -270,7 +277,7 @@ export async function serve(config: Config) {
     if (errors.length) throw new AggregateError(errors, "failed to stop serving Ghost state root");
   };
   try {
-    try { updater = new Updater({ root: config.root, publicOrigin: config.publicOrigin, idle: () => hostIsIdle(app.core) && !app.memoryDreams.isBusy(), log }); }
+    try { updater = new Updater({ root: config.root, publicOrigin: config.publicOrigin, idle: () => hostIsIdle(app.core, app.terminals) && !app.memoryDreams.isBusy(), log }); }
     catch (error) { log("업데이트를 시작하지 못했습니다.", error); }
     const layout = detectLayout();
     if (layout) registerHostBundle(layout).catch((error: unknown) => log("Ghost Host 번들을 시스템에 등록하지 못했습니다.", error));
@@ -288,7 +295,7 @@ export async function serve(config: Config) {
     app.core.catalog.start(catalogChanged);
     app.core.codexCatalog.start(catalogChanged);
     const token = ownerToken(config.root);
-    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, workbench: app.workbench, vault: app.vault, browser: app.browser, logins: app.logins, shade: app.shade, localAccounts: app.localAccounts, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
+    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, terminals: app.terminals, workbench: app.workbench, vault: app.vault, browser: app.browser, logins: app.logins, shade: app.shade, localAccounts: app.localAccounts, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
     push = startPush(app.core, config);
     const hostFile = join(config.root, "host.json");
     writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });

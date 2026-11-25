@@ -73,6 +73,14 @@
   .workbench-agent .embedded-identity { display: none; }
   .workbench-agent .embedded-workspace__head { padding-block: 3px; }
   .workbench-agent .embedded-workspace__actions { flex-wrap: wrap; }
+  .workbench-agent-stack[data-covered] { display: none; }
+  .workbench-terminal { display: flex; flex-direction: column; flex: 0 0 42%; min-block-size: 0; border-block-start: 1px solid var(--ghost-line); }
+  .workbench[data-compact] .workbench-terminal { flex: 1; border-block-start: 0; }
+  .workbench-terminal > header { display: flex; flex: none; align-items: center; gap: 2px; padding: 0 4px 0 12px; }
+  .workbench-terminal h2 { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); font-weight: 620; }
+  .workbench-terminal h2 small { color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 400; }
+  .workbench-terminal__body { flex: 1; min-block-size: 0; }
+  .workbench-terminal .terminal-pane { padding: 2px 6px 4px; }
   .workbench-attention, .workbench-state-mark { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
   .workbench-attention { background: var(--ghost-success-ink); }
   .workbench-attention[data-signal='waiting'] { border-radius: 1px; background: var(--ghost-amber-ink); transform: rotate(45deg); }
@@ -105,8 +113,10 @@
   .workbench-picker svg { flex: none; width: 16px; height: 16px; }
   .workbench[data-compact] { display: flex; flex-direction: column; }
   .workbench[data-compact] .workbench-main { flex: 1; }
-  .workbench-compact-head { min-height: 44px; padding: 0 8px; }
-  .workbench-compact-head > button:first-child { min-width: 0; max-width: calc(100% - 44px); justify-content: start; }
+  .workbench-compact-head { min-height: 44px; padding: 0 4px 0 6px; gap: 0; justify-content: flex-start; }
+  .workbench-compact-head > button:first-child { flex: 1; }
+  .workbench-compact-head > button > small { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 400; }
+  .workbench-compact-head > button:first-child { min-width: 0; justify-content: start; }
   .workbench-compact-head > button > svg { flex: none; }
   .workbench-compact-head > button { min-height: 44px; min-width: 44px; }
   .workbench-space-popover { width: min(20rem, calc(100vw - 16px)); max-height: var(--radix-popover-content-available-height); overflow-y: auto; padding: 5px; }

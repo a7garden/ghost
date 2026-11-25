@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { UpdateStatus } from "@ghost/contract";
 import { CommandError } from "../core/errors.ts";
 import type { Core } from "../core/core.ts";
+import type { Terminals } from "../terminal/index.ts";
 import { runReleaseCommand, sha256, validateTarball, verifyReleaseDirectory } from "./archive.ts";
 import { GitHubClient, MAX_ASSET_BYTES, newer, parseManifest, type ReleaseManifest, type UpdateFetch } from "./github.ts";
 import { buildIdentity, RELEASE_PUBKEY, RELEASE_REPOSITORY } from "./identity.ts";
@@ -33,8 +34,8 @@ export interface UpdaterOptions {
 }
 
 /** The engine mirrors live running state into the ledger's busy flag. */
-export function hostIsIdle(core: Core): boolean {
-  return !core.hasQueuedLanes() && !core.codingSessions?.busy()
+export function hostIsIdle(core: Core, terminals?: Pick<Terminals, "busy"> | null): boolean {
+  return !core.hasQueuedLanes() && !core.codingSessions?.busy() && !terminals?.busy()
     && !core.ledger.conversations().some(conversation => conversation.busy);
 }
 

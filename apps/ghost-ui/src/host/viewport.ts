@@ -30,7 +30,7 @@ export function dragClosesKeyboard(dx: number, dy: number): boolean {
 }
 
 /** Where a drag leaves the keyboard alone: it scrolls or selects something of its own. */
-const OWN_DRAG = '.ghost-composer, .composer-suggest, .composer-plus__menu, .cm-editor, textarea, input, [contenteditable="true"]';
+const OWN_DRAG = '.ghost-composer, .composer-suggest, .composer-plus__menu, .xterm, .cm-editor, textarea, input, [contenteditable="true"]';
 
 /** WKWebView keeps the layout viewport behind the keyboard; size the shared frame to the visible one. */
 export function useVisibleViewport() {

@@ -162,7 +162,8 @@ Feature-level compositions:
   On phones, the session title and state share the back bar; the view switch stays
   directly above the content. A selected diff has one file
   toolbar, and a blocking request replaces the disabled chat composer.
-  Terminals and pane lease control are gone (owner decision 2026-11-25): the workbench
+  Terminals are optional, owner-only and on demand: the owner opens one themselves,
+  an agent never opens one, and they are not persisted across a Host restart. The workbench
   is spaces → agents, and each agent is a built-in GUI Pi coding session. The native
   workbench only creates a worktree when
   **worktree로 시작** is checked; **git 변경** reads the focused space without staging

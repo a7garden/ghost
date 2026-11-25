@@ -1,18 +1,19 @@
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronUp, Ellipsis, Folder, GitBranch, Plus, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Ellipsis, Folder, GitBranch, History, Pencil, Plus, SquareTerminal, Trash2, X } from 'lucide-react';
 import type { Agent, CodingSession as Session, Scope, Space, WorkbenchSpaceCreate, WorkbenchState } from '@ghost/contract';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { FolderField } from '../components/FolderPicker';
 import { Modal } from '../components/Modal';
 import { HostError } from '../host/client';
 import { useHost } from '../host/context';
-import { Button, InlineError, Input, Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { Button, ContextMenu, ContextMenuAction, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, InlineError, Input, Popover, PopoverContent, PopoverTrigger } from '../ui';
 import { CodingSession } from './CodingSession';
 import { StartSession } from './CodingSessionStart';
 import { codingError } from './CodingSessionModel';
 import { directoryName } from './CodingModel';
 import { useWorkbenchAttention, type Attention } from './WorkbenchAttention';
 import { WorkbenchChanges } from './WorkbenchChanges';
+import { WorkbenchTerminal } from './WorkbenchTerminal';
 import { absoluteTime, relativeTime, useNow } from './time';
 import { foldedAgents } from './workbenchFold';
 import { resolveSessionLink } from './workbenchSessionLink';
@@ -21,7 +22,8 @@ import './CodingSession.css';
 
 type Dialog =
   | { type: 'space' | 'changes' | 'agent' | 'start' }
-  | { type: 'rename' | 'delete'; space: Space };
+  | { type: 'rename' | 'delete'; space: Space }
+  | { type: 'renameAgent' | 'deleteAgent'; sessionId: string; title: string };
 
 const ATTENTION_PRIORITY: Record<Attention, number> = { done: 1, failed: 2, waiting: 3 };
 const stateLabels: Record<Session['state'], string> = {
@@ -103,6 +105,7 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [spacesOpen, setSpacesOpen] = useState(false);
   const [showOlder, setShowOlder] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const busy = queued > 0;
   const now = useNow();
   const focus = state?.focus;
@@ -113,7 +116,14 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
   const agentTitle = (agent: Agent) => sessions.get(agent.sessionId)?.title || '에이전트';
   const folded = foldedAgents(agents, sessions, attention, focusedId, Date.now());
   const listed = showOlder ? agents : agents.filter(agent => !folded.has(agent.sessionId));
+  const listedIds = new Set(state?.agents.map(agent => agent.sessionId));
+  const earlier = [...sessions.values()].filter(session => !listedIds.has(session.id)).sort((a, b) => b.updatedAt - a.updatedAt);
   const focusedAgent = agents.find(agent => agent.sessionId === focusedId);
+  // The shell opens where the agent works, else in the space's folder.
+  const terminalCwd = (focusedAgent && sessions.get(focusedAgent.sessionId)?.cwd) || space?.root || null;
+  const covered = compact && terminalOpen && terminalCwd !== null;
+  const terminalButton = <Button variant={terminalOpen ? 'secondary' : 'ghost'} size={compact ? 'icon' : 'sm'} type="button" disabled={!terminalCwd} aria-pressed={terminalOpen}
+    aria-label="터미널" title="터미널" onClick={() => setTerminalOpen(value => !value)}><SquareTerminal aria-hidden="true"/>{!compact && '터미널'}</Button>;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -152,7 +162,8 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
     return () => controller.abort();
   }, [client, loaded, sessionId]);
 
-  useEffect(() => setShowPicker(dialog?.type === 'agent'), [dialog?.type, setShowPicker]);
+  // The session list also tells whether earlier sessions are waiting to be opened.
+  useEffect(() => setShowPicker(true), [setShowPicker]);
 
   function apply(snapshot: WorkbenchState) {
     if (latest.current && latest.current.version > snapshot.version) return;
@@ -223,18 +234,27 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
           {listed.map(agent => {
             const title = agentTitle(agent);
             const updatedAt = sessions.get(agent.sessionId)?.updatedAt;
-            return <li key={agent.sessionId} className="workbench-agent-row" data-selected={agent.sessionId === focusedId || undefined}>
+            const removeAgent = () => showFailure(mutate(`agents/${encodeURIComponent(agent.sessionId)}`, 'DELETE'));
+            return <li key={agent.sessionId}><ContextMenu>
+              <ContextMenuTrigger asChild touchAction="inline"><div className="workbench-agent-row" data-selected={agent.sessionId === focusedId || undefined}>
               <button type="button" aria-current={agent.sessionId === focusedId ? 'true' : undefined} title={title}
                 onClick={() => { select(item.id, agent.sessionId); setSpacesOpen(false); }}>
                 <AgentState session={sessions.get(agent.sessionId)}/><span className="workbench-agent-title">{title}</span>{updatedAt !== undefined && <time className="workbench-agent-time tabular" dateTime={new Date(updatedAt).toISOString()} title={absoluteTime(updatedAt)}>{relativeTime(updatedAt, now)}</time>}<AttentionMark signal={attention.get(agent.sessionId)}/>
               </button>
+              <ContextMenuAction/>
               <Button variant="ghost" size="icon" type="button" disabled={busy} aria-label={`${title} 닫기`} title="닫기"
-                onClick={() => showFailure(mutate(`agents/${encodeURIComponent(agent.sessionId)}`, 'DELETE'))}><X aria-hidden="true"/></Button>
-            </li>;
+                onClick={removeAgent}><X aria-hidden="true"/></Button>
+              </div></ContextMenuTrigger>
+              <ContextMenuContent aria-label="에이전트 메뉴">
+                <ContextMenuItem icon={<Pencil/>} onSelect={() => setDialog({ type: 'renameAgent', sessionId: agent.sessionId, title })}>이름 바꾸기</ContextMenuItem>
+                <ContextMenuItem icon={<Trash2/>} onSelect={() => setDialog({ type: 'deleteAgent', sessionId: agent.sessionId, title })}>삭제</ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu></li>;
           })}
           {folded.size > 0 && <li><button type="button" className="workbench-agent-add" aria-expanded={showOlder} onClick={() => setShowOlder(value => !value)}>
             {showOlder ? <ChevronUp size={15} aria-hidden="true"/> : <ChevronDown size={15} aria-hidden="true"/>}{showOlder ? '이전 에이전트 접기' : `이전 에이전트 ${folded.size}개`}</button></li>}
-          <li><button type="button" className="workbench-agent-add" disabled={busy} onClick={() => displayDialog({ type: 'agent' })}><Plus size={15} aria-hidden="true"/>에이전트 추가</button></li>
+          <li><button type="button" className="workbench-agent-add" disabled={busy} onClick={() => displayDialog({ type: 'start' })}><Plus size={15} aria-hidden="true"/>새 에이전트</button></li>
+          {earlier.length > 0 && <li><button type="button" className="workbench-agent-add" disabled={busy} onClick={() => displayDialog({ type: 'agent' })}><History size={15} aria-hidden="true"/>이전 세션 열기</button></li>}
         </ul>}
       </div>;
     })}
@@ -258,12 +278,20 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
     sheet = <ConfirmDialog title="스페이스 삭제" onClose={dismiss} confirmLabel="삭제" onConfirm={() => mutate(`spaces/${encodeURIComponent(target.id)}`, 'DELETE')}>
       <p>‘{target.title}’과 그 에이전트 목록이 사라집니다. 코딩 세션은 남습니다.{target.worktree && ' worktree와 브랜치도 남습니다.'}</p>
     </ConfirmDialog>;
+  } else if (dialog?.type === 'renameAgent') {
+    const target = dialog;
+    sheet = <NameSheet key={target.sessionId} title="이름 바꾸기" initial={target.title} onClose={dismiss}
+      onSave={title => client.patchCodingSession(target.sessionId, { title })}/>;
+  } else if (dialog?.type === 'deleteAgent') {
+    const target = dialog;
+    sheet = <ConfirmDialog title="에이전트 삭제" onClose={dismiss} confirmLabel="삭제"
+      onConfirm={() => mutate(`agents/${encodeURIComponent(target.sessionId)}`, 'DELETE')}>
+      <p>‘{target.title}’을 목록에서 삭제합니다. 코딩 세션 기록은 남고 「이전 세션 열기」에서 다시 열 수 있습니다.</p>
+    </ConfirmDialog>;
   } else if (dialog?.type === 'agent') {
-    const listed = new Set(state?.agents.map(agent => agent.sessionId));
-    sheet = <Modal title="에이전트 추가" onClose={dismiss}><div className="workbench-picker">
-      <button type="button" onClick={() => setDialog({ type: 'start' })}><Plus aria-hidden="true"/>새 에이전트</button>
-      {[...sessions.values()].filter(session => !listed.has(session.id)).sort((a, b) => b.updatedAt - a.updatedAt).map(session =>
-        <button type="button" key={session.id} title={session.repo ?? session.cwd} onClick={() => { dismiss(); showFailure(addAgent(session.id)); }}>{session.title}</button>)}
+    sheet = <Modal title="이전 세션 열기" onClose={dismiss}><div className="workbench-picker">
+      {earlier.map(session => <button type="button" key={session.id} title={session.repo ?? session.cwd} onClick={() => { dismiss(); showFailure(addAgent(session.id)); }}>{session.title}</button>)}
+      {earlier.length === 0 && !listError && <p className="workbench-empty">열 수 있는 이전 세션이 없습니다.</p>}
       {listError && <InlineError onRetry={reloadList} retryLabel="다시 불러오기">{listError}</InlineError>}
     </div></Modal>;
   } else if (dialog?.type === 'start') {
@@ -278,11 +306,18 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
     <h1 className="sr-only">코딩 작업대</h1>
     {compact ? <div className="workbench-compact-head">
       <Popover open={spacesOpen} onOpenChange={setSpacesOpen}>
-        <PopoverTrigger asChild><Button variant="ghost" type="button" aria-label={space ? `스페이스: ${space.title}` : '스페이스'}><Folder aria-hidden="true"/>
-          <span>{space?.title ?? '스페이스'}</span><AttentionMark signal={space ? spaceSignals.get(space.id) : undefined}/><ChevronDown aria-hidden="true"/></Button></PopoverTrigger>
-        <PopoverContent className="workbench-space-popover" align="start" aria-label="스페이스 목록">{spaceList}{sideLinks}</PopoverContent>
+        <PopoverTrigger asChild><Button variant="ghost" className="justify-start" type="button" aria-label={space ? `스페이스: ${space.title}${focusedAgent ? `, ${agentTitle(focusedAgent)}` : ''}` : '스페이스'}>
+          {focusedAgent ? <AgentState session={sessions.get(focusedAgent.sessionId)}/> : <Folder aria-hidden="true"/>}
+          <span className="workbench-agent-title">{focusedAgent ? agentTitle(focusedAgent) : space?.title ?? '스페이스'}</span>
+          {focusedAgent && <small>{space?.title}</small>}<AttentionMark signal={focusedAgent ? attention.get(focusedAgent.sessionId) : space ? spaceSignals.get(space.id) : undefined}/><ChevronDown aria-hidden="true"/></Button></PopoverTrigger>
+        <PopoverContent className="workbench-space-popover" align="start" aria-label="스페이스 목록">{spaceList}
+          <button type="button" className="workbench-agent-add" disabled={!state || busy} onClick={() => displayDialog({ type: 'space' })}><Plus size={15} aria-hidden="true"/>새 스페이스</button>
+          {sideLinks}</PopoverContent>
       </Popover>
-      {makeSpace}
+      {!space && makeSpace}
+      {space && terminalButton}
+      {space?.root && <Button variant="ghost" size="icon" type="button" disabled={busy} aria-label="git 변경" title="git 변경" onClick={() => setDialog({ type: 'changes' })}><GitBranch aria-hidden="true"/></Button>}
+      {space && <Button variant="ghost" size="icon" type="button" disabled={busy} aria-label="새 에이전트" title="새 에이전트" onClick={() => displayDialog({ type: 'start' })}><Plus aria-hidden="true"/></Button>}
     </div> : <aside className="workbench-rail" aria-label="작업대 탐색">
       <div className="workbench-rail-head"><h2>스페이스</h2>{makeSpace}</div>
       {spaceList}{sideLinks}
@@ -294,22 +329,25 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
         ? <p className="workbench-error" role="status">에이전트를 여는 중…</p>
         : sessionLink.error && <div className="workbench-error"><InlineError>{sessionLink.error}</InlineError></div>)}
       {space ? <>
-        <header className="workbench-head">
+        {!compact && <header className="workbench-head">
           {focusedAgent && <AgentState session={sessions.get(focusedAgent.sessionId)}/>}
           <h2 title={focusedAgent ? agentTitle(focusedAgent) : space.title}>{focusedAgent ? agentTitle(focusedAgent) : space.title}</h2>
           {focusedAgent && <AttentionMark signal={attention.get(focusedAgent.sessionId)}/>}
-          {space.root && <Button className="ml-auto shrink-0" variant="ghost" size="sm" type="button" disabled={busy}
+          <span className="ml-auto"/>{terminalButton}
+          {space.root && <Button className="shrink-0" variant="ghost" size="sm" type="button" disabled={busy}
             onClick={() => setDialog({ type: 'changes' })}><GitBranch aria-hidden="true"/>git 변경</Button>}
-        </header>
-        {agents.length ? <div className="workbench-agent-stack">
+        </header>}
+        {agents.length ? <div className="workbench-agent-stack" data-covered={covered || undefined}>
           {/* Every unfolded agent stays mounted so a draft and the live stream survive switching. */}
           {agents.filter(agent => !folded.has(agent.sessionId)).map(agent => <section key={agent.sessionId} className="workbench-agent" aria-label={`에이전트: ${agentTitle(agent)}`}
             data-focused={agent.sessionId === focusedId || undefined} hidden={agent.sessionId !== focusedId}>
             <CodingSession id={agent.sessionId} onUpdate={observer}/>
           </section>)}
-        </div> : <div className="workbench-empty">
-          <Button variant="add" type="button" disabled={busy} onClick={() => setDialog({ type: 'agent' })}>에이전트 추가</Button>
+        </div> : !covered && <div className="workbench-empty">
+          <Button variant="add" type="button" disabled={busy} onClick={() => setDialog({ type: 'start' })}>새 에이전트</Button>
+          {earlier.length > 0 && <Button variant="ghost" type="button" disabled={busy} onClick={() => setDialog({ type: 'agent' })}>이전 세션 열기</Button>}
         </div>}
+        {terminalOpen && terminalCwd !== null && <WorkbenchTerminal key={terminalCwd} cwd={terminalCwd} onHide={() => setTerminalOpen(false)}/>}
       </> : state && <div className="workbench-empty">
         <Button variant="add" type="button" disabled={busy} onClick={() => displayDialog({ type: 'space' })}>스페이스 만들기</Button>
       </div>}
