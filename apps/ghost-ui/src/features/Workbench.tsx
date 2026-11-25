@@ -10,6 +10,7 @@ import { Button, InlineError, Input, Popover, PopoverContent, PopoverTrigger } f
 import { CodingSession } from './CodingSession';
 import { StartSession } from './CodingSessionStart';
 import { codingError } from './CodingSessionModel';
+import { directoryName } from './CodingModel';
 import { useWorkbenchAttention, type Attention } from './WorkbenchAttention';
 import { WorkbenchChanges } from './WorkbenchChanges';
 import { resolveSessionLink } from './workbenchSessionLink';
@@ -42,16 +43,18 @@ function NameSheet({ title, initial = '', withRoot, onSave, onClose }: {
   const [pending, setPending] = useState(false);
   const formed = useRef(false);
   const [error, setError] = useState('');
+  // A chosen folder names the space when the name is left empty.
+  const label = name.trim() || (withRoot && root ? directoryName(root).slice(0, 200) : '');
   return <Modal title={title} onClose={() => { if (!formed.current) onClose(); }} className="sm:max-w-[420px]">
     <form className="workbench-form" onSubmit={event => {
       event.preventDefault();
-      if (!name.trim() || (withWorktree && !branch.trim()) || formed.current) return;
+      if (!label || (withWorktree && !branch.trim()) || formed.current) return;
       formed.current = true;
       setPending(true); setError('');
-      void onSave(name.trim(), root || null, withWorktree ? { branch: branch.trim() } : undefined).then(onClose).catch(reason => setError(codingError(reason, '저장하지 못했습니다.')))
+      void onSave(label, root || null, withWorktree ? { branch: branch.trim() } : undefined).then(onClose).catch(reason => setError(codingError(reason, '저장하지 못했습니다.')))
         .finally(() => { formed.current = false; setPending(false); });
     }}>
-      <label>이름<Input value={name} required maxLength={200} disabled={pending} onChange={event => setName(event.target.value)}/></label>
+      <label>이름<Input value={name} required={!root} placeholder={root ? directoryName(root) : undefined} maxLength={200} disabled={pending} onChange={event => setName(event.target.value)}/></label>
       {withRoot && <>
         <FolderField label="작업 폴더 (선택)" optional value={root} disabled={pending} onChange={value => {
           setRoot(value);
@@ -62,7 +65,7 @@ function NameSheet({ title, initial = '', withRoot, onSave, onClose }: {
         {withWorktree && <label>브랜치 이름<Input value={branch} required maxLength={200} disabled={pending} onChange={event => setBranch(event.target.value)}/></label>}
       </>}
       {error && <InlineError>{error}</InlineError>}
-      <Button className="justify-self-end" disabled={pending || !name.trim() || (withWorktree && !branch.trim())} type="submit">{pending ? '저장 중…' : '저장'}</Button>
+      <Button className="justify-self-end" disabled={pending || !label || (withWorktree && !branch.trim())} type="submit">{pending ? '저장 중…' : '저장'}</Button>
     </form>
   </Modal>;
 }
@@ -256,7 +259,7 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
     </div></Modal>;
   } else if (dialog?.type === 'start') {
     const roots = [...new Set([space?.root, ...scopes.flatMap(scope => scope.paths)].filter((path): path is string => Boolean(path)))];
-    sheet = <StartSession directories={roots} onClose={dismiss} onCreated={session => {
+    sheet = <StartSession directories={roots} sandboxFirst={!space?.root} onClose={dismiss} onCreated={session => {
       dismiss();
       showFailure(addAgent(session.id));
     }}/>;

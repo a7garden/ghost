@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall, getCurrentTools, getSystemMessageText, type FauxResponseFactory } from "@earendil-works/pi-ai";
@@ -61,7 +61,7 @@ function fixture() {
   });
   secrets.put("faux", "faux-key");
   const create = (real = false) => new CodingSessions({ root, ledger, settings: () => ledger.settings(), secrets, catalog: core.catalog, log: console.error,
-    authorizeGhost: () => {},
+    authorizeGhost: () => {}, sandboxRoot: join(dir, "sandboxes"),
     ...(real ? {} : { provider: () => faux.provider }),
   });
   const sessions = create();
@@ -70,6 +70,18 @@ function fixture() {
     async close() { await sessions.shutdown(); core.stop(); ledger.close(); rmSync(dir, { recursive: true, force: true }); },
   };
 }
+
+test("an owner session with no folder works in its own empty sandbox; a Ghost still needs a repository", async () => {
+  const f = fixture();
+  try {
+    const a = await f.sessions.create({}, owner), b = await f.sessions.create({}, owner);
+    expect(a).toMatchObject({ title: "샌드박스", repo: null, branch: null });
+    expect(a.cwd.startsWith(join(realpathSync(f.dir), "sandboxes"))).toBe(true);
+    expect(readdirSync(a.cwd)).toEqual([]);
+    expect(b.cwd).not.toBe(a.cwd);
+    await expect(f.sessions.create({}, { kind: "ghost", ghostId: "g", workId: "w", callId: "c" })).rejects.toMatchObject({ code: "invalid" });
+  } finally { await f.close(); }
+});
 
 test("faux provider streams thinking/text, sees the image, and persists edit and write patches and transcript IDs", async () => {
   const f = fixture();

@@ -141,7 +141,7 @@ export type CodingEvent = Static<typeof CodingEvent>;
 export const CodingSessionCreate = Type.Object({
   /** The owner's repository (an absolute path): the Host cuts a worktree and a branch from it. */
   repo: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
-  /** Or a directory to work in directly, with no worktree. Exactly one of repo and cwd. */
+  /** Or a directory to work in directly, with no worktree. With neither repo nor cwd the owner's session works in an empty sandbox directory. */
   cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
   branch: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   title: Type.Optional(Type.String({ maxLength: 200 })),

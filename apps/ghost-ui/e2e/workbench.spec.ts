@@ -77,3 +77,17 @@ for (const width of [1440, 390]) {
     });
   });
 }
+
+test('a chosen folder names the space when the name is left empty', async ({ page }) => {
+  const { service } = await mockWorkbench(page);
+  await openScreen(page, { name: 'workbench', route: () => '/coding', waits: () => ['스페이스 만들기'] }, 'light');
+  await page.route('**/api/folders**', route => route.fulfill({ json: { path: tmpdir(), parent: null, home: tmpdir(), shortcuts: [], truncated: false, entries: [] } }));
+  await page.getByRole('button', { name: '새 스페이스' }).click();
+  const save = page.getByRole('button', { name: '저장', exact: true });
+  await expect(save).toBeDisabled();
+  await page.getByRole('button', { name: '작업 폴더 (선택): 선택 안 함' }).click();
+  await page.getByRole('button', { name: '이 폴더 선택' }).click();
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect.poll(() => service.read().spaces.map(space => space.title)).toEqual([tmpdir().split('/').pop()]);
+});

@@ -134,6 +134,10 @@ test('starts from a known repository, patches title and model, then preserves cl
   const create = page.getByRole('dialog', { name: '새 에이전트' });
   const repo = create.getByRole('combobox', { name: '작업 폴더' });
   await expect(repo).toBeVisible();
+  // A space with no folder starts in the sandbox: no worktree choice until a folder is picked.
+  await expect(repo).toHaveValue('sandbox');
+  await expect(create.getByRole('checkbox', { name: '별도 worktree에서 작업' })).toHaveCount(0);
+  await repo.selectOption({ index: 1 });
   await expect(create.getByRole('checkbox', { name: '별도 worktree에서 작업' })).toBeChecked();
   const path = await repo.inputValue();
   expect(path).toMatch(/^\//);

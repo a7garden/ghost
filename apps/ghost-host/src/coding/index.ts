@@ -1,5 +1,6 @@
 import { mkdirSync, realpathSync } from "node:fs";
 import { basename, join } from "node:path";
+import { homedir } from "node:os";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, type AgentSession, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import { ORCHESTRATION_READ_TOOLS, type OrchestrationAgent, type CodingDialog, type CodingDialogAnswer, type CodingEvent, type CodingImage, type CodingItem, type CodingPrompt, type CodingSession, type CodingSessionCreate } from "@ghost/contract";
@@ -33,6 +34,8 @@ interface CodingSessionOptions extends CodingModelSource {
   ledger: Ledger;
   log(message: string, detail?: unknown): void;
   authorizeGhost(requester: GhostRequester, id: string): void;
+  /** Where an owner session with no folder works; one empty directory per session. Default `~/Ghost`. */
+  sandboxRoot?: string;
 }
 
 interface SessionHandle {
@@ -107,7 +110,7 @@ export class CodingSessions implements CodingSessionsPort {
 
   async create(input: CodingSessionCreate, requester: CodingRequester): Promise<CodingSession> {
     if (this.stopping) throw conflict("coding sessions are shutting down");
-    if (!!input.repo === !!input.cwd || (!input.repo && input.branch)) throw invalid("provide exactly one of repo or cwd; branch requires a repository");
+    if (input.repo && input.cwd || (!input.repo && input.branch)) throw invalid("provide at most one of repo or cwd; branch requires a repository");
     if (requester.kind === "ghost" && !input.repo) throw invalid("Ghost coding requires an isolated repository worktree");
     const id = requester.kind === "ghost" ? ghostCodingSessionId(requester) : `coding-${newId()}`;
     const prior = this.get(id);
@@ -129,10 +132,13 @@ export class CodingSessions implements CodingSessionsPort {
     authorize?.();
     const directory = join(this.directory, id);
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const workspace = prepareWorkspace(this.root, input.repo ?? input.cwd!, directory, id, !!input.repo, input.branch);
+    // No folder: the owner works in an empty sandbox directory of its own, like a chat with no project.
+    const sandbox = input.repo || input.cwd ? null : join(this.options.sandboxRoot ?? join(homedir(), "Ghost"), `sandbox-${id.replace(/-/g, "").slice(-12)}`);
+    if (sandbox) mkdirSync(sandbox, { recursive: true, mode: 0o700 });
+    const workspace = prepareWorkspace(this.root, sandbox ?? input.repo ?? input.cwd!, directory, id, !!input.repo, input.branch);
     const at = Date.now();
     const session: CodingSession = {
-      ...workspace, id, title: (input.title?.trim() || basename(workspace.repo ?? workspace.cwd) || workspace.cwd).slice(0, 200),
+      ...workspace, id, title: (input.title?.trim() || (sandbox ? "샌드박스" : basename(workspace.repo ?? workspace.cwd) || workspace.cwd)).slice(0, 200),
       model: { provider: model.provider, model: model.id }, thinking, workId: requester.kind === "ghost" ? requester.workId : null,
       state: "idle", turn: 0, pendingDialog: null, usage: { input: 0, output: 0, cost: 0 }, createdAt: at, updatedAt: at,
     };

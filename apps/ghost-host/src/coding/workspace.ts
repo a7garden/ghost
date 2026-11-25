@@ -72,19 +72,19 @@ function git(cwd: string, args: string[]): string {
 }
 
 export function prepareWorkspace(root: string, directory: string, sessionDir: string, id: string, isolate: boolean, requestedBranch?: string): Pick<CodingSession, "cwd" | "repo" | "branch" | "base"> {
-  if (!isAbsolute(directory)) throw invalid("coding directory must be absolute");
+  if (!isAbsolute(directory)) throw invalid("작업 폴더는 절대 경로여야 합니다.");
   let cwd: string;
   try {
     cwd = realpathSync(directory);
     if (!statSync(cwd).isDirectory()) throw new Error();
-  } catch { throw invalid("coding directory does not exist"); }
+  } catch { throw invalid("작업 폴더가 없습니다."); }
   if ([...secretPaths(homedir(), root), join(homedir(), ".pi")].some(secret => insidePath(cwd, secret) || insidePath(secret, cwd))) {
-    throw invalid("coding directory overlaps Host state or a credential directory");
+    throw invalid("Ghost 상태나 자격 증명이 있는 폴더는 작업 폴더로 쓸 수 없습니다. 다른 폴더를 고르거나 샌드박스를 쓰세요.");
   }
   if (!isolate) return { cwd, repo: null, branch: null, base: null };
   let repo: string;
   try { repo = repositoryOf(cwd); } catch (error) { throw invalid(String(error)); }
-  if (insidePath(root, repo) || insidePath(repo, root)) throw invalid("repository overlaps Host state");
+  if (insidePath(root, repo) || insidePath(repo, root)) throw invalid("Ghost 상태 폴더와 겹치는 저장소는 쓸 수 없습니다.");
   const slug = basename(repo).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 42) || "repo";
   const branch = requestedBranch ?? `ghost/${slug}-${id.replace(/-/g, "").slice(-12)}`;
   if (branch.startsWith("-") || git(repo, ["check-ref-format", "--branch", branch]) !== branch) throw invalid("invalid branch name");

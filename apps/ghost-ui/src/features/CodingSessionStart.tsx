@@ -8,13 +8,14 @@ import { directoryName } from './CodingModel';
 import { useEmbeddedModels } from './CodingSessionLive';
 import { codingError, codingThinkingLabels, codingThinkingOptions, modelKey } from './CodingSessionModel';
 const OTHER = 'other';
+const SANDBOX = 'sandbox';
 
-export function StartSession({ directories, onCreated, onClose }: {
-  directories: string[]; onCreated(session: CodingSession): void; onClose(): void;
+export function StartSession({ directories, sandboxFirst, onCreated, onClose }: {
+  directories: string[]; sandboxFirst?: boolean; onCreated(session: CodingSession): void; onClose(): void;
 }) {
   const { client } = useHost();
   const { models, error: modelError, reload } = useEmbeddedModels(true);
-  const [directory, selectDirectory] = useState(directories[0] ?? OTHER);
+  const [directory, selectDirectory] = useState(sandboxFirst || !directories.length ? SANDBOX : directories[0]!);
   const [custom, setCustom] = useState('');
   const [worktree, setWorktree] = useState(true);
   const [modelId, selectModel] = useState('');
@@ -26,8 +27,9 @@ export function StartSession({ directories, onCreated, onClose }: {
   const model = models?.find(candidate => modelKey(candidate) === modelId);
   const levels = codingThinkingOptions(model);
   const level = thinking && levels.includes(thinking) ? thinking : undefined;
+  const sandbox = directory === SANDBOX;
   const repo = directory === OTHER ? custom.trim() : directory;
-  const canStart = Boolean(models?.length && repo.startsWith('/'));
+  const canStart = Boolean(models?.length && (sandbox || repo.startsWith('/')));
 
   async function start() {
     if (!canStart || submitting.current) return;
@@ -36,7 +38,7 @@ export function StartSession({ directories, onCreated, onClose }: {
     setError('');
     try {
       onCreated(await client.createCodingSession({
-        ...(worktree ? { repo } : { cwd: repo }), ...(model && { model: { provider: model.provider, model: model.model } }), thinking: level,
+        ...(sandbox ? {} : worktree ? { repo } : { cwd: repo }), ...(model && { model: { provider: model.provider, model: model.model } }), thinking: level,
       }));
     } catch (reason) {
       setError(codingError(reason, '에이전트를 시작하지 못했습니다.'));
@@ -49,15 +51,16 @@ export function StartSession({ directories, onCreated, onClose }: {
   return <Modal title="새 에이전트" onClose={() => { if (!submitting.current) onClose(); }} className="embedded-start-sheet">
     <form className="embedded-settings" onSubmit={event => { event.preventDefault(); void start(); }}>
       <label htmlFor={`${fields}-repo`}>작업 폴더</label>
-      {directories.length > 0 && <select id={`${fields}-repo`} value={directory} disabled={pending} onChange={event => selectDirectory(event.target.value)}>
+      <select id={`${fields}-repo`} value={directory} disabled={pending} onChange={event => selectDirectory(event.target.value)}>
+        <option value={SANDBOX}>샌드박스 (폴더 없음)</option>
         {directories.map(path => <option key={path} value={path}>{directoryName(path)} · {path}</option>)}
         <option value={OTHER}>다른 폴더 선택…</option>
-      </select>}
+      </select>
       {directory === OTHER && <FolderField label="작업 폴더" showLabel={false} value={custom} disabled={pending} onChange={setCustom}/>}
-      <label className="flex items-center gap-2">
+      {!sandbox && <label className="flex items-center gap-2">
         <input type="checkbox" checked={worktree} disabled={pending} onChange={event => setWorktree(event.target.checked)}/>
         별도 worktree에서 작업
-      </label>
+      </label>}
       <label htmlFor={`${fields}-model`}>모델</label>
       {!models && !modelError ? <Skeleton className="h-8 w-full" role="status" aria-label="모델 불러오는 중…"/>
         : <select id={`${fields}-model`} disabled={pending || !models?.length} value={model ? modelKey(model) : ''} onChange={event => {
