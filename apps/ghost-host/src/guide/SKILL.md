@@ -16,17 +16,19 @@ This guide offers options, not a required organization. Ask what the owner wants
 
 ## When to create a Ghost
 
-Consider a separate Ghost when it gives the owner a useful persistent identity or distinct responsibility:
+A Ghost is a way of working; a scope is what it works on. Each Ghost is used like its own app: the owner opens the writing Ghost to write and the coding Ghost to code.
 
-1. The owner wants a separate conversation partner for something (for example one per business) so their own context does not mix.
-2. Something needs its own rhythm of waking and watching (for example the Mac or a store's orders).
-3. Memory must not mix (for example personal finance versus work).
+Create a separate Ghost when at least one of these must differ for all of its work:
 
-For a one-off specialty, consider a Work with a role document or a read-only subagent. Roles, permissions and model choices do not by themselves require another persistent Ghost. The owner can still choose role-based Ghosts when that better suits their work.
+1. The model (for example a prose model for fiction, a coding model for software).
+2. Tools and permissions (for example `code_run` and PC execution for code, none of that for fiction).
+3. The persona: its voice and its standard of good work would conflict with another Ghost's.
 
-## What a Ghost's persona field holds
+Otherwise give the scope to the Ghost that already works that way, or attach a playbook (a skill) to the Work. One Ghost receives every scope that shares its way of working: two novels are one writing Ghost with two scopes, so taste and memory carry over while each work's canon stays in its own scope. The one exception is memory that must not mix (for example personal finance versus company work); split those even when the way of working is the same. Do not split one way of working into job titles (planner, balancer, reviewer); those are playbooks.
 
-The persona field is the Ghost's standing instructions, not a character. Line one is a one-line introduction: the team list, search and delegation picks show only that line. After it, write what the Ghost is accountable for, its boundaries and how it reports. Keep how a role works (planner, reviewer, writer) in a skill so it can be applied to any Work, and keep what only this Mac needs in environment notes. Rules that name other Ghosts go stale when the team changes; prefer rules that stay true without them.
+## What a Ghost's persona holds
+
+The persona is who the Ghost is and how it works, and it opens every conversation. Line one is a one-line introduction: lists, search and delegation picks show only that line. After it, write its voice, what good work means for it, what it decides alone and what it asks the owner, and what it never does. Keep facts about one work or repository in that scope's documents, what only this Mac needs in environment notes, and a one-off role procedure in a skill. Rules that name other Ghosts go stale when the team changes; prefer rules that stay true without them.
 
 ## Scopes
 

@@ -1,7 +1,7 @@
-import { useEffect, useId, useRef, useState, type RefObject } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { Compass, Folder, Home, Inbox, LayoutList, Mail, MessageCircle, Pin, Plus, Settings2, Bot } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Navigation, NavigationGroup, NavigationItem, ScrollRail } from '../ui'
-import type { Ghost, State } from '@ghost/contract';
+import type { Ghost, Scope, State } from '@ghost/contract';
 import { ghostLiveWork, ghostPresence, liveWorks, visibleGhosts, type Presence } from '../features/ghostState';
 import { useSidebarPreferences } from '../features/sidebarPreferences';
 import { PresenceAvatar } from './agent';
@@ -17,7 +17,10 @@ const SEARCH_LIMIT = 8;
  * (the default Ghost is always pinned) stays up in its own group; everyone else sits in the
  * pool group, folded by its own header — the header sticks while scrolling, so folding never
  * means hunting for a button at the bottom of a long list. A folded pool still shows the Ghosts
- * that need the owner or hold the conversation on screen.
+ * that need the owner, hold the conversation on screen or receive a project.
+ *
+ * A Ghost is one way of working, used like its own app (docs/concept.md), so its projects sit
+ * right under its row. Only projects whose receiver left the roster stay in the 프로젝트 group.
  *
  * The destinations stay put; only the roster and projects scroll, under sticky group labels,
  * fading out at the bottom while more follows. The rail beside it marks Ghosts that are
@@ -48,6 +51,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
   }, [openGhostId]);
   // Deleted and retired Ghosts leave the roster.
   const roster = visibleGhosts(state?.ghosts ?? []);
+  const { byGhost, orphans } = projectsByReceiver(scopes, roster);
   const onlyMain = roster.length === 1 && roster[0]?.isDefault;
   const { pinned, expanded, togglePinned, setExpanded } = useSidebarPreferences(roster.map(ghost => ghost.id));
   const [query, setQuery] = useState('');
@@ -60,12 +64,13 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
   admitFixed(roster.find(ghost => ghost.isDefault));
   for (const id of pinned) admitFixed(byId.get(id));
   const pool = roster.filter(ghost => !fixed.includes(ghost));
-  // A folded pool keeps the rows the owner is looking at or must answer.
-  const needsEyes = (ghost: Ghost) => ghost.id === openGhostId || presence.get(ghost.id)!.line !== null;
+  // A folded pool keeps the rows the owner is looking at or must answer, and every Ghost that receives a project.
+  const needsEyes = (ghost: Ghost) => ghost.id === openGhostId || presence.get(ghost.id)!.line !== null || byGhost.has(ghost.id);
   const shownPool = expanded ? pool : pool.filter(needsEyes);
   const needle = query.trim().toLowerCase();
   const filteredPool = shownPool.filter(ghost => !needle || ghost.name.toLowerCase().includes(needle)
-    || ghost.persona.split('\n')[0]!.toLowerCase().includes(needle));
+    || ghost.persona.split('\n')[0]!.toLowerCase().includes(needle)
+    || (byGhost.get(ghost.id) ?? []).some(scope => scope.name.toLowerCase().includes(needle)));
 
   const row = (ghost: Ghost, dimmed = false) => {
     const now = presence.get(ghost.id)!;
@@ -94,11 +99,23 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
     </ContextMenu>;
   };
 
+  const projectItem = (scope: Scope, nested: boolean) => <NavigationItem key={scope.id} className={nested ? 'sidebar-project' : undefined}
+    data-paused={scope.state === 'paused' ? '' : undefined} current={section === 'scopes' && scope.id === selectedScope}
+    onClick={() => navigate(`/scopes/${scope.id}`)}>
+    {!nested && <Folder/>}<span className="truncate">{scope.name}</span>
+  </NavigationItem>;
+  /** A Ghost row followed by the projects it receives. */
+  const entry = (ghost: Ghost, dimmed = false) => {
+    const owned = byGhost.get(ghost.id);
+    return <Fragment key={ghost.id}>
+      {row(ghost, dimmed)}
+      {owned && <div className="sidebar-projects" role="group" aria-label={`${ghost.name}의 프로젝트`}>{owned.map(scope => projectItem(scope, true))}</div>}
+    </Fragment>;
+  };
+
   const projects = <NavigationGroup label="프로젝트"
     action={<button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/scopes?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>}>
-    {scopes.map(space => <NavigationItem key={space.id} current={section === 'scopes' && space.id === selectedScope} onClick={() => navigate(`/scopes/${space.id}`)}>
-      <Folder/><span className="truncate">{space.name}</span>
-    </NavigationItem>)}
+    {orphans.map(scope => projectItem(scope, false))}
   </NavigationGroup>;
 
   return <>
@@ -133,8 +150,8 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
       <div className="sidebar-scroll-frame">
         <div ref={scrollRef} className="sidebar-scroll">
           {section === 'workspace' && projects}
-          {onlyMain ? fixed.map(ghost => row(ghost))
-            : fixed.length > 0 && <NavigationGroup label="고정">{fixed.map(ghost => row(ghost))}</NavigationGroup>}
+          {onlyMain ? fixed.map(ghost => entry(ghost))
+            : fixed.length > 0 && <NavigationGroup label="고정">{fixed.map(ghost => entry(ghost))}</NavigationGroup>}
           {pool.length > 0 && <NavigationGroup label="Ghost"
             action={<button type="button" className="sidebar-pool-toggle" aria-expanded={expanded}
               aria-label={expanded ? 'Ghost 목록 접기' : `Ghost 목록 펼치기 (${pool.length})`}
@@ -145,7 +162,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
             {expanded && pool.length > SEARCH_LIMIT && <input type="text" enterKeyHint="search" className="sidebar-search" aria-label="Ghost 찾기"
               placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}
               onKeyDown={event => { blurTouchSearchOnEnter(event); if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
-            {filteredPool.map(ghost => row(ghost, true))}
+            {filteredPool.map(ghost => entry(ghost, true))}
           </NavigationGroup>}
           {section !== 'workspace' && projects}
         </div>
@@ -160,6 +177,24 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
       </NavigationItem>
     </div>
   </>;
+}
+
+/**
+ * Each roster Ghost's projects, in project order, and the projects whose receiver is not on the roster. A project
+ * without a receiver belongs to the default Ghost, as the Host routes it. Pure; tests pin it.
+ */
+export function projectsByReceiver(scopes: readonly Scope[], roster: readonly Ghost[]): { byGhost: Map<Ghost['id'], Scope[]>; orphans: Scope[] } {
+  const main = roster.find(ghost => ghost.isDefault)?.id;
+  const onRoster = new Set(roster.map(ghost => ghost.id));
+  const byGhost = new Map<Ghost['id'], Scope[]>();
+  const orphans: Scope[] = [];
+  for (const scope of scopes) {
+    const receiver = scope.ghostId ?? main;
+    if (receiver === undefined || !onRoster.has(receiver)) { orphans.push(scope); continue; }
+    const list = byGhost.get(receiver);
+    if (list) list.push(scope); else byGhost.set(receiver, [scope]);
+  }
+  return { byGhost, orphans };
 }
 
 /** Marks a scroller with `data-more-below` while content continues past its bottom edge. */

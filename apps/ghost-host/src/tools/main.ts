@@ -179,8 +179,8 @@ export function createMainTools(core: Core): Extension {
   const ghostCreate = defineTool({
     name: "ghost_create",
     description:
-      "Create a new Ghost only when at least one is true: it is accountable for the outcome of a lasting subject (a business, this Mac, an asset), it needs a permission other Ghosts must not hold, or the owner will ask it by name how things are going. Otherwise do the work as a Work with a playbook (a skill) instead of a new Ghost. " +
-      "Write `persona` as standing instructions, not a character: line one is a one-line introduction shown in the team list and search, then what it is accountable for, its boundaries and how it reports. How a role works (planner, reviewer) belongs in a skill. Tools default to every tool except Mac host tools. Main Ghost only; the owner is told about every new Ghost.",
+      "Create a new Ghost only when its way of working must differ for all of its work: a different model, different tools or permissions, or a persona (voice and standard of good work) that would conflict with an existing Ghost's, as fiction differs from code; or when its memory must not mix with another's. Otherwise route the scope to the Ghost that already works that way, or give the Work a playbook (a skill). " +
+      "Write `persona` as who it is and how it works: line one is a one-line introduction shown in lists and search, then its voice, what good work means, what it decides alone and what it asks, and what it never does. Facts about one project belong in that scope's documents; a role procedure belongs in a skill. Tools default to every tool except Mac host tools. Main Ghost only; the owner is told about every new Ghost.",
     parameters: Type.Object({
       name: Type.String({ minLength: 1, maxLength: 128 }),
       persona: Type.String({ minLength: 1, maxLength: 8192 }),
@@ -191,7 +191,7 @@ export function createMainTools(core: Core): Extension {
       attachments: Type.Optional(DocRefs),
       tools: Type.Optional(GhostToolList),
       look: Type.Optional(Look),
-      host_execution: Type.Optional(Type.Boolean({ description: "Allow its Works to run directly on the owner's Mac; only when its role needs it" })),
+      host_execution: Type.Optional(Type.Boolean({ description: "Allow its Works to run directly on the owner's Mac; only when its way of working needs it" })),
     }),
     replay: "unsafe",
     async execute(args, api) {
@@ -226,7 +226,7 @@ export function createMainTools(core: Core): Extension {
   const ghostUpdate = defineTool({
     name: "ghost_update",
     description:
-      "Change another Ghost's name, persona (its standing instructions: accountability, boundaries, reporting; line one is its introduction in the team list), notes about this environment, model, fallback models, skills, look, state, tool allow-list (host tools included) or direct PC execution, and re-apply its conversations. " +
+      "Change another Ghost's name, persona (who it is and how it works; line one is its introduction in lists), notes about this environment, model, fallback models, skills, look, state, tool allow-list (host tools included) or direct PC execution, and re-apply its conversations. " +
       "Correct its notes when its results show it keeps working the wrong way here. Main Ghost only; the main designation and credentials stay with the owner. Grant PC execution or host tools only when a concrete task needs them; the owner is told about every such grant.",
     parameters: Type.Object({
       ghost_id: Type.String({ minLength: 1, description: "The Ghost to update" }),

@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Decision, Ghost, State, Work } from '@ghost/contract';
-import { WorkspaceSidebar } from './WorkspaceSidebar';
+import { WorkspaceSidebar, projectsByReceiver } from './WorkspaceSidebar';
 
 const ghost = (id: string, isDefault = false, overrides: Partial<Ghost> = {}): Ghost => ({
   id, name: id, persona: '', look: { avatarId: null }, model: null, isDefault, state: 'active',
@@ -92,6 +92,27 @@ it('shows the sole main Ghost without roster labels or a redundant role badge', 
   expect(html).not.toContain('presence-row__main-mark');
   expect(html).not.toContain('Ghost 목록');
   expect(html).toContain('프로젝트');
+});
+
+const project = (id: string, ghostId: string | null): State['scopes'][number] =>
+  ({ id, name: `프로젝트-${id}`, paths: [], vaultPath: null, createdAt: 1, ghostId, state: 'active', attachments: [], limits: {}, updatedAt: 1 });
+
+it('files each project under its receiving Ghost, unassigned ones under the main, and keeps a gone receiver\'s apart', () => {
+  const roster = [ghost('main', true), ghost('writer')];
+  const { byGhost, orphans } = projectsByReceiver([project('a', null), project('b', 'writer'), project('c', 'retired'), project('d', 'writer')], roster);
+  expect(byGhost.get('main')?.map(scope => scope.id)).toEqual(['a']);
+  expect(byGhost.get('writer')?.map(scope => scope.id)).toEqual(['b', 'd']);
+  expect(orphans.map(scope => scope.id)).toEqual(['c']);
+});
+
+it('nests a project right under its Ghost, even when the folded pool would hide that Ghost', () => {
+  storeSidebar({ pinned: [], expanded: false });
+  const html = render({ state: team(['main', 'writer', 'idle'], { scopes: [project('novel', 'writer')] }) });
+  const writer = html.indexOf('writer');
+  expect(writer).toBeGreaterThan(-1);
+  expect(html.indexOf('프로젝트-novel')).toBeGreaterThan(writer);
+  expect(html.indexOf('프로젝트-novel')).toBeLessThan(html.indexOf('프로젝트</p>'));
+  expect(html).not.toContain('>idle<');
 });
 
 it('shows host trouble on the settings entry only once it is announced, toned by severity', () => {

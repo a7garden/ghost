@@ -8,11 +8,11 @@ The iPhone app must support direct conversation, delegation, approval, results a
 
 ## Product scope
 
-See [current goals and scope](docs/current-priorities.md) for the product entry point and remaining acceptance boundaries. Dated migration plans are historical evidence, not an independent backlog.
+[The product concept](docs/concept.md) defines what Ghost is: each Ghost is one way of working, used like its own app (persona, model, tools and permissions), and a project is what it works on. A Ghost is added only when its model, tools and permissions, or persona must differ for all of its work; roles inside one way of working are playbooks (skills). See [current goals and scope](docs/current-priorities.md) for the product entry point and remaining acceptance boundaries. Dated migration plans are historical evidence, not an independent backlog.
 
 Use **맡긴 일** for work assigned to Ghost. Keep execution time limits, durable scheduling, work resumption, and completion notifications. There is no personal planner or calendar.
 
-Work, goals, decisions and standing activities may belong to a **프로젝트** (`Scope` in code and API; the retired `Space` name survives only in legacy data and migrations). A project groups paths, a PDC vault, context, an optional responsible Ghost and its own limits; it grants no authority, and unscoped work and goals stay valid. The product does not hard-code an organisation: per-project responsibility is a recommended arrangement, not a rule the code enforces. See [the foundation design](docs/ghost-infrastructure.md) and [the paradigm](docs/ghost-paradigm.md).
+Work, goals, decisions and standing activities may belong to a **프로젝트** (`Scope` in code and API; the retired `Space` name survives only in legacy data and migrations). A project groups paths, a PDC vault, context, an optional receiving Ghost and its own limits; it grants no authority, and unscoped work and goals stay valid. One Ghost receives every project that shares its way of working; the sidebar lists projects under their receiving Ghost. The code does not enforce an organisation. See [the foundation design](docs/ghost-infrastructure.md).
 
 ## Local operations
 

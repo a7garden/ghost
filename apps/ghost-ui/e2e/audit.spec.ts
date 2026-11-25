@@ -166,7 +166,7 @@ for (const theme of ['light', 'dark'] as const) {
           expect(await toggle.evaluate(element => getComputedStyle(element, '::before').height)).toBe('22px');
         }
         if (tab === 'team') {
-          for (const name of ['책임과 원칙', '도구', '운영']) {
+          for (const name of ['페르소나', '도구', '운영']) {
             const panel = page.locator('.ghost-panel').filter({ has: page.getByText(name, { exact: true }) });
             await panel.first().scrollIntoViewIfNeeded();
             await capture(page, `ghost-${name}`, theme, info.project.name);

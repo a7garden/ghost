@@ -47,7 +47,7 @@ const alwaysTools = ['소유자에게 묻기', '위임한 Ghost에게 묻기', '
 const states: { value: GhostState; label: string }[] = [{ value: 'active', label: '활성' }, { value: 'paused', label: '일시정지' }, { value: 'retired', label: '은퇴' }];
 
 /**
- * Ghost 설정: 위쪽 초상 줄에서 Ghost를 고르고, 아래에서 그 Ghost의 이름·메인 지정·상태·모델·역할·환경 적응·도구·샌드박스를 고친다.
+ * Ghost 설정: 위쪽 초상 줄에서 Ghost를 고르고, 아래에서 그 Ghost의 이름·페르소나·모델·환경 적응·도구·상태·메인 지정·샌드박스를 고친다.
  * 모습은 초상을 눌러 여는 꾸미기가 맡는다. 모든 변경은 ghost.update · ghost.adapt · ghost.set_default · sandbox.control로 바로 저장된다.
  */
 /** The settings roster: deleted Ghosts leave it, the main Ghost leads, then oldest first. Pure; tests pin it. */
@@ -188,8 +188,8 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
     </header>
     {error && <div className="ghost-sheet__feedback" role="status"><InlineError>{error}</InlineError></div>}
 
+    <Panel title={uiTerms.persona}><PersonaNote key={ghost.persona} persona={ghost.persona} onSave={persona => update({ persona })}/></Panel>
     <Panel title="모델"><ModelRoute ghost={ghost} save={save}/></Panel>
-    <Panel title={uiTerms.standingInstructions}><PersonaNote key={ghost.persona} persona={ghost.persona} onSave={persona => update({ persona })}/></Panel>
     <Panel title="환경 적응">
       <AdaptationNote key={adaptation?.notes ?? ''} adaptation={adaptation} onSave={notes => save({ type: 'ghost.adapt', ghostId: ghost.id, notes })}/>
     </Panel>
@@ -352,7 +352,8 @@ function StateSwitch({ value, disabled, onChange }: { value: GhostState; disable
 
 
 /**
- * Standing instructions read as text first; 「편집」 opens the note for editing, and saving or cancelling closes it.
+ * The persona — who this Ghost is and how it works (docs/concept.md) — reads as text first; 「편집」 opens it for editing,
+ * and saving or cancelling closes it.
  * 2026.11.11 : 늘 열린 입력칸이라 설정을 훑다가 실수로 고치기 쉬웠다. 읽기가 기본이고 편집은 고르는 일로 바꿨다.
  * 이 글은 Host 가 정한 기본 지시 앞에 붙는 Ghost 의 몫이다 — 기본 지시를 갈아 끼우지 않는다.
  */
@@ -371,12 +372,12 @@ function PersonaNote({ persona, onSave }: { persona: string; onSave(persona: str
   if (!editing) return <div className="persona-note" data-reading>
     <p className="persona-note__text">{persona}</p>
     <div className="persona-note__actions">
-      <span className="persona-note__hint">첫 줄은 팀 목록의 한 줄 소개입니다. 기본 지시 앞에 붙습니다.</span>
+      <span className="persona-note__hint">첫 줄은 목록에 보이는 한 줄 소개입니다.</span>
       <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}><Pencil aria-hidden="true"/>편집</Button>
     </div>
   </div>;
   return <div className="persona-note" data-changed={changed || undefined}>
-    <textarea ref={area} aria-label={uiTerms.standingInstructions} value={draft} maxLength={8192} rows={3} onChange={event => setDraft(event.target.value)}
+    <textarea ref={area} aria-label={uiTerms.persona} value={draft} maxLength={8192} rows={3} onChange={event => setDraft(event.target.value)}
       onKeyDown={event => {
         if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); void commit(); }
         if (event.key === 'Escape') { event.preventDefault(); cancel(); }
@@ -461,7 +462,7 @@ function SandboxStrip({ ghostId, state, detail }: { ghostId: string; state: stri
   </div>;
 }
 
-/** A new Ghost starts as a sheet of its own: the portrait it will get, its name and its role. */
+/** A new Ghost starts as a sheet of its own: the portrait it will get, its name and its persona. */
 function GhostCreator({ onCancel, onCreated }: { onCancel(): void; onCreated(id: string): void }) {
   const { client } = useHost();
   const [name, setName] = useState(''), [persona, setPersona] = useState('');
@@ -481,8 +482,8 @@ function GhostCreator({ onCancel, onCreated }: { onCancel(): void; onCreated(id:
         <input className="ghost-sheet__name" aria-label="이름" placeholder="이름" value={name} maxLength={128} autoFocus required disabled={saving} onChange={event => setName(event.target.value)}/>
       </div>
     </header>
-    <Panel title={uiTerms.standingInstructions}>
-      <div className="persona-note"><textarea aria-label={uiTerms.standingInstructions} placeholder="첫 줄: 한 줄 소개 (팀 목록에 보입니다). 이어서 맡은 일, 지킬 원칙, 보고 방식" value={persona} rows={4} maxLength={8192} required disabled={saving} onChange={event => setPersona(event.target.value)}/></div>
+    <Panel title={uiTerms.persona}>
+      <div className="persona-note"><textarea aria-label={uiTerms.persona} placeholder="첫 줄은 한 줄 소개. 이어서 말투, 좋은 결과의 기준, 혼자 정할 것과 물을 것" value={persona} rows={4} maxLength={8192} required disabled={saving} onChange={event => setPersona(event.target.value)}/></div>
     </Panel>
     {error && <InlineError>{error}</InlineError>}
     <div className="ghost-sheet__footer">

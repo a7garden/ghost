@@ -174,7 +174,7 @@ const fieldSpecs: Record<ConfigEntity, FieldSpec[]> = {
   ],
   ghost: [
     { key: 'name', label: '이름', render: textOf },
-    { key: 'persona', label: '맡은 역할', render: textOf },
+    { key: 'persona', label: uiTerms.persona, render: textOf },
     { key: 'model', label: '모델', render: modelOf },
     { key: 'isDefault', label: '기본 Ghost', render: named },
     { key: 'state', label: '상태', render: ghostStateText },

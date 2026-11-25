@@ -26,7 +26,7 @@ export function createSelfTools(core: Core): Extension {
   const selfAdapt = defineTool({
     name: "self_adapt",
     description:
-      "Rewrite your notes about working in this owner's environment: what works here (paths, command forms, tools, sites, habits) where it differs from your standing instructions or skills. " +
+      "Rewrite your notes about working in this owner's environment: what works here (paths, command forms, tools, sites, habits) where it differs from your persona or skills. " +
       "Send the complete new notes, not a diff; your current notes are in your instructions. Keep only what changes how you work; never secrets. Notes do not change your tools.",
     parameters: Type.Object({
       notes: Type.String({ maxLength: ADAPTATION_MAX_CHARS, description: "Your full notes after this change; empty clears them" }),

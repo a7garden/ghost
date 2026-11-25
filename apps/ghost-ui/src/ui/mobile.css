@@ -99,6 +99,7 @@
   .workspace-page .ghost-navigation-group__head { margin-inline: 0; padding-inline: 0; background: var(--ghost-canvas); }
   .workspace-page .ghost-navigation-item, .workspace-page .presence-row__main { min-height: 56px; }
   .workspace-page .presence-row__main { padding-inline: 10px; }
+  .workspace-page .sidebar-project { min-height: 44px; padding-left: 46px; }
   .workspace-page .presence-row { width: 100%; }
   .workspace-page .sidebar-pool-toggle, .workspace-page .sidebar-group-action { width: 44px; height: 44px; margin-block: 10px 0; }
   .workspace-page .sidebar-scroll-frame { margin-inline: 0; }

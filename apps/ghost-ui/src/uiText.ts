@@ -37,7 +37,7 @@ export const uiTerms = {
   advanced: '고급',
   connections: '연결 계정',
   conversationHistory: '대화 기록',
-  standingInstructions: '책임과 원칙',
+  persona: '페르소나',
   ghostSettings: 'Ghost 설정',
   settings: '설정',
 } as const;

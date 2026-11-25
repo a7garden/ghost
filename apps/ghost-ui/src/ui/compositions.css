@@ -122,6 +122,10 @@
 .sidebar-count[data-tone="danger"] { padding: 2px 6px; border-radius: var(--radius-pill); color: var(--ghost-danger-ink); background: var(--ghost-danger-tint); }
 .sidebar-group-action { display: grid; width: 24px; height: 24px; flex: none; margin: 12px 4px 0 0; place-items: center; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink3); background: none; cursor: pointer; }
 .sidebar-group-action:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
+/* A Ghost's projects sit under its row, indented to its name: the Ghost is the app, the project is what it opens. */
+.sidebar-projects { display: flex; flex-direction: column; gap: 1px; padding-bottom: 4px; }
+.sidebar-project { min-height: 30px; padding-left: 44px; font-weight: 450; }
+.sidebar-project[data-paused] { opacity: .55; }
 
 .presence-row__main {
   display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 44px; padding: 6px 10px 6px 8px;
