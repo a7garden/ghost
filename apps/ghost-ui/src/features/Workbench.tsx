@@ -373,7 +373,8 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
     </nav>}/>;
 
   const paneBody = (id: string) => id === LAUNCH
-    ? <AgentLaunch folders={launchFolders} busyFolders={busyFolders} earlier={earlier} disabled={!state} onLaunch={launch} onResume={resume}/>
+    // A launch pad belongs to its project: folder and model picks never carry over to another one.
+    ? <AgentLaunch key={selected ?? 'none'} folders={launchFolders} busyFolders={busyFolders} earlier={earlier} disabled={!state} onLaunch={launch} onResume={resume}/>
     : <CodingSession id={id} onUpdate={observer} changesRevision={value => setChangeRevisions(all => all[id] === value ? all : { ...all, [id]: value })}/>;
 
   const agentActions = (id: string): PaneActions => {
