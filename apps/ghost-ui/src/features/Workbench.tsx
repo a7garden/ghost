@@ -53,6 +53,7 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
   const [changeRevisions, setChangeRevisions] = useState<Record<string, number>>({});
   const [dropHint, setDropHint] = useState<{ index: number; side: 'split' | 'replace' } | null>(null);
   const panesRef = useRef<HTMLDivElement>(null);
+  const [folders, setFolders] = useState<{ scopeId: string; paths: string[] } | null>(null);
   const busy = queued > 0;
   const now = useNow();
 
@@ -94,7 +95,8 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
   // Every unfolded agent of the project stays mounted, so a draft and the live stream survive switching panes.
   const mounted = [...new Set([...projectRows.filter(row => !folded.has(row.sessionId)).map(row => row.sessionId), ...layout.panes])];
   const shownIds = new Set(compact ? [activeId ?? ''] : layout.panes);
-  const terminalCwd = (activeSession && sessions.get(activeSession)?.cwd) || scope?.paths[0] || null;
+  const projectFolder = (folders?.scopeId === selected ? folders.paths[0] : undefined) ?? scope?.paths[0];
+  const terminalCwd = (activeSession && sessions.get(activeSession)?.cwd) || projectFolder || null;
 
   function setLayout(update: (current: Layout) => Layout, scopeId = selected) {
     setLayouts(all => {
@@ -152,6 +154,18 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [client, revision]);
+
+  // A project's folders as a new agent sees them: the repositories its paths sit in come first.
+  const scopePaths = scope?.paths.join('\n');
+  useEffect(() => {
+    if (!selected) return;
+    const controller = new AbortController();
+    void client.workbenchFolders(selected, controller.signal).then(paths => {
+      if (!controller.signal.aborted) setFolders({ scopeId: selected, paths });
+    }).catch(() => { /* The project's own paths still serve. */ });
+    return () => controller.abort();
+  }, [client, selected, scopePaths]);
+  const launchFolders = folders?.scopeId === selected ? folders.paths : scope?.paths ?? [];
 
   const activateSession = useEffectEvent((id: string, signal: AbortSignal) => {
     setSessionLink(null);
@@ -327,7 +341,7 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
 
   const changesFor = (id: string) => setDialog({ type: 'agentChanges', sessionId: id });
   const terminalToggle = (id: string | null) => <Button variant="ghost" size="icon" type="button" aria-label="터미널" title="터미널"
-    aria-pressed={terminalOpen && activeId === id} disabled={!((id && id !== LAUNCH && sessions.get(id)?.cwd) || scope?.paths[0])}
+    aria-pressed={terminalOpen && activeId === id} disabled={!((id && id !== LAUNCH && sessions.get(id)?.cwd) || projectFolder)}
     onClick={() => { if (id) setLayout(current => ({ ...current, active: Math.max(0, current.panes.indexOf(id)) })); setTerminalOpen(open => !(open && activeId === id)); }}><SquareTerminal aria-hidden="true"/></Button>;
 
   let sheet = null;
@@ -359,7 +373,7 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
     </nav>}/>;
 
   const paneBody = (id: string) => id === LAUNCH
-    ? <AgentLaunch folders={scope?.paths ?? []} busyFolders={busyFolders} earlier={earlier} disabled={!state} onLaunch={launch} onResume={resume}/>
+    ? <AgentLaunch folders={launchFolders} busyFolders={busyFolders} earlier={earlier} disabled={!state} onLaunch={launch} onResume={resume}/>
     : <CodingSession id={id} onUpdate={observer} changesRevision={value => setChangeRevisions(all => all[id] === value ? all : { ...all, [id]: value })}/>;
 
   const agentActions = (id: string): PaneActions => {

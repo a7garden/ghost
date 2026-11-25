@@ -60,6 +60,19 @@ test("lists agents per project, remembers each project's agent and survives a le
   expect(new Workbench(restarted, sessions).read()).toEqual(snapshot);
 });
 
+test("a project's folders lead with the repository its docs path sits in", async () => {
+  const { root, ledger, workbench } = fixture();
+  const repo = join(root, "repo");
+  const docs = join(repo, "docs");
+  const plain = join(root, "plain");
+  mkdirSync(docs, { recursive: true });
+  mkdirSync(plain);
+  Bun.spawnSync(["git", "init", "-q", repo]);
+  makeScope(ledger, "scope-docs", [docs, plain]);
+  expect(await workbench.folders("scope-docs")).toEqual([repo, docs, plain]);
+  await expect(workbench.folders("missing")).rejects.toMatchObject({ code: "not_found" });
+});
+
 test("an agent belongs to one project, must be a real session, and removing it never closes the session", () => {
   const { ledger, sessions, workbench } = fixture();
   const a = makeScope(ledger, "scope-a", []);

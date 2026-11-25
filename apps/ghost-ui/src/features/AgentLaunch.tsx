@@ -27,7 +27,9 @@ export function AgentLaunch({ folders, busyFolders, earlier, onLaunch, onResume,
   onResume(session: CodingSession): void;
   disabled?: boolean;
 }) {
-  const [folder, setFolder] = useState<string | null>(folders[0] ?? null);
+  // Until the owner picks, the project's first folder (which may arrive after the pane opens).
+  const [picked, setFolder] = useState<string | null | undefined>(undefined);
+  const folder = picked === undefined ? folders[0] ?? null : picked;
   const [worktreeChoice, setWorktree] = useState<boolean | null>(null);
   const [choice, setChoice] = useState<ModelChoice>({ model: null, thinking: null });
   const [allEarlier, setAllEarlier] = useState(false);

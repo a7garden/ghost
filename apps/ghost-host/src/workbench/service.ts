@@ -6,6 +6,7 @@ import type { Core } from "../core/core.ts";
 import { configurationCommand, reviseConfiguration } from "../core/configuration.ts";
 import { conflict, invalid, notFound } from "../core/errors.ts";
 import type { Ledger } from "../ledger/ledger.ts";
+import { readGit } from "../sandbox/git.ts";
 import { folderChanges } from "./changes.ts";
 
 const KEY = "workbench.state";
@@ -130,6 +131,22 @@ export class Workbench {
 
   changes(root: string, path: string | null) {
     return folderChanges(this.allowedRoot(root), path);
+  }
+
+  /**
+   * Where a new agent of the project may work: the repository holding each project path first (a project often points at
+   * a repository's docs folder, while code work belongs at its top), then the path itself when it is not that top.
+   */
+  async folders(scopeId: string): Promise<string[]> {
+    let scope: Scope;
+    try { scope = this.ledger.scope(scopeId); } catch { throw notFound("프로젝트를 찾을 수 없습니다."); }
+    const folders: string[] = [];
+    for (const path of scope.paths) {
+      const top = await readGit(path, ["rev-parse", "--show-toplevel"], 8192).catch(() => null);
+      const repository = top && top.code === 0 && !top.truncated ? top.value.replace(/\n$/, "") : "";
+      for (const folder of repository ? [repository, path] : [path]) if (!folders.includes(folder)) folders.push(folder);
+    }
+    return folders;
   }
 
   /** The stored state, migrating a pre-project blob once on first read. */

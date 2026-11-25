@@ -16,6 +16,11 @@ export async function serveWorkbench(bench: Workbench, principal: Principal | { 
     if (root === null) throw invalid("조회할 폴더를 지정하세요.");
     return bench.changes(root, params.get("path"));
   }
+  if (pathname === "/api/workbench/folders" && method === "GET") {
+    const scopeId = new URL(request.url).searchParams.get("scopeId");
+    if (!scopeId) throw invalid("프로젝트를 지정하세요.");
+    return bench.folders(parse(Id, scopeId));
+  }
   const route = /^\/api\/workbench\/agents\/([^/]+)$/.exec(pathname);
   if (route) {
     const sessionId = parse(Id, decodeId(route[1]!));

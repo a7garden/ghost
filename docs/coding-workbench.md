@@ -11,7 +11,7 @@
 | **에이전트(Agent)** | 프로젝트에 나열된 코딩 세션(`CodingSession`) 하나. 세션은 에이전트가 가리킬 뿐 수명이 다르다: 목록에서 지워도 세션은 남고 새 에이전트 화면의 「이어서 하기」에서 다시 연다. 세션 하나는 한 프로젝트에만 있다 |
 | **Ghost의 에이전트** | Ghost가 `code_run`으로 띄운 세션. 목록에 저장하지 않고, 그 맡긴 일의 프로젝트(없으면 세션 폴더를 품은 프로젝트) 아래에 그 Ghost의 얼굴과 함께 보인다. 닫힌 지 3일이 지나면 목록에서 빠진다. 열어서 지켜보거나 지시할 수 있고 「목록에 고정」하면 소유자 목록에 들어간다 |
 
-- **새 에이전트**는 모달이 아니라 패널에서 시작한다. 지시를 쓰고 보내면 세션 생성·첫 지시·목록 추가가 한 번에 된다. 컴포저 아래쪽의 칩이 작업 폴더(프로젝트 경로, 샌드박스, 다른 폴더…), worktree 여부, 모델과 생각 수준을 정한다. 같은 폴더에서 다른 에이전트가 바로 일하고 있으면 worktree가 기본으로 켜진다. 아래 「이어서 하기」는 이 프로젝트의 목록에 없는 이전 세션이다.
+- **새 에이전트**는 모달이 아니라 패널에서 시작한다. 지시를 쓰고 보내면 세션 생성·첫 지시·목록 추가가 한 번에 된다. 컴포저 아래쪽의 칩이 작업 폴더(프로젝트 경로가 든 저장소의 최상위가 먼저, 그다음 프로젝트 경로, 샌드박스, 다른 폴더…), worktree 여부, 모델과 생각 수준을 정한다. 같은 폴더에서 다른 에이전트가 바로 일하고 있으면 worktree가 기본으로 켜진다. 아래 「이어서 하기」는 이 프로젝트의 목록에 없는 이전 세션이다.
 - 첫 지시가 세션 이름이 된다(이름을 직접 준 세션은 제외). 샌드박스는 `~/Ghost/sandbox-<id>`의 빈 폴더에서 일하고 worktree가 없다. Ghost의 `code_run`은 여전히 저장소가 필요하다.
 - **패널 분할**(넓은 화면): 에이전트를 ⌘클릭하거나 오른쪽 클릭 「옆에 열기」, 또는 목록의 에이전트를 패널 오른쪽으로 끌어 놓으면 옆에 열린다(최대 3개). 가운데에 놓으면 그 패널을 바꾼다. 경계를 끌거나 키보드 ←/→로 너비를 바꾼다. 활성 패널은 위쪽 선으로 보이고, 활성 에이전트가 Host의 포커스가 되어 휴대전화도 같은 에이전트로 돌아온다. 배치는 프로젝트마다 이 기기에 저장한다. 휴대전화는 한 번에 한 에이전트다.
 - **접기**: 앱 사이드바는 제목 막대의 버튼이나 ⌘\로, 작업대의 프로젝트 목록은 ⌘B로 접는다. 접힌 목록은 현재 프로젝트 에이전트의 상태 표시만 남긴 좁은 띠가 된다.
@@ -33,7 +33,7 @@
 ## 공유 규약
 
 - 영속은 새 SQL 마이그레이션 없이 원장 설정 저장(`ledger.setting(key)`/`putSetting`)의 JSON으로 한다. 키는 갈래별 접두어(`workbench.`, `pi.`, `orchestration.`).
-- API는 `/api/workbench/*`, `/api/pi/*`, `/api/orchestration/*`. 인증·오류 규약은 `/api/coding/sessions`와 같다. 작업대 API는 `GET /api/workbench`, `POST /agents {sessionId, scopeId}`, `PATCH /agents/:sessionId {scopeId}`, `DELETE /agents/:sessionId`, `POST /focus {scopeId, sessionId?}`, `GET /changes?root=[&path=]`(프로젝트 경로나 세션 폴더만)이며 모든 쓰기는 `version`을 싣는다. 패널 배치는 기기의 `localStorage`에 둔다. 계약 타입은 `packages/ghost-contract/src/<갈래>.ts`에 둔다.
+- API는 `/api/workbench/*`, `/api/pi/*`, `/api/orchestration/*`. 인증·오류 규약은 `/api/coding/sessions`와 같다. 작업대 API는 `GET /api/workbench`, `POST /agents {sessionId, scopeId}`, `PATCH /agents/:sessionId {scopeId}`, `DELETE /agents/:sessionId`, `POST /focus {scopeId, sessionId?}`, `GET /changes?root=[&path=]`(프로젝트 경로나 세션 폴더만), `GET /folders?scopeId=`(새 에이전트의 폴더 후보)이며 모든 쓰기는 `version`을 싣는다. 패널 배치는 기기의 `localStorage`에 둔다. 계약 타입은 `packages/ghost-contract/src/<갈래>.ts`에 둔다.
 - 모든 새 도구·확장 적재는 소유자의 것이다. Ghost(비서)는 작업대를 조작하거나 확장을 설치하거나 오케스트레이션을 바꾸지 못한다(읽기 전용 조회만 허용 가능). 이를 막는 근거를 코드에 둔다.
 - Host 업데이트는 작업 중이거나 답을 기다리는 내장 세션을 기다린다.
 - UI는 `apps/ghost-ui/AGENTS.md`·`DESIGN.md`와 agent-ui·anti-slop 규칙을 따른다: 설명 문구 최소, 타입과 여백으로 위계. 한국어 문구.

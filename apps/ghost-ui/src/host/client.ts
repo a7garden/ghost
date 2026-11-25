@@ -277,6 +277,11 @@ export class HostClient {
     return this.json(`/api/workbench/changes?${new URLSearchParams({ root })}`, { signal, cache: 'no-store' });
   }
 
+  /** Where a new agent of the project may work: repository tops first, then the project's own paths. */
+  workbenchFolders(scopeId: string, signal?: AbortSignal): Promise<string[]> {
+    return this.json(`/api/workbench/folders?${new URLSearchParams({ scopeId })}`, { signal });
+  }
+
   workbenchFileDiff(root: string, path: string, signal?: AbortSignal): Promise<WorkbenchFileDiff> {
     return this.json(`/api/workbench/changes?${new URLSearchParams({ root, path })}`, { signal, cache: 'no-store' });
   }
