@@ -13,6 +13,7 @@ import { codingError } from './CodingSessionModel';
 import { directoryName } from './CodingModel';
 import { useWorkbenchAttention, type Attention } from './WorkbenchAttention';
 import { WorkbenchChanges } from './WorkbenchChanges';
+import { absoluteTime, relativeTime, useNow } from './time';
 import { foldedAgents } from './workbenchFold';
 import { resolveSessionLink } from './workbenchSessionLink';
 import './Workbench.css';
@@ -103,6 +104,7 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
   const [spacesOpen, setSpacesOpen] = useState(false);
   const [showOlder, setShowOlder] = useState(false);
   const busy = queued > 0;
+  const now = useNow();
   const focus = state?.focus;
   const space = state?.spaces.find(space => space.id === focus?.spaceId);
   const agents = state?.agents.filter(agent => agent.spaceId === space?.id) ?? [];
@@ -220,10 +222,11 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
         {selected && <ul className="workbench-agents" aria-label="에이전트">
           {listed.map(agent => {
             const title = agentTitle(agent);
+            const updatedAt = sessions.get(agent.sessionId)?.updatedAt;
             return <li key={agent.sessionId} className="workbench-agent-row" data-selected={agent.sessionId === focusedId || undefined}>
               <button type="button" aria-current={agent.sessionId === focusedId ? 'true' : undefined} title={title}
                 onClick={() => { select(item.id, agent.sessionId); setSpacesOpen(false); }}>
-                <AgentState session={sessions.get(agent.sessionId)}/><span>{title}</span><AttentionMark signal={attention.get(agent.sessionId)}/>
+                <AgentState session={sessions.get(agent.sessionId)}/><span className="workbench-agent-title">{title}</span>{updatedAt !== undefined && <time className="workbench-agent-time tabular" dateTime={new Date(updatedAt).toISOString()} title={absoluteTime(updatedAt)}>{relativeTime(updatedAt, now)}</time>}<AttentionMark signal={attention.get(agent.sessionId)}/>
               </button>
               <Button variant="ghost" size="icon" type="button" disabled={busy} aria-label={`${title} 닫기`} title="닫기"
                 onClick={() => showFailure(mutate(`agents/${encodeURIComponent(agent.sessionId)}`, 'DELETE'))}><X aria-hidden="true"/></Button>

@@ -49,6 +49,8 @@
   .workbench-agent-row > button:first-child { padding-block: 6px; }
   .workbench-agent-row > button[aria-label] { flex: none; opacity: 0; }
   .workbench-agent-row:is(:hover, :focus-within) > button[aria-label], .workbench-agent-row[data-selected] > button[aria-label] { opacity: 1; }
+  .workbench-agent-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .workbench-agent-time { flex: none; margin-inline-start: auto; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 400; }
   .workbench-agent-add { width: 100%; color: var(--ghost-ink3); }
   .workbench-agent-add:hover { background: var(--ghost-hover); color: var(--ghost-ink); }
   .workbench-links { display: grid; gap: 1px; padding: 8px 4px 0; margin-top: auto; }
