@@ -813,6 +813,9 @@ export const ProviderKind = Type.Union([
   Type.Literal("zai"),
   Type.Literal("minimax"),
   Type.Literal("google"),
+  Type.Literal("kimi"),
+  Type.Literal("openrouter"),
+  Type.Literal("xai"),
 ]);
 export type ProviderKind = Static<typeof ProviderKind>;
 

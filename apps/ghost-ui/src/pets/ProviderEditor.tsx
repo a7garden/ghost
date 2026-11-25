@@ -5,7 +5,7 @@ import type { ModelInfo, Provider, ProviderKind, ProviderPreset } from '@ghost/c
 import { Modal } from '../components/Modal';
 import { ExternalAnchor } from '../components/ExternalAnchor';
 import { ProviderModels } from './ProviderModels';
-import { oauthName } from '../uiText';
+import { oauthName, OAUTH_KINDS } from '../uiText';
 
 const KINDS: { value: ProviderKind; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
@@ -13,6 +13,9 @@ const KINDS: { value: ProviderKind; label: string }[] = [
   { value: 'zai', label: 'Z.AI' },
   { value: 'minimax', label: 'MiniMax' },
   { value: 'google', label: 'Google Gemini' },
+  { value: 'kimi', label: 'Kimi For Coding' },
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'xai', label: 'xAI' },
   { value: 'openai_compatible', label: 'OpenAI 호환 서버' },
 ];
 
@@ -44,7 +47,7 @@ export function ProviderEditor({ initial, presets, providerIds, busy, onClose, o
           className="flex min-h-16 items-center gap-3 rounded-control px-3 py-3 text-left outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 disabled:opacity-50">
           <span className="flex size-9 flex-none items-center justify-center rounded-control bg-hover text-ui font-semibold text-ink" aria-hidden="true">{item.kind === 'openai_compatible' ? '+' : item.name.slice(0, 1)}</span>
           <span className="min-w-0 flex-1"><span className="block text-ui font-semibold text-ink">{item.name}</span>
-            <span className="block text-caption text-ink-3">{item.kind === 'openai' ? 'ChatGPT 구독 · API 키' : item.kind === 'anthropic' ? 'Claude 구독 · API 키' : item.kind === 'openai_compatible' ? '주소와 모델 직접 설정' : 'API 키'}</span>
+            <span className="block text-caption text-ink-3">{OAUTH_KINDS.has(item.kind) ? `${oauthName(item.kind)} 구독 · API 키` : item.kind === 'openai_compatible' ? '주소와 모델 직접 설정' : 'API 키'}</span>
           </span><ChevronRight size={15} className="flex-none text-ink-3" aria-hidden="true"/>
         </button>)}
       </div>
@@ -57,7 +60,7 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
   initial?: Provider; preset?: ProviderPreset; presets: ProviderPreset[]; providerIds: string[]; busy: boolean;
   onClose(): void; onBack?: () => void; onSave(save: ProviderSave): Promise<void>;
 }) {
-  const [method, setMethod] = useState<'api_key' | 'oauth'>(initial ? initial.authType === 'oauth' ? 'oauth' : 'api_key' : preset?.kind === 'openai' || preset?.kind === 'anthropic' ? 'oauth' : 'api_key');
+  const [method, setMethod] = useState<'api_key' | 'oauth'>(initial ? initial.authType === 'oauth' ? 'oauth' : 'api_key' : preset !== undefined && OAUTH_KINDS.has(preset.kind) ? 'oauth' : 'api_key');
   const [value, setValue] = useState<ProviderDraft>(() => {
     if (initial) return { id: initial.id, kind: initial.kind, name: initial.name, baseUrl: initial.baseUrl, models: (initial.configuredModels ?? initial.models).map(model => ({ ...model })) };
     const chosen = preset!;
@@ -73,7 +76,7 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const locked = busy || saving;
   const currentPreset = presets.find(item => item.kind === value.kind);
-  const oauthAllowed = (value.kind === 'openai' || value.kind === 'anthropic') && value.baseUrl === null;
+  const oauthAllowed = OAUTH_KINDS.has(value.kind) && value.baseUrl === null;
   const effectiveMethod = oauthAllowed ? method : 'api_key';
   const unchangedEndpoint = initial?.kind === value.kind && initial.baseUrl === value.baseUrl;
   const automatic = unchangedEndpoint && initial.automaticModels !== undefined

@@ -4,9 +4,12 @@ import type { ModelInfo, ProviderPreset, Provider as ContractProvider } from "@g
 import type { Api, Model, Provider as PiProvider } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { googleProvider } from "@earendil-works/pi-ai/providers/google";
+import { kimiCodingProvider } from "@earendil-works/pi-ai/providers/kimi-coding";
 import { minimaxProvider } from "@earendil-works/pi-ai/providers/minimax";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
+import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
+import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
 import { zaiProvider } from "@earendil-works/pi-ai/providers/zai";
 
 export type CatalogFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -58,6 +61,9 @@ const anthropic = anthropicProvider();
 const google = googleProvider();
 const zai = zaiProvider();
 const minimax = minimaxProvider();
+const kimi = kimiCodingProvider();
+const openrouter = openrouterProvider();
+const xai = xaiProvider();
 
 const openaiModels = chatCatalog(openai);
 const codexModels = chatCatalog(codex);
@@ -65,6 +71,9 @@ const anthropicModels = chatCatalog(anthropic);
 const googleModels = chatCatalog(google);
 const zaiModels = chatCatalog(zai);
 const minimaxModels = chatCatalog(minimax);
+const kimiModels = chatCatalog(kimi);
+const openrouterModels = chatCatalog(openrouter);
+const xaiModels = chatCatalog(xai);
 
 const CAPABILITY_SOURCES: Record<ContractProvider["kind"], readonly PiProvider[]> = {
   openai: [openai],
@@ -73,6 +82,9 @@ const CAPABILITY_SOURCES: Record<ContractProvider["kind"], readonly PiProvider[]
   google: [google],
   zai: [zai],
   minimax: [minimax],
+  kimi: [kimi],
+  openrouter: [openrouter],
+  xai: [xai],
 };
 
 /** Static SDK capabilities only; unknown custom model ids remain text-only. */
@@ -145,9 +157,10 @@ const PRESET_SEEDS: readonly PresetSeed[] = [
     baseUrl: zai.baseUrl ?? null,
     credentialUrl: "https://z.ai/manage-apikey/apikey-list",
     models: zaiModels,
-    oauthModels: [],
+    // Subscription sign-in mints a durable API key for the same coding-plan catalog.
+    oauthModels: zaiModels,
     suggestedModelId: "glm-5.3",
-    suggestedOAuthModelId: null,
+    suggestedOAuthModelId: "glm-5.3",
   },
   {
     id: "minimax",
@@ -161,6 +174,41 @@ const PRESET_SEEDS: readonly PresetSeed[] = [
     suggestedOAuthModelId: null,
   },
   {
+    id: "kimi",
+    kind: "kimi",
+    name: "Kimi For Coding",
+    baseUrl: kimi.baseUrl ?? null,
+    credentialUrl: null,
+    models: kimiModels,
+    // Subscription sign-in speaks the same bundled catalog as an API key.
+    oauthModels: kimiModels,
+    suggestedModelId: "kimi-for-coding",
+    suggestedOAuthModelId: "kimi-for-coding",
+  },
+  {
+    id: "openrouter",
+    kind: "openrouter",
+    name: "OpenRouter",
+    baseUrl: openrouter.baseUrl ?? null,
+    credentialUrl: "https://openrouter.ai/settings/keys",
+    models: openrouterModels,
+    oauthModels: openrouterModels,
+    suggestedModelId: null,
+    suggestedOAuthModelId: null,
+  },
+  {
+    id: "xai",
+    kind: "xai",
+    name: "xAI",
+    baseUrl: xai.baseUrl ?? null,
+    credentialUrl: "https://console.x.ai",
+    models: xaiModels,
+    // SuperGrok/X Premium sign-in serves the same bundled catalog.
+    oauthModels: xaiModels,
+    suggestedModelId: "grok-4.6",
+    suggestedOAuthModelId: "grok-4.6",
+  },
+  {
     id: "custom",
     kind: "openai_compatible",
     name: "OpenAI 호환 서버",
@@ -172,6 +220,19 @@ const PRESET_SEEDS: readonly PresetSeed[] = [
     suggestedOAuthModelId: null,
   },
 ];
+
+/** Kinds whose subscription sign-in serves the same catalog as an API key. */
+const SAME_CATALOG_OAUTH: Record<ContractProvider["kind"], true | undefined> = {
+  openai: undefined,
+  openai_compatible: undefined,
+  anthropic: true,
+  zai: true,
+  minimax: undefined,
+  google: undefined,
+  kimi: true,
+  openrouter: true,
+  xai: true,
+};
 
 /**
  * Remote catalog keys per endpoint. `null` baseUrl means the kind's default
@@ -189,6 +250,9 @@ const DEFAULT_KEYS: Record<ContractProvider["kind"], readonly string[]> = {
   google: ["google"],
   zai: ["zai-coding-plan"],
   minimax: ["minimax", "minimax-coding-plan"],
+  kimi: [],
+  openrouter: ["openrouter"],
+  xai: ["xai"],
 };
 
 const EXACT_KEYS: readonly (readonly [url: string, kind: ContractProvider["kind"], keys: readonly string[]])[] = [
@@ -390,6 +454,8 @@ const SDK_FALLBACK: Record<string, readonly ModelInfo[]> = {
   zai: zaiModels,
   minimax: minimaxModels,
   "minimax-coding-plan": minimaxModels,
+  openrouter: openrouterModels,
+  xai: xaiModels,
 };
 
 /** First catalog entry per id across the mapped keys; a key without snapshot data falls back to the bundled SDK list. */
@@ -515,14 +581,16 @@ export class ProviderCatalog {
   /** Bundled presets merged with the latest validated remote snapshot; with a snapshot present the list is the active catalog, SDK seeds only fill cold start. */
   get presets(): ProviderPreset[] {
     return PRESET_SEEDS.map((seed) => {
-      const models = mergeModels([], [], modelIndex(this.snapshot, catalogKeysFor(seed.kind, seed.baseUrl)), true);
+      const index = modelIndex(this.snapshot, catalogKeysFor(seed.kind, seed.baseUrl));
+      // A kind with no remote catalog entry (or no snapshot yet) presents its bundled SDK list.
+      const models = index.size === 0 && seed.models.length > 0 ? [...seed.models] : mergeModels([], [], index, true);
+      // Subscription sign-ins other than ChatGPT serve the same catalog as API keys.
       const oauthModels =
         seed.kind === "openai"
           ? // Known ChatGPT-login ids pick up refreshed metadata; API-only models are never advertised.
             mergeModels(seed.oauthModels, [], modelIndex(this.snapshot, ["openai"]), false)
-          : seed.kind === "anthropic"
-            ? // Claude subscription login serves the same catalog as API keys.
-              models
+          : SAME_CATALOG_OAUTH[seed.kind]
+            ? models
             : [];
       return {
         id: seed.id,

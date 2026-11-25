@@ -12,7 +12,7 @@ import { ProviderEditor } from './ProviderEditor';
 import { ProviderQuotaGroup } from './ProviderQuota';
 import { FallbackSteps, editFallbacks, type FallbackAction } from '../features/fallbacks';
 import type { ProviderSave } from './ProviderEditor';
-import { oauthName } from '../uiText';
+import { oauthName, OAUTH_KINDS } from '../uiText';
 
 export function ModelSettings() {
   const { store, client } = useHost();
@@ -91,7 +91,7 @@ export function ModelSettings() {
           {provider.baseUrl && <span className="mt-0.5 block">{provider.baseUrl}</span>}
         </>}>
         <span className="flex flex-wrap items-center gap-1">
-          {(provider.kind === 'openai' || provider.kind === 'anthropic') && !provider.baseUrl && (!provider.hasCredential || provider.authType === 'oauth') && <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} ${oauthName(provider.kind)}로 로그인`} onClick={() => { setError(''); setLogin(provider); }}><LogIn size={14}/>{provider.authType === 'oauth' ? '다시 로그인' : `${oauthName(provider.kind)} 로그인`}</Button>}
+          {OAUTH_KINDS.has(provider.kind) && !provider.baseUrl && (!provider.hasCredential || provider.authType === 'oauth') && <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} ${oauthName(provider.kind)}로 로그인`} onClick={() => { setError(''); setLogin(provider); }}><LogIn size={14}/>{provider.authType === 'oauth' ? '다시 로그인' : `${oauthName(provider.kind)} 로그인`}</Button>}
           <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} 설정`} onClick={() => { setError(''); setEditor({ initial: provider }); }}>설정<ChevronRight size={14}/></Button>
           <Button variant="ghost" size="icon" type="button" aria-label={`${provider.name} 제공자 삭제`} disabled={pending !== ''} onClick={() => { setError(''); setRemove(provider); }}><Trash2 size={15}/></Button>
         </span>

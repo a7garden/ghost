@@ -1,8 +1,22 @@
 // Stable product terms. See docs/ui-terminology.md for their scope and meaning.
 import type { Provider } from '@ghost/contract';
 
-/** Subscription account label per provider kind: Claude 계정 로그인 vs ChatGPT 계정 로그인. */
-export const oauthName = (kind: Provider['kind']) => kind === 'anthropic' ? 'Claude' : 'ChatGPT';
+/** Subscription account label per provider kind; empty for kinds without account sign-in. */
+const OAUTH_ACCOUNT: Record<Provider['kind'], string> = {
+  openai: 'ChatGPT',
+  anthropic: 'Claude',
+  zai: 'Z.AI',
+  kimi: 'Kimi',
+  openrouter: 'OpenRouter',
+  xai: 'xAI',
+  google: '',
+  minimax: '',
+  openai_compatible: '',
+};
+export const oauthName = (kind: Provider['kind']) => OAUTH_ACCOUNT[kind];
+
+/** Kinds that offer account sign-in beside the API key at their default server address. */
+export const OAUTH_KINDS: ReadonlySet<Provider['kind']> = new Set(['openai', 'anthropic', 'zai', 'kimi', 'openrouter', 'xai']);
 
 export const uiTerms = {
   inbox: '확인할 일',

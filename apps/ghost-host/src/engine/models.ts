@@ -8,6 +8,9 @@ import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.l
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
+import { kimiCodingProvider } from "@earendil-works/pi-ai/providers/kimi-coding";
+import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
+import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
 import type { Secrets } from "../core/ports.ts";
 import { modelInputFor, ProviderCatalog } from "../integrations/provider-catalog.ts";
 
@@ -19,6 +22,9 @@ const API_BY_KIND = {
   zai: "openai-completions",
   minimax: "anthropic-messages",
   google: "google-generative-ai",
+  kimi: "openai-completions",
+  openrouter: "openai-completions",
+  xai: "openai-responses",
 } as const satisfies Record<ContractProvider["kind"], Api>;
 
 /** Where a provider lives when the owner did not give a base URL. */
@@ -29,6 +35,9 @@ const BASE_URL_BY_KIND = {
   zai: "https://api.z.ai/api/coding/paas/v4",
   minimax: "https://api.minimax.io/anthropic",
   google: "https://generativelanguage.googleapis.com/v1beta",
+  kimi: "https://api.kimi.com/coding/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  xai: "https://api.x.ai/v1",
 } as const satisfies Record<ContractProvider["kind"], string | null>;
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
@@ -39,8 +48,24 @@ const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 
 /** Codex OAuth login/refresh implementation, memoized so every OAuth-backed OpenAI provider shares one. */
 let codexAuth: OAuthAuth | undefined;
-/** Claude (Pro/Max) OAuth login/refresh implementation, shared by every OAuth-backed Anthropic provider. */
-let claudeAuth: OAuthAuth | undefined;
+/** Subscription OAuth flows per kind, memoized so every OAuth-backed provider of a kind shares one. */
+const subscriptionOAuth = new Map<Exclude<ContractProvider["kind"], "openai">, OAuthAuth>();
+
+const SUBSCRIPTION_OAUTH_PROVIDERS = {
+  anthropic: anthropicProvider,
+  kimi: kimiCodingProvider,
+  openrouter: openrouterProvider,
+  xai: xaiProvider,
+} as const;
+
+const subscriptionOAuthFor = (kind: keyof typeof SUBSCRIPTION_OAUTH_PROVIDERS): OAuthAuth => {
+  let flow = subscriptionOAuth.get(kind);
+  if (!flow) {
+    flow = SUBSCRIPTION_OAUTH_PROVIDERS[kind]().auth.oauth!;
+    subscriptionOAuth.set(kind, flow);
+  }
+  return flow;
+};
 
 /** Which pi-ai API speaks a configured provider: an OAuth (ChatGPT) OpenAI credential switches it to the Codex backend. */
 export function apiFor(provider: ContractProvider, credential: Credential | undefined): Api {
@@ -122,7 +147,9 @@ function modelOf(provider: ContractProvider, info: ModelInfo, api: Api, baseUrl:
 export function createHostProvider(provider: ContractProvider, credential: Credential | undefined, catalog: ProviderCatalog): Provider | null {
   const api: Api = apiFor(provider, credential);
   const codex = api === "openai-codex-responses";
-  const claude = provider.kind === "anthropic" && provider.baseUrl === null;
+  const subscriptionFlow = provider.baseUrl === null && provider.kind in SUBSCRIPTION_OAUTH_PROVIDERS
+    ? subscriptionOAuthFor(provider.kind as keyof typeof SUBSCRIPTION_OAUTH_PROVIDERS)
+    : undefined;
   const baseUrl = codex ? CODEX_BASE_URL : (provider.baseUrl ?? BASE_URL_BY_KIND[provider.kind]);
   if (!baseUrl) return null;
   const apiKeyAuth = {
@@ -139,11 +166,11 @@ export function createHostProvider(provider: ContractProvider, credential: Crede
     baseUrl,
     auth: codex
       ? { oauth: (codexAuth ??= openaiCodexProvider().auth.oauth!) }
-      : claude
+      : subscriptionFlow
         ? {
-            // pi-ai turns the stored Claude OAuth token into Bearer auth plus the OAuth beta headers.
+            // pi-ai turns a stored subscription token into Bearer auth or the API key it stands for.
             apiKey: apiKeyAuth,
-            oauth: (claudeAuth ??= anthropicProvider().auth.oauth!),
+            oauth: subscriptionFlow,
           }
         : { apiKey: apiKeyAuth },
     models: catalog.modelsFor(provider, credential?.type).map((info) => modelOf(provider, info, api, baseUrl)),
