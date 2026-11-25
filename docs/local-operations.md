@@ -140,6 +140,7 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작�
   - 설치: Owner API `POST /api/update/install {"version":"2.34.0"}`. 45초 뒤 health `2.34.0`, `current`는 `releases/2.34.0-c65c209`, 단일 Host 프로세스. 대화 674·Ghost 31·맡긴 일 200 그대로, 기존 스페이스 1개는 에이전트 0개로 이전됐고(패널이 없었다) `/api/terminals`는 404, 서비스되는 UI 번들에 「에이전트 추가」가 있다. `GET /api/update`의 `lastResult`는 확인 시점에 이전 설치를 가리켰다.
   - 한계: 설치된 Mac 앱 창에서 새 작업대를 조작하지 못했다(서비스된 번들과 격리 Host의 Playwright 확인까지).
 - 샌드박스 에이전트·폴더 이름 스페이스(2.35.0, 2026-11-25): 폴더 없는 소유자 세션은 `~/Ghost/sandbox-<id>` 빈 폴더에서 일하고, 폴더만 고른 새 스페이스는 폴더 이름을 얻는다. 릴리스 [v2.35.0](https://github.com/a7garden/ghost/releases/tag/v2.35.0)(커밋 `84df817`, 격리 worktree). Host의 자동 설치가 먼저 설치를 끝냈고(`install`은 `conflict`) health `2.35.0`, `current`는 `releases/2.35.0-84df817`, Ghost 31·대화 674·맡긴 일 200·스페이스 `twillroom` 그대로. 서비스되는 UI 번들에 「샌드박스 (폴더 없음)」가 있다. 한계: 설치된 Mac 앱 창에서 직접 조작하지 못했다.
+- 목표 입력에서 모달 폼 제거(2.41.0, 2026-11-25, 소유자 결정 「모달에 입력 필드를 쌓는 UX 금지」): 목표는 목록 맨 위 한 줄(방향 + 프로젝트)에서 Enter로 만들고, 방향·이유·지키는 선·참고 신호는 목표 위에서 제자리 편집한다. 원칙은 `apps/ghost-ui/DESIGN.md`의 Visual language. 릴리스 [v2.41.0](https://github.com/a7garden/ghost/releases/tag/v2.41.0)(커밋 `f7ede0a`, 정본 체크아웃, 다른 에이전트의 2.40.0 포함). 검사: UI 타입·빌드, goals e2e 8개(데스크톱·iPhone). Host 자동 확인이 이미 받는 중이라 `install`은 `conflict`였고 약 20초 뒤 health `2.41.0`, `current`는 `releases/2.41.0-f7ede0a`, 단일 리스너 PID 28499, Ghost 31·대화 674·맡긴 일 200·프로젝트 13·기기 1 그대로. 운영 Host의 실제 화면(Playwright, 읽기 전용)에서 대화상자 없이 한 줄 입력이 열리고 Escape로 닫히며 명령이 나가지 않음을 확인했다. 한계: `~/Applications/Ghost.app`이 이 Mac에 없어 네이티브 셸 창에서는 확인하지 못했다.
 
 ### Mac 셸·도구 자동 승인 모드 (운영 정책 변경) — 2026-11-20
 
