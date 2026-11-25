@@ -63,25 +63,25 @@ export function UpdateSettings({ monitor }: { monitor: UpdateMonitor }) {
         <span className="text-ui text-ink">{status ? status.current.version : '—'}</span>
       </SettingsRow>
       {status && <SettingsRow label="최신 버전" description={latest?.notes}>
-        {latest
-          ? <span className="flex min-w-0 items-center gap-2">
-              <span className="text-ui text-ink">{latest.version}</span>
-              <Button variant="outline" disabled={busy} onClick={() => void monitor.install(latest.version)}>
-                <Download aria-hidden="true"/>설치
-              </Button>
+        {phase && phase !== 'idle' && phase !== 'error' && (latest || phase === 'checking')
+          ? <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2" aria-live="polite">
+              {latest && <span className="text-ui text-ink">{latest.version}</span>}
+              <span className="text-caption text-ink-2">{phaseLabel[phase]}</span>
+              {(phase === 'downloading' || phase === 'waiting') &&
+                <Button variant="outline" size="sm" disabled={pending} onClick={() => void monitor.cancel()}>취소</Button>}
             </span>
-          : disabled
-            ? <span className="text-caption text-ink-2">{disabled}</span>
-            : status.checkedAt
-              ? <span className="text-caption text-ink-2">최신 버전입니다</span>
-              : <span className="text-caption text-ink-2">—</span>}
-      </SettingsRow>}
-      {status && phase && phase !== 'idle' && phase !== 'error' && <SettingsRow label="상태">
-        <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="text-caption text-ink-2">{phaseLabel[phase]}</span>
-          {(phase === 'downloading' || phase === 'waiting') &&
-            <Button variant="outline" size="sm" disabled={pending} onClick={() => void monitor.cancel()}>취소</Button>}
-        </span>
+          : latest
+            ? <span className="flex min-w-0 items-center gap-2">
+                <span className="text-ui text-ink">{latest.version}</span>
+                <Button variant="outline" disabled={busy} onClick={() => void monitor.install(latest.version)}>
+                  <Download aria-hidden="true"/>설치
+                </Button>
+              </span>
+            : disabled
+              ? <span className="text-caption text-ink-2">{disabled}</span>
+              : status.checkedAt
+                ? <span className="text-caption text-ink-2">최신 버전입니다</span>
+                : <span className="text-caption text-ink-2">—</span>}
       </SettingsRow>}
       <SettingsRow label="지금 확인"
         description={status?.checkedAt
@@ -131,8 +131,8 @@ export function UpdateSettings({ monitor }: { monitor: UpdateMonitor }) {
       </SettingsRow>}
       {iosError && <SettingsRow label="오류"><InlineError>{iosError}</InlineError></SettingsRow>}
     </SettingsGroup>
-    <SettingsGroup title="자동 확인">
-      <SettingsRow label="자동 확인" htmlFor="update-auto-check">
+    <SettingsGroup title="자동 업데이트">
+      <SettingsRow label="새 버전 자동 설치" htmlFor="update-auto-check">
         <Switch id="update-auto-check" checked={status?.autoCheck ?? false}
           disabled={!status?.enabled || pending}
           onCheckedChange={autoCheck => void monitor.save({ autoCheck })}/>

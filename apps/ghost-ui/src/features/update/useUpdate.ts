@@ -39,7 +39,18 @@ export type UpdateBridges = {
   shellCheck?: () => Promise<ShellUpdate | null>;
   shellInstall?: () => Promise<void>;
   iosInstall?: (url: string) => Promise<{ opened: boolean }>;
+  /** Load the UI the new Host serves; defaults to a page reload. */
+  reload?: () => void;
 };
+
+const SHELL_TRIED_KEY = 'ghost.update.shell-auto-tried';
+/** One automatic attempt per app version: a failed or unchanged install must not loop. */
+function shellTried(version: string): boolean {
+  try { return localStorage.getItem(SHELL_TRIED_KEY) === version; } catch { return true; }
+}
+function markShellTried(version: string): void {
+  try { localStorage.setItem(SHELL_TRIED_KEY, version); } catch { /* storage unavailable: shellTried stays true */ }
+}
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -47,7 +58,9 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
  * The host's own update state, kept alive: one status fetch on start, an hourly
  * re-check, and a 2 s poll while a phase is active. During `installing` the host
  * restarts, so connection errors there are expected and polling simply continues;
- * the result shows once the host answers again.
+ * the result shows once the host answers again. A host that comes back as a new
+ * version reloads the page so the UI matches it, and with automatic updates on the
+ * desktop app installs its own pending update once the host is current.
  */
 export class UpdateMonitor {
   private snapshot: UpdateSnapshot = { status: null, shell: null, error: null, pending: false };
@@ -84,7 +97,7 @@ export class UpdateMonitor {
   refresh = async (): Promise<void> => {
     try {
       const status = await this.api.update();
-      this.set({ status, error: null });
+      this.adopt(status, { error: null });
       void this.refreshShell(status);
     } catch (error) {
       // The host restarts while it installs; keep the last known phase and keep polling.
@@ -145,13 +158,20 @@ export class UpdateMonitor {
     this.set({ pending: true, error: null });
     try {
       const status = await run(this.api);
-      this.set({ status, pending: false });
+      this.adopt(status, { pending: false });
       void this.refreshShell(status);
     } catch (error) {
       this.set({ pending: false, error: message(error) });
     }
     this.arm();
   };
+
+  /** Publish a status; a changed host version means the served UI is stale. */
+  private adopt(status: UpdateStatus, patch: Partial<UpdateSnapshot>) {
+    const previous = this.snapshot.status?.current.version;
+    this.set({ ...patch, status });
+    if (previous && previous !== status.current.version) (this.bridges.reload ?? (() => location.reload()))();
+  }
 
   /** One timer at a time: fast polls during an active phase, otherwise refresh status every 10 min. */
   private arm() {
@@ -172,7 +192,12 @@ export class UpdateMonitor {
       return;
     }
     try {
-      this.set({ shell: await shellCheck() });
+      const offer = await shellCheck();
+      this.set({ shell: offer });
+      if (offer && status.autoCheck && status.enabled && !status.latest && !shellTried(offer.version)) {
+        markShellTried(offer.version);
+        void this.installShell();
+      }
     } catch {
       this.set({ shell: null });
     }

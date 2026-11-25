@@ -28,6 +28,8 @@ export interface UpdaterOptions {
   env?: Record<string, string | undefined>;
   log?: UpdateLog;
   startupSoakMs?: number;
+  /** Install a newer release by itself once a check finds it (default true; `autoCheck` off disables it). */
+  autoInstall?: boolean;
 }
 
 /** The engine mirrors live running state into the ledger's busy flag. */
@@ -62,6 +64,8 @@ export class Updater {
   private nextCheckAt: number | null = null;
   private timer: NodeJS.Timeout | undefined;
   private soakTimer: NodeJS.Timeout | undefined;
+  /** A release the owner cancelled or whose automatic install failed; only a manual install retries it. */
+  private autoSkipped: string | null = null;
   private started = false;
   private closed = false;
   private checking: Promise<UpdateStatus> | null = null;
@@ -189,6 +193,7 @@ export class Updater {
         this.state.signature = verified.signature;
         this.state.failures = 0;
         this.phase = "idle";
+        this.autoInstall();
       } catch (error) {
         if (!this.closed) {
           this.state.failures++;
@@ -218,7 +223,7 @@ export class Updater {
     this.timer = undefined;
     this.installing = this.performInstall(manifest, controller.signal).catch((error: unknown) => {
       if (controller.signal.aborted) { this.phase = "idle"; this.error = null; }
-      else { this.phase = "error"; this.error = error instanceof Error && /[가-힣]/.test(error.message) ? error.message : "업데이트를 설치하지 못했습니다."; }
+      else { this.autoSkipped = `${manifest.version}-${manifest.commit}`; this.phase = "error"; this.error = error instanceof Error && /[가-힣]/.test(error.message) ? error.message : "업데이트를 설치하지 못했습니다."; }
     }).finally(() => { this.installing = null; this.installAbort = null; this.schedule(); });
     return this.status();
   }
@@ -228,8 +233,23 @@ export class Updater {
 
   async cancel(): Promise<UpdateStatus> {
     if (this.phase === "installing") throw new CommandError("conflict", "설치 중에는 취소할 수 없습니다.");
-    if (this.phase === "downloading" || this.phase === "waiting") { this.installAbort?.abort(); await this.installing; }
+    if (this.phase === "downloading" || this.phase === "waiting") {
+      if (this.manifest) this.autoSkipped = `${this.manifest.version}-${this.manifest.commit}`;
+      this.installAbort?.abort(); await this.installing;
+    }
     return this.status();
+  }
+
+  /** A release a check just found installs without a click; it still waits for idle, backs up and rolls back as a manual install does. */
+  private autoInstall(): void {
+    const manifest = this.manifest;
+    if (!manifest || !this.state.autoCheck || this.options.autoInstall === false || !this.layout || this.installing || this.closed) return;
+    if (!newer(manifest.version, this.identity.version)) return;
+    const name = `${manifest.version}-${manifest.commit}`;
+    const last = this.state.lastResult;
+    if (this.autoSkipped === name || (last && last.outcome !== "installed" && last.to === name)) return;
+    try { this.install(manifest.version); }
+    catch (error) { this.log("업데이트를 자동으로 시작하지 못했습니다.", error); }
   }
 
   private async performInstall(manifest: ReleaseManifest, signal: AbortSignal): Promise<void> {

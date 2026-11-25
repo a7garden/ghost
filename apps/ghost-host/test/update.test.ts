@@ -294,3 +294,25 @@ describe("crash and service safeguards", () => {
     await restarted.close();
   });
 });
+
+describe("automatic installation", () => {
+  test("a check that finds a newer release installs it without a click; cancel and failure are not retried by the next check", async () => {
+    let idle = false;
+    const f = await setup({ idle: () => idle });
+    f.updater.settings({ autoCheck: true });
+    expect((await f.updater.check()).phase).toBe("downloading");
+    await until(() => f.updater.status().phase === "waiting");
+    expect((await f.updater.cancel()).phase).toBe("idle");
+    expect((await f.updater.check()).phase).toBe("idle");
+    expect(readlinkSync(join(f.base, "current"))).toBe(`releases/${f.oldName}`);
+    expect(f.updater.status().latest?.version).toBe("2.2.0");
+    idle = true;
+    f.updater.install("2.2.0"); await f.updater.settled();
+    expect(readlinkSync(join(f.base, "current"))).toBe("releases/2.2.0-new123");
+  });
+  test("autoCheck off only offers the release", async () => {
+    const f = await setup();
+    expect((await f.updater.check()).phase).toBe("idle");
+    expect(f.updater.status().latest?.version).toBe("2.2.0");
+  });
+});
