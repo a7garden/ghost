@@ -140,9 +140,12 @@ test("the one-time migration maps spaces to projects, creating a Scope for an un
   roots.push(dir);
   mkdirSync(join(dir, "monorepo", "pkg"), { recursive: true });
   mkdirSync(join(dir, "twillroom"));
+  mkdirSync(join(dir, "site", "docs"), { recursive: true });
   const { ledger, core } = harness(join(dir, "ledger.db"));
   ledgers.add(ledger);
   const linked = makeScope(ledger, "scope-linked", [join(dir, "monorepo")]);
+  // A project that points at a repository's docs folder is the project of a space rooted at that repository.
+  const docs = makeScope(ledger, "scope-docs", [join(dir, "site", "docs")]);
   ledger.putSetting("workbench.state", {
     version: 4,
     spaces: [
@@ -150,26 +153,28 @@ test("the one-time migration maps spaces to projects, creating a Scope for an un
       { id: "s-new", title: "Twillroom", root: join(dir, "twillroom"), createdAt: 2, lastSessionId: "two" },
       { id: "s-none", title: "루트 없음", root: null, createdAt: 3 },
       { id: "s-gone", title: "사라진 폴더", root: join(dir, "gone"), createdAt: 4 },
+      { id: "s-site", title: "사이트", root: join(dir, "site"), createdAt: 5 },
     ],
-    agents: [{ sessionId: "one", spaceId: "s-linked" }, { sessionId: "two", spaceId: "s-new" }, { sessionId: "three", spaceId: "s-none" }],
+    agents: [{ sessionId: "one", spaceId: "s-linked" }, { sessionId: "two", spaceId: "s-new" }, { sessionId: "three", spaceId: "s-none" }, { sessionId: "four", spaceId: "s-site" }],
     focus: { spaceId: "s-new", sessionId: "two" },
   });
   const sessions = { get: () => null, list: () => [] as CodingSession[] };
   const workbench = new Workbench(ledger, sessions, { createScope: ownerScopeCreator(core) });
   const state = workbench.read();
-  const created = ledger.scopes().find(scope => scope.id !== linked.id)!;
+  const created = ledger.scopes().find(scope => scope.id !== linked.id && scope.id !== docs.id)!;
   expect(created).toMatchObject({ name: "Twillroom", ghostId: null, paths: [join(dir, "twillroom")], vaultPath: null, state: "active", attachments: [], limits: {} });
   expect(state.agents).toEqual([
     { sessionId: "one", scopeId: linked.id },
     { sessionId: "two", scopeId: created.id },
     { sessionId: "three", scopeId: null },
+    { sessionId: "four", scopeId: docs.id },
   ]);
   expect(state.focus).toEqual({ scopeId: created.id, sessionId: "two" });
   // The Scope went through the owner's scope.create path: a configuration revision remembers it.
   expect(ledger.configRevisions("scope", created.id)).toHaveLength(1);
   // Reading again does not create another Scope or another revision.
   expect(new Workbench(ledger, sessions, { createScope: ownerScopeCreator(core) }).read()).toEqual(state);
-  expect(ledger.scopes()).toHaveLength(2);
+  expect(ledger.scopes()).toHaveLength(3);
   expect(ledger.configRevisions("scope", created.id)).toHaveLength(1);
 });
 

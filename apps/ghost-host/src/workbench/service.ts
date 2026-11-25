@@ -184,7 +184,9 @@ export class Workbench {
     if (!root) return null;
     let real: string;
     try { real = realpathSync(root); } catch { return null; }
-    const covering = scopes.find(scope => scope.paths.some(path => inside(path, real)));
+    // A project covering the folder wins; else one pointing inside it (a repository's docs folder is the same project).
+    const covering = scopes.find(scope => scope.paths.some(path => inside(path, real)))
+      ?? scopes.find(scope => scope.paths.some(path => inside(real, path)));
     if (covering) return covering.id;
     if (!statSync(real, { throwIfNoEntry: false })?.isDirectory() || !this.options.createScope) return null;
     const scopeId = this.options.createScope({ name: space.title.slice(0, 128), paths: [real] });
