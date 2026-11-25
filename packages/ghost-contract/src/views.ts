@@ -54,6 +54,8 @@ export const OAuthStatus = Type.Object({
   state: Type.Union([Type.Literal("pending"), Type.Literal("done"), Type.Literal("failed"), Type.Literal("cancelled")]),
   userCode: nullable(Type.String()),
   verificationUri: nullable(Type.String()),
+  /** Browser sign-in address (Anthropic); the user opens it, the callback or a pasted code completes the login. */
+  authUrl: nullable(Type.String()),
   expiresAt: Timestamp,
   message: nullable(Type.String()),
 });

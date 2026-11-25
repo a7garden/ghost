@@ -769,6 +769,18 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       }
     }
 
+    const providerOAuthCode = /^\/api\/providers\/([a-z0-9][a-z0-9_-]{0,63})\/oauth\/code$/.exec(pathname);
+    if (providerOAuthCode !== null) {
+      try {
+        if (request.method !== "POST") return error("invalid", "use POST", 405);
+        const body = await request.json() as { code?: unknown };
+        if (typeof body.code !== "string" || body.code.trim().length === 0) return error("invalid", "code is required", 400);
+        return json(oauth.submitCode(providerOAuthCode[1]!, body.code));
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+
     const work = /^\/api\/works\/([^/]+)$/.exec(pathname);
     if (work !== null && request.method === "GET") {
       try {

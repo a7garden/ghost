@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, ExternalLink, LoaderCircle } from 'lucide-react';
-import { Button, InlineError } from '../ui';
+import { Button, InlineError, Input } from '../ui';
 import { Modal } from '../components/Modal';
 import { ExternalAnchor } from '../components/ExternalAnchor';
 import { useHost } from '../host/context';
@@ -15,6 +15,10 @@ const verificationLink = (uri: string | null) => {
   try { return uri && new URL(uri).protocol === 'https:' ? uri : null; } catch { return null; }
 };
 
+const loginCopy = (kind: Provider['kind']) => kind === 'anthropic'
+  ? { title: 'Claude 로그인', intro: 'Claude 구독으로 인증합니다. API 키를 대신 쓰려면 제공자 편집에서 입력할 수 있습니다.', open: '인증 페이지 열기', done: 'Claude 로그인을 완료했습니다. 인증 정보가 저장되었습니다.', pasteLabel: '인증 코드', pasteHint: '브라우저가 이 컴퓨터에서 열리면 자동으로 완료됩니다. 다른 기기에서 열었다면 인증 코드나 마지막 주소를 붙여넣어 주세요.' }
+  : { title: 'ChatGPT 로그인', intro: 'ChatGPT 구독으로 인증합니다. API 키를 대신 쓰려면 제공자 편집에서 입력할 수 있습니다.', open: '인증 페이지 열기', done: 'ChatGPT 로그인을 완료했습니다. 인증 정보가 저장되었습니다.', pasteLabel: '', pasteHint: '' };
+
 /** ChatGPT 기기 로그인. 코드를 보여 주고 완료·실패까지 1초 간격으로 확인하며, 인증 정보는 이 UI를 거치지 않는다. */
 export function ChatGptLoginDialog({ provider, onClose }: { provider: Provider; onClose(): void }) {
   const { client } = useHost();
@@ -23,6 +27,8 @@ export function ChatGptLoginDialog({ provider, onClose }: { provider: Provider; 
   const [starting, setStarting] = useState(true);
   const [cancelling, setCancelling] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [code, setCode] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const stateRef = useRef<OAuthStatus['state'] | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -95,6 +101,23 @@ export function ChatGptLoginDialog({ provider, onClose }: { provider: Provider; 
     else onClose();
   };
 
+  const submit = async () => {
+    const value = code.trim();
+    if (submitting || value === '') return;
+    setSubmitting(true); setError('');
+    try {
+      const next = await client.submitOAuthCode(provider.id, value);
+      if (!mounted.current) return;
+      apply(next); setCode('');
+      if (next.state === 'failed') setError(next.message ?? '로그인에 실패했습니다.');
+    } catch (reason) {
+      if (!mounted.current) return;
+      setError(message(reason));
+    } finally {
+      if (mounted.current) setSubmitting(false);
+    }
+  };
+
   const copyCode = async () => {
     if (!status?.userCode) return;
     try {
@@ -107,11 +130,13 @@ export function ChatGptLoginDialog({ provider, onClose }: { provider: Provider; 
   };
 
   const uri = status ? verificationLink(status.verificationUri) : null;
+  const authUrl = status ? verificationLink(status.authUrl) : null;
   const remainingMinutes = status ? Math.ceil((status.expiresAt - Date.now()) / 60000) : 0;
   const failed = status?.state === 'failed' || status?.state === 'cancelled';
-  return <Modal title="ChatGPT 로그인" onClose={requestClose} className="w-[min(480px,calc(100vw-2rem))] sm:max-w-[480px]">
+  const text = loginCopy(provider.kind);
+  return <Modal title={text.title} onClose={requestClose} className="w-[min(480px,calc(100vw-2rem))] sm:max-w-[480px]">
     <div className="flex flex-col gap-4">
-      <p className="m-0 text-ui text-ink-2">ChatGPT 구독으로 인증합니다. API 키를 대신 쓰려면 제공자 편집에서 입력할 수 있습니다.</p>
+      <p className="m-0 text-ui text-ink-2">{text.intro}</p>
       {starting && <p className="m-0 flex items-center gap-2 text-ui text-ink-2" role="status">
         <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true"/>로그인 세션을 만드는 중…
       </p>}
@@ -122,14 +147,21 @@ export function ChatGptLoginDialog({ provider, onClose }: { provider: Provider; 
             {copied ? <Check size={13} className="text-success"/> : <Copy size={13}/>}{copied ? '복사됨' : '코드 복사'}
           </Button>
         </div>}
-        {uri && <div className="flex flex-wrap items-center gap-3">
-          <Button asChild><ExternalAnchor href={uri} target="_blank" rel="noopener noreferrer">인증 페이지 열기<ExternalLink size={14}/></ExternalAnchor></Button>
-          <span className="text-caption text-ink-3">{remainingMinutes > 0 ? `코드는 약 ${remainingMinutes}분 후 만료됩니다.` : undefined}</span>
+        {(uri || authUrl) && <div className="flex flex-wrap items-center gap-3">
+          <Button asChild><ExternalAnchor href={(uri ?? authUrl)!} target="_blank" rel="noopener noreferrer">{text.open}<ExternalLink size={14}/></ExternalAnchor></Button>
+          {uri && remainingMinutes > 0 && <span className="text-caption text-ink-3">코드는 약 {remainingMinutes}분 후 만료됩니다.</span>}
         </div>}
-        <p className="m-0 text-caption text-ink-3" role="status">인증 페이지에서 코드를 입력하면 여기에 결과가 표시됩니다.</p>
+        {authUrl && <form className="flex flex-col gap-2" onSubmit={event => { event.preventDefault(); void submit(); }}>
+          <div className="flex items-center gap-2">
+            <Input aria-label="인증 코드" placeholder="코드 또는 마지막 주소 붙여넣기" value={code} onChange={event => setCode(event.target.value)} autoComplete="off" spellCheck={false}/>
+            <Button variant="outline" size="sm" type="submit" disabled={submitting || code.trim() === ''}>{submitting ? '확인 중…' : '계속'}</Button>
+          </div>
+          <p className="m-0 text-caption text-ink-3" role="status">{text.pasteHint}</p>
+        </form>}
+        {!authUrl && <p className="m-0 text-caption text-ink-3" role="status">인증 페이지에서 코드를 입력하면 여기에 결과가 표시됩니다.</p>}
       </div>}
       {status?.state === 'done' && <p className="m-0 flex items-start gap-2 text-ui text-success" role="status">
-        <Check size={15} className="mt-0.5 flex-none" aria-hidden="true"/>ChatGPT 로그인을 완료했습니다. 인증 정보가 저장되었습니다.
+        <Check size={15} className="mt-0.5 flex-none" aria-hidden="true"/>{text.done}
       </p>}
       {(error || failed) && <InlineError pending={starting || cancelling} onRetry={() => setAttempt(value => value + 1)} retryLabel="다시 시도">
         {error || status?.message || (status?.state === 'cancelled' ? '로그인이 취소되었습니다.' : '로그인에 실패했습니다.')}

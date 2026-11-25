@@ -7,6 +7,7 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
+import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import type { Secrets } from "../core/ports.ts";
 import { modelInputFor, ProviderCatalog } from "../integrations/provider-catalog.ts";
 
@@ -38,6 +39,8 @@ const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 
 /** Codex OAuth login/refresh implementation, memoized so every OAuth-backed OpenAI provider shares one. */
 let codexAuth: OAuthAuth | undefined;
+/** Claude (Pro/Max) OAuth login/refresh implementation, shared by every OAuth-backed Anthropic provider. */
+let claudeAuth: OAuthAuth | undefined;
 
 /** Which pi-ai API speaks a configured provider: an OAuth (ChatGPT) OpenAI credential switches it to the Codex backend. */
 export function apiFor(provider: ContractProvider, credential: Credential | undefined): Api {
@@ -119,24 +122,30 @@ function modelOf(provider: ContractProvider, info: ModelInfo, api: Api, baseUrl:
 export function createHostProvider(provider: ContractProvider, credential: Credential | undefined, catalog: ProviderCatalog): Provider | null {
   const api: Api = apiFor(provider, credential);
   const codex = api === "openai-codex-responses";
+  const claude = provider.kind === "anthropic" && provider.baseUrl === null;
   const baseUrl = codex ? CODEX_BASE_URL : (provider.baseUrl ?? BASE_URL_BY_KIND[provider.kind]);
   if (!baseUrl) return null;
+  const apiKeyAuth = {
+    name: `${provider.name} API key`,
+    // Only the Ghost secret resolves here; ambient environment is never consulted.
+    resolve: async ({ credential }: { credential?: Credential }) =>
+      credential?.type === "api_key" && credential.key
+        ? { auth: { apiKey: credential.key }, source: "Ghost secrets" }
+        : undefined,
+  };
   return createProvider<Api>({
     id: provider.id,
     name: provider.name,
     baseUrl,
     auth: codex
       ? { oauth: (codexAuth ??= openaiCodexProvider().auth.oauth!) }
-      : {
-          apiKey: {
-            name: `${provider.name} API key`,
-            // Only the Ghost secret resolves here; ambient environment is never consulted.
-            resolve: async ({ credential }) =>
-              credential?.type === "api_key" && credential.key
-                ? { auth: { apiKey: credential.key }, source: "Ghost secrets" }
-                : undefined,
-          },
-        },
+      : claude
+        ? {
+            // pi-ai turns the stored Claude OAuth token into Bearer auth plus the OAuth beta headers.
+            apiKey: apiKeyAuth,
+            oauth: (claudeAuth ??= anthropicProvider().auth.oauth!),
+          }
+        : { apiKey: apiKeyAuth },
     models: catalog.modelsFor(provider, credential?.type).map((info) => modelOf(provider, info, api, baseUrl)),
     api: codex ? openAICodexResponsesApi() : streamsFor(api),
   });

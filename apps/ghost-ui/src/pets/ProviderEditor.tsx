@@ -5,6 +5,7 @@ import type { ModelInfo, Provider, ProviderKind, ProviderPreset } from '@ghost/c
 import { Modal } from '../components/Modal';
 import { ExternalAnchor } from '../components/ExternalAnchor';
 import { ProviderModels } from './ProviderModels';
+import { oauthName } from '../uiText';
 
 const KINDS: { value: ProviderKind; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
@@ -43,7 +44,7 @@ export function ProviderEditor({ initial, presets, providerIds, busy, onClose, o
           className="flex min-h-16 items-center gap-3 rounded-control px-3 py-3 text-left outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 disabled:opacity-50">
           <span className="flex size-9 flex-none items-center justify-center rounded-control bg-hover text-ui font-semibold text-ink" aria-hidden="true">{item.kind === 'openai_compatible' ? '+' : item.name.slice(0, 1)}</span>
           <span className="min-w-0 flex-1"><span className="block text-ui font-semibold text-ink">{item.name}</span>
-            <span className="block text-caption text-ink-3">{item.kind === 'openai' ? 'ChatGPT 구독 · API 키' : item.kind === 'openai_compatible' ? '주소와 모델 직접 설정' : 'API 키'}</span>
+            <span className="block text-caption text-ink-3">{item.kind === 'openai' ? 'ChatGPT 구독 · API 키' : item.kind === 'anthropic' ? 'Claude 구독 · API 키' : item.kind === 'openai_compatible' ? '주소와 모델 직접 설정' : 'API 키'}</span>
           </span><ChevronRight size={15} className="flex-none text-ink-3" aria-hidden="true"/>
         </button>)}
       </div>
@@ -56,7 +57,7 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
   initial?: Provider; preset?: ProviderPreset; presets: ProviderPreset[]; providerIds: string[]; busy: boolean;
   onClose(): void; onBack?: () => void; onSave(save: ProviderSave): Promise<void>;
 }) {
-  const [method, setMethod] = useState<'api_key' | 'oauth'>(initial ? initial.authType === 'oauth' ? 'oauth' : 'api_key' : preset?.kind === 'openai' ? 'oauth' : 'api_key');
+  const [method, setMethod] = useState<'api_key' | 'oauth'>(initial ? initial.authType === 'oauth' ? 'oauth' : 'api_key' : preset?.kind === 'openai' || preset?.kind === 'anthropic' ? 'oauth' : 'api_key');
   const [value, setValue] = useState<ProviderDraft>(() => {
     if (initial) return { id: initial.id, kind: initial.kind, name: initial.name, baseUrl: initial.baseUrl, models: (initial.configuredModels ?? initial.models).map(model => ({ ...model })) };
     const chosen = preset!;
@@ -72,7 +73,7 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const locked = busy || saving;
   const currentPreset = presets.find(item => item.kind === value.kind);
-  const oauthAllowed = value.kind === 'openai' && value.baseUrl === null;
+  const oauthAllowed = (value.kind === 'openai' || value.kind === 'anthropic') && value.baseUrl === null;
   const effectiveMethod = oauthAllowed ? method : 'api_key';
   const unchangedEndpoint = initial?.kind === value.kind && initial.baseUrl === value.baseUrl;
   const automatic = unchangedEndpoint && initial.automaticModels !== undefined
@@ -110,9 +111,9 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
       <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
       {onBack && <Button variant="ghost" size="sm" type="button" className="self-start" disabled={locked} onClick={onBack}><ArrowLeft size={14}/>다른 제공자</Button>}
       {oauthAllowed && <SegmentedControl aria-label="인증 방법" value={method} onValueChange={chooseMethod}
-        options={[{ value: 'oauth', label: 'ChatGPT 구독', disabled: locked }, { value: 'api_key', label: 'API 키', disabled: locked }]}/>}
+        options={[{ value: 'oauth', label: `${oauthName(value.kind)} 구독`, disabled: locked }, { value: 'api_key', label: 'API 키', disabled: locked }]}/>}
       {effectiveMethod === 'oauth'
-        ? <p className="m-0 text-ui text-ink-2">{initial?.authType === 'oauth' ? '저장된 ChatGPT 인증을 사용합니다.' : '저장 후 인증 페이지에서 ChatGPT 계정으로 로그인합니다.'}</p>
+        ? <p className="m-0 text-ui text-ink-2">{initial?.authType === 'oauth' ? `저장된 ${oauthName(value.kind)} 인증을 사용합니다.` : `저장 후 인증 페이지에서 ${oauthName(value.kind)} 계정으로 로그인합니다.`}</p>
         : <FormField label={initial?.hasCredential ? '새 API 키' : 'API 키'} description={initial?.hasCredential && initial.authType !== 'oauth' ? '비워 두면 저장된 인증 정보를 유지합니다.' : '키는 호스트에만 저장되며 다시 표시되지 않습니다.'}>
           {control => <div className="flex flex-col gap-2"><Input {...control} type="password" value={apiKey} maxLength={4096} autoComplete="off" disabled={locked || removeKey} onChange={event => setApiKey(event.target.value)}/>
             {currentPreset?.credentialUrl && <ExternalAnchor href={currentPreset.credentialUrl} target="_blank" rel="noopener noreferrer" className="flex w-fit items-center gap-1 text-caption text-ink-2 underline underline-offset-4">API 키 발급<ExternalLink size={12} aria-hidden="true"/></ExternalAnchor>}
@@ -137,7 +138,7 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
       {error && <InlineError>{error}</InlineError>}
       <div className="flex flex-none justify-end gap-2 border-t border-dashed border-line-strong pt-3">
         <Button variant="outline" type="button" disabled={locked} onClick={onClose}>취소</Button>
-        <Button type="submit" disabled={locked}>{saving ? '저장 중…' : effectiveMethod === 'oauth' && initial?.authType !== 'oauth' && !removeKey ? 'ChatGPT로 로그인' : '저장'}</Button>
+        <Button type="submit" disabled={locked}>{saving ? '저장 중…' : effectiveMethod === 'oauth' && initial?.authType !== 'oauth' && !removeKey ? `${oauthName(value.kind)}로 로그인` : '저장'}</Button>
       </div>
     </form>
   </Modal>;

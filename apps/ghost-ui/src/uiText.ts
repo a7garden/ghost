@@ -1,4 +1,9 @@
 // Stable product terms. See docs/ui-terminology.md for their scope and meaning.
+import type { Provider } from '@ghost/contract';
+
+/** Subscription account label per provider kind: Claude 계정 로그인 vs ChatGPT 계정 로그인. */
+export const oauthName = (kind: Provider['kind']) => kind === 'anthropic' ? 'Claude' : 'ChatGPT';
+
 export const uiTerms = {
   inbox: '확인할 일',
   work: '맡긴 일',

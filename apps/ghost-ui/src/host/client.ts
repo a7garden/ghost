@@ -602,6 +602,11 @@ export class HostClient {
     return this.json(`/api/providers/${encodeURIComponent(providerId)}/oauth`, { method: 'DELETE' });
   }
 
+  /** Deliver a pasted authorization code to a browser-based login (Anthropic; owner only). */
+  submitOAuthCode(providerId: string, code: string): Promise<OAuthStatus> {
+    return this.json(`/api/providers/${encodeURIComponent(providerId)}/oauth/code`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+  }
+
   connectionOAuth(serviceId: string): Promise<ConnectionOAuthView> {
     return this.json(`/api/connection-oauth/${encodeURIComponent(serviceId)}`);
   }

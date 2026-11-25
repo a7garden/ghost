@@ -122,9 +122,10 @@ const PRESET_SEEDS: readonly PresetSeed[] = [
     baseUrl: anthropic.baseUrl ?? null,
     credentialUrl: "https://platform.claude.com/settings/keys",
     models: anthropicModels,
-    oauthModels: [],
+    // Claude subscription login speaks the same catalog as API keys.
+    oauthModels: anthropicModels,
     suggestedModelId: "claude-sonnet-5-5",
-    suggestedOAuthModelId: null,
+    suggestedOAuthModelId: "claude-sonnet-5-5",
   },
   {
     id: "google",
@@ -519,7 +520,10 @@ export class ProviderCatalog {
         seed.kind === "openai"
           ? // Known ChatGPT-login ids pick up refreshed metadata; API-only models are never advertised.
             mergeModels(seed.oauthModels, [], modelIndex(this.snapshot, ["openai"]), false)
-          : [];
+          : seed.kind === "anthropic"
+            ? // Claude subscription login serves the same catalog as API keys.
+              models
+            : [];
       return {
         id: seed.id,
         kind: seed.kind,

@@ -12,6 +12,7 @@ import { ProviderEditor } from './ProviderEditor';
 import { ProviderQuotaGroup } from './ProviderQuota';
 import { FallbackSteps, editFallbacks, type FallbackAction } from '../features/fallbacks';
 import type { ProviderSave } from './ProviderEditor';
+import { oauthName } from '../uiText';
 
 export function ModelSettings() {
   const { store, client } = useHost();
@@ -82,7 +83,7 @@ export function ModelSettings() {
       ? <SettingsGroup title={<span className="sr-only">제공자 목록</span>}>{(settings?.providers ?? []).map(provider => <SettingsRow key={provider.id}
         label={<span className="flex min-w-0 flex-wrap items-center gap-2 text-ui font-semibold text-ink [overflow-wrap:anywhere]">{provider.name}
           {provider.hasCredential
-            ? <Badge variant="outline"><KeyRound aria-hidden="true"/>{provider.authType === 'oauth' ? 'ChatGPT 인증 저장됨' : 'API 키 저장됨'}</Badge>
+            ? <Badge variant="outline"><KeyRound aria-hidden="true"/>{provider.authType === 'oauth' ? `${oauthName(provider.kind)} 인증 저장됨` : 'API 키 저장됨'}</Badge>
             : <Badge variant="warning"><ShieldOff aria-hidden="true"/>인증 정보 없음</Badge>}
         </span>}
         description={<>
@@ -90,7 +91,7 @@ export function ModelSettings() {
           {provider.baseUrl && <span className="mt-0.5 block">{provider.baseUrl}</span>}
         </>}>
         <span className="flex flex-wrap items-center gap-1">
-          {provider.kind === 'openai' && !provider.baseUrl && (!provider.hasCredential || provider.authType === 'oauth') && <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} ChatGPT로 로그인`} onClick={() => { setError(''); setLogin(provider); }}><LogIn size={14}/>{provider.authType === 'oauth' ? '다시 로그인' : 'ChatGPT 로그인'}</Button>}
+          {(provider.kind === 'openai' || provider.kind === 'anthropic') && !provider.baseUrl && (!provider.hasCredential || provider.authType === 'oauth') && <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} ${oauthName(provider.kind)}로 로그인`} onClick={() => { setError(''); setLogin(provider); }}><LogIn size={14}/>{provider.authType === 'oauth' ? '다시 로그인' : `${oauthName(provider.kind)} 로그인`}</Button>}
           <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} 설정`} onClick={() => { setError(''); setEditor({ initial: provider }); }}>설정<ChevronRight size={14}/></Button>
           <Button variant="ghost" size="icon" type="button" aria-label={`${provider.name} 제공자 삭제`} disabled={pending !== ''} onClick={() => { setError(''); setRemove(provider); }}><Trash2 size={15}/></Button>
         </span>
