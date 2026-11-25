@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, ExternalLink, LoaderCircle } from 'lucide-react';
 import { Button, InlineError, Input } from '../ui';
-import { Modal } from '../components/Modal';
 import { ExternalAnchor } from '../components/ExternalAnchor';
 import { oauthName } from '../uiText';
 import { useHost } from '../host/context';
@@ -16,49 +15,10 @@ const verificationLink = (uri: string | null) => {
   try { return uri && new URL(uri).protocol === 'https:' ? uri : null; } catch { return null; }
 };
 
-const loginCopy: Record<Provider['kind'], { title: string; intro: string; pasteHint: string }> = {
-  openai: {
-    title: 'ChatGPT 로그인',
-    intro: 'ChatGPT 구독으로 인증합니다. API 키를 대신 쓰려면 제공자 편집에서 입력할 수 있습니다.',
-    pasteHint: '',
-  },
-  anthropic: {
-    title: 'Claude 로그인',
-    intro: 'Claude 구독으로 인증합니다. API 키를 대신 쓰려면 제공자 편집에서 입력할 수 있습니다.',
-    pasteHint: '브라우저가 이 컴퓨터에서 열리면 자동으로 완료됩니다. 다른 기기에서 열었다면 인증 코드나 마지막 주소를 붙여넣어 주세요.',
-  },
-  zai: {
-    title: 'Z.AI 로그인',
-    intro: 'Z.AI 코딩 플랜으로 인증합니다. 로그인하면 Z.AI 계정에 Ghost 이름의 API 키를 만들어 저장합니다.',
-    pasteHint: 'Z.ai 로그인을 마친 뒤 표시되는 코드나 마지막 주소를 붙여넣어 주세요.',
-  },
-  kimi: {
-    title: 'Kimi 로그인',
-    intro: 'Kimi For Coding 구독으로 인증합니다. API 키를 대신 쓰려면 제공자 편집에서 입력할 수 있습니다.',
-    pasteHint: '',
-  },
-  openrouter: {
-    title: 'OpenRouter 로그인',
-    intro: 'OpenRouter 계정으로 인증합니다. API 키를 대신 쓰려면 제공자 편집에서 입력할 수 있습니다.',
-    pasteHint: '브라우저가 이 컴퓨터에서 열리면 자동으로 완료됩니다. 다른 기기에서 열었다면 표시된 코드나 마지막 주소를 붙여넣어 주세요.',
-  },
-  xai: {
-    title: 'xAI 로그인',
-    intro: 'SuperGrok·X Premium 구독으로 인증합니다. API 키를 대신 쓰려면 제공자 편집에서 입력할 수 있습니다.',
-    pasteHint: '',
-  },
-  github_copilot: {
-    title: 'GitHub Copilot 로그인',
-    intro: 'GitHub Copilot 구독으로 인증합니다. 로그인한 계정이 사용할 수 있는 모델만 표시됩니다.',
-    pasteHint: '',
-  },
-  google: { title: '로그인', intro: '', pasteHint: '' },
-  minimax: { title: '로그인', intro: '', pasteHint: '' },
-  openai_compatible: { title: '로그인', intro: '', pasteHint: '' },
-};
+const browserPasteHint = '이 컴퓨터에서 브라우저를 열면 자동으로 완료됩니다. 다른 기기에서 열었다면 인증 코드나 마지막 주소를 붙여넣어 주세요.';
 
 /** ChatGPT 기기 로그인. 코드를 보여 주고 완료·실패까지 1초 간격으로 확인하며, 인증 정보는 이 UI를 거치지 않는다. */
-export function ChatGptLoginDialog({ provider, onClose }: { provider: Provider; onClose(): void }) {
+export function ChatGptLogin({ provider, onClose }: { provider: Provider; onClose(): void }) {
   const { client } = useHost();
   const [status, setStatus] = useState<OAuthStatus | null>(null);
   const [error, setError] = useState('');
@@ -73,6 +33,8 @@ export function ChatGptLoginDialog({ provider, onClose }: { provider: Provider; 
   const teardown = useRef<Promise<void>>(Promise.resolve());
   const mounted = useRef(false);
   const apply = (next: OAuthStatus) => { stateRef.current = next.state; setStatus(next); };
+  const surface = useRef<HTMLElement>(null);
+  useEffect(() => { surface.current?.focus(); }, []);
 
   useEffect(() => {
     let alive = true;
@@ -171,10 +133,11 @@ export function ChatGptLoginDialog({ provider, onClose }: { provider: Provider; 
   const authUrl = status ? verificationLink(status.authUrl) : null;
   const remainingMinutes = status ? Math.ceil((status.expiresAt - Date.now()) / 60000) : 0;
   const failed = status?.state === 'failed' || status?.state === 'cancelled';
-  const text = loginCopy[provider.kind];
-  return <Modal title={text.title} onClose={requestClose} className="w-[min(480px,calc(100vw-2rem))] sm:max-w-[480px]">
-    <div className="flex flex-col gap-4">
-      <p className="m-0 text-ui text-ink-2">{text.intro}</p>
+  const title = `${oauthName(provider.kind)} 로그인`;
+  return <section className="setup-route provider-setup" aria-label={title} tabIndex={-1} ref={surface}
+    onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing) requestClose(); }}>
+    <h3 className="m-0 text-ui font-semibold">{title}</h3>
+    {provider.kind === 'zai' && <p className="m-0 text-caption text-ink-2">로그인하면 Z.AI 계정에 Ghost 이름의 API 키를 만들어 저장합니다.</p>}
       {starting && <p className="m-0 flex items-center gap-2 text-ui text-ink-2" role="status">
         <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true"/>로그인 세션을 만드는 중…
       </p>}
@@ -191,10 +154,10 @@ export function ChatGptLoginDialog({ provider, onClose }: { provider: Provider; 
         </div>}
         {authUrl && <form className="flex flex-col gap-2" onSubmit={event => { event.preventDefault(); void submit(); }}>
           <div className="flex items-center gap-2">
-            <Input aria-label="인증 코드" placeholder="코드 또는 마지막 주소 붙여넣기" value={code} onChange={event => setCode(event.target.value)} autoComplete="off" spellCheck={false}/>
+            <Input type="password" aria-label="인증 코드" placeholder="코드 또는 마지막 주소 붙여넣기" value={code} onChange={event => setCode(event.target.value)} autoComplete="off" spellCheck={false}/>
             <Button variant="outline" size="sm" type="submit" disabled={submitting || code.trim() === ''}>{submitting ? '확인 중…' : '계속'}</Button>
           </div>
-          <p className="m-0 text-caption text-ink-3" role="status">{text.pasteHint}</p>
+          <p className="m-0 text-caption text-ink-3">{provider.kind === 'zai' ? 'Z.AI 로그인 후 표시되는 코드나 마지막 주소를 붙여넣어 주세요.' : browserPasteHint}</p>
         </form>}
         {!authUrl && <p className="m-0 text-caption text-ink-3" role="status">인증 페이지에서 코드를 입력하면 여기에 결과가 표시됩니다.</p>}
       </div>}
@@ -204,11 +167,10 @@ export function ChatGptLoginDialog({ provider, onClose }: { provider: Provider; 
       {(error || failed) && <InlineError pending={starting || cancelling} onRetry={() => setAttempt(value => value + 1)} retryLabel="다시 시도">
         {error || status?.message || (status?.state === 'cancelled' ? '로그인이 취소되었습니다.' : '로그인에 실패했습니다.')}
       </InlineError>}
-      <div className="flex justify-end gap-2">
+      <div className="setup-route__actions">
         {status?.state === 'pending'
           ? <Button variant="outline" type="button" disabled={cancelling} onClick={() => void cancel()}>{cancelling ? '취소 중…' : '로그인 취소'}</Button>
           : <Button variant={status?.state === 'done' ? 'default' : 'outline'} type="button" disabled={cancelling} onClick={onClose}>닫기</Button>}
       </div>
-    </div>
-  </Modal>;
+  </section>;
 }

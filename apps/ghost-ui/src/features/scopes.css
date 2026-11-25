@@ -80,6 +80,9 @@
 .project[data-view="conversation"] .project__body { overflow: hidden; }
 .project[data-view="conversation"] .project__body > .chat-layout { flex: 1; height: auto; }
 .project__page { display: grid; align-content: start; gap: 20px; width: 100%; max-width: calc(var(--project-w) + 2 * var(--ghost-layout-page-gutter)); min-width: 0; margin-inline: auto; padding: 24px var(--ghost-layout-page-gutter) 64px; }
+.project__dispatch { flex: none; padding-block-end: 20px; }
+.project[data-view="conversation"][data-handoff] .project__body { overflow-y: auto; }
+.project[data-view="conversation"][data-handoff] .project__body > .chat-layout { min-height: 100%; }
 .project-stack { display: grid; gap: 28px; }
 .project-section { display: grid; gap: 10px; min-width: 0; }
 .project-settings { display: grid; gap: 28px; min-width: 0; }
@@ -110,12 +113,44 @@
 .project-pulse__empty { margin: 0; color: var(--ghost-ink3); font-size: var(--text-caption); }
 .project-pulse__all { justify-self: start; padding: 6px 0; }
 
-/* Documents: the index and the open document side by side from the wide breakpoint up. */
+/* The same document sheet fills the index's place when there isn't room for both. */
 .project__page--docs[data-split] { max-width: calc(var(--project-w) + 2 * var(--ghost-layout-page-gutter)); grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); gap: 28px; align-items: start; }
-.project__page--docs[data-split] > .doc { align-content: start; }
 .project__page--docs[data-split] .doc__search { flex: 1; }
 .project__page--docs[data-split] .doc__search input { width: 100%; }
-.doc-pane { min-width: 0; }
+.doc-pane { display: grid; gap: 12px; min-width: 0; }
+.doc-pane__bar {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px;
+  padding-block: 4px; background: var(--ghost-canvas);
+}
+.doc-pane__tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-inline-start: auto; }
+.doc-pane__format {
+  min-height: 32px; padding-inline: 6px; border: 0; border-radius: var(--radius-chip);
+  color: var(--ghost-ink2); background: var(--ghost-inset); font-size: var(--text-ui);
+}
+.doc-page {
+  box-sizing: border-box; width: 100%; min-width: 0; max-width: var(--ghost-layout-document-max); margin-inline: auto;
+  padding: clamp(14px, 3.4vw, 32px); border-radius: var(--radius-card);
+  background: var(--ghost-surface); box-shadow: var(--shadow-card);
+}
+.doc-page__title {
+  display: block; width: 100%; min-width: 0; margin: 0; padding: 0 0 12px;
+  border: 0; border-radius: 0; border-bottom: 1px solid var(--ghost-line);
+  color: var(--ghost-ink); background: transparent; font: 650 var(--text-headingLg)/1.25 var(--font-sans);
+  letter-spacing: -.02em; overflow-wrap: anywhere;
+}
+.doc-page__title::placeholder { color: var(--ghost-ink3); opacity: 1; }
+.doc-page__legacy { margin: 12px 0 0; color: var(--ghost-ink3); font-size: var(--text-caption); overflow-wrap: anywhere; }
+.doc-page__mode { margin-block: 14px 8px; }
+.doc-page__body {
+  --ghost-editor-gutter: 0px; --ghost-editor-top-padding: 16px; --ghost-editor-min-height: 50dvh;
+  display: block; width: 100%; min-height: 50dvh; border: 0; background: transparent;
+}
+.doc-page__source { padding: 8px 0; resize: vertical; color: var(--ghost-ink); font: var(--text-caption)/1.6 var(--font-mono); }
+.doc-page__body:has(.cm-editor.cm-focused),
+.doc-page__source:focus-visible, .doc-page__title:focus-visible, .doc-pane__format:focus-visible {
+  outline: 2px solid var(--ghost-ink3); outline-offset: 3px; border-radius: var(--radius-chip);
+}
 .doc-pane__empty { min-height: 240px; justify-content: center; }
 .doc__row[aria-current="true"] { background: var(--ghost-hover2); }
 
@@ -147,6 +182,8 @@
   .project-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .project-row__label { padding-top: 0; flex-direction: row; gap: 8px; }
   .project-drill { min-height: 44px; }
+  .doc-pane__bar button, .doc-pane__format { min-height: 44px; }
+  .doc-pane__format, .doc-page__source { font-size: max(16px, var(--text-ui)); }
 }
 
 }

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type KeyboardEvent, type RefObject, type SyntheticEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject, type SyntheticEvent } from 'react';
 import { Folder, X } from 'lucide-react';
 import { useHost } from '../../host/context';
 import { useHostState } from '../../host/store';
@@ -31,16 +31,24 @@ export function useProjectMentions(text: string, setText: (value: string) => voi
   const id = useId();
   const initialKey = initialScopeIds.join('\0');
   useEffect(() => { setIds(initialKey ? initialKey.split('\0').slice(0, 1) : []); }, [initialKey, selectionKey]);
+  const pickedCaret = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const at = pickedCaret.current;
+    if (at === null) return;
+    pickedCaret.current = null;
+    const input = inputRef.current;
+    if (input && document.activeElement === input) input.setSelectionRange(at, at);
+  }, [text, inputRef]);
   const token = !disabled && ids.length < 1 ? projectMentionQuery(text, caret) : null;
   const matches = token && dismissed !== `${text}:${caret}`
     ? scopes.filter(space => !ids.includes(space.id) && space.name.toLocaleLowerCase().includes(token.query)).slice(0, 8) : [];
   const current = Math.min(active, Math.max(0, matches.length - 1));
   const choose = (scopeId: string) => {
     if (!token) return;
+    pickedCaret.current = token.start;
     setIds(previous => [...previous, scopeId]);
     setText(text.slice(0, token.start) + text.slice(token.end));
     setCaret(token.start); setActive(0);
-    requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(token.start, token.start); });
   };
   const open = matches.length > 0;
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {

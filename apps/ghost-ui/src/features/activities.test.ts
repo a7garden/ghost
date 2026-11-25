@@ -1,9 +1,10 @@
 import { expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { ActivityConfig, ActivityRun, ActivitySource, Ghost } from '@ghost/contract';
-import { buildActivityConfig, draftFromConfig, emptyDraft, intersectTools, type ActivityDraft } from './activity-config';
+import type { ActivityConfig, ActivityRun, ActivitySource, Decision, Ghost } from '@ghost/contract';
+import { buildActivityConfig, draftFromConfig, emptyDraft, intersectTools, pendingActivityConfig, type ActivityDraft } from './activity-config';
 import { RunRow } from './Activities';
+import { ActivityRuleEditor, ActivityRulePreview } from './ActivityForm';
 
 const ghost = (patch: Partial<Ghost> = {}): Ghost => ({
   id: 'g1', name: '연구원', persona: '', look: { avatarId: null }, model: null, isDefault: false, state: 'active',
@@ -24,7 +25,31 @@ it('offers the activity no tool the Ghost itself does not have', () => {
   expect(narrowed).toEqual(['web_search']);
 });
 
-
+it('uses the same rule sections for a direct draft and the pending proposal that came back', () => {
+  const owner = ghost();
+  const state = { ghosts: [owner], scopes: [] };
+  const built = buildActivityConfig(draft(), owner);
+  if (!built.ok) throw new Error(built.error);
+  const proposal: Decision = {
+    id: 'review', kind: 'approve_effect', state: 'pending', ghostId: owner.id,
+    conversationId: owner.directConversationId, workId: null, effectId: 'effect',
+    title: '상시 활동 켜기', detail: '활동 승인', options: [], answer: null, createdAt: 1, resolvedAt: null,
+    proposal: { config: built.config, policy: { classification: { tool: 'activity_propose' } } },
+  };
+  const config = pendingActivityConfig(proposal);
+  expect(config).toBe(built.config);
+  expect(pendingActivityConfig({ ...proposal, state: 'approved' })).toBeNull();
+  const preview = renderToStaticMarkup(createElement(ActivityRulePreview, { state, config: config! }));
+  const editor = renderToStaticMarkup(createElement(ActivityRuleEditor, {
+    state, connections: [], activity: null, onClose: () => {}, onSave: async () => {},
+  }));
+  for (const markup of [preview, editor]) {
+    expect(markup.match(/activity-rule__lead">(.*?)</g)).toEqual(['activity-rule__lead">계기<', 'activity-rule__lead">할 일<', 'activity-rule__lead">한도<']);
+    expect(markup).not.toContain('role="dialog"');
+  }
+  expect(preview).toContain('메일 정리');
+  for (const markup of [preview, editor]) expect(markup).toContain('도구 3개 · 파일 읽기, 웹 검색, 웹 읽기');
+});
 
 it('keeps skipped reasons, exact run timestamps and self-check explanations in history', () => {
   const run: ActivityRun = {

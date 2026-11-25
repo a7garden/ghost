@@ -207,14 +207,14 @@ export function forwardQuote(message: MailMessage): string {
 export const replySubject = (subject: string) => /^(re|답장)\s*:/i.test(subject) ? subject : `Re: ${subject}`;
 export const forwardSubject = (subject: string) => /^(fwd|전달)\s*:/i.test(subject) ? subject : `Fwd: ${subject}`;
 
-/** What the compose sheet holds, as input strings; `reply` pins the message being answered. */
+/** A letter in progress; `reply` pins the message being answered. */
 export interface MailComposeDraft {
   connectionId: string;
   to: string; cc: string; bcc: string; subject: string; text: string;
   reply?: { mailbox: string; uid: number };
 }
 
-/** Compose sheet → mail.send. The body travels verbatim. Pure; tests pin it. */
+/** Letter → mail.send. The body travels verbatim. Pure; tests pin it. */
 export function buildMailSend(draft: MailComposeDraft): { ok: true; command: MailSendCommand } | { ok: false; error: string } {
   const to = parseMailAddresses(draft.to);
   if (!to.length) return { ok: false, error: '받는 사람을 한 명 이상 입력해 주세요.' };

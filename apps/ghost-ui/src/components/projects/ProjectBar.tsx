@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Ref } from 'react';
+import { useEffect, useRef, useState, type MouseEventHandler, type Ref } from 'react';
 import { BriefcaseBusiness, Settings2 } from 'lucide-react';
 import { Button } from '../../ui';
 import { PresenceAvatar } from '../agent';
@@ -21,7 +21,7 @@ export function ProjectBar({ scope, receiver, folder, tabs, active, onTab, onHan
   tabs: ProjectTab[];
   active: string;
   onTab(id: string): void;
-  onHandoff(): void;
+  onHandoff: MouseEventHandler<HTMLButtonElement>;
   canHandoff: boolean;
   /** Opens 설정 where the receiving Ghost is chosen. */
   onManage(): void;

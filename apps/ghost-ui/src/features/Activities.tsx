@@ -1,35 +1,37 @@
-import { Fragment, useState } from 'react';
+import { useId, useState } from 'react';
 import { FlaskConical, Pause, Pencil, Play, Plus, Square, Trash2 } from 'lucide-react';
-import { Badge, Button, InlineError, SettingsGroup, SettingsRow } from '../ui';
-import { TERMINAL_WORK_STATES, type Activity, type ActivityRun, type Connection } from '@ghost/contract';
+import { Badge, Button, InlineError, SkeletonRows } from '../ui';
+import { TERMINAL_WORK_STATES, type Activity, type ActivityRun } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
 import { uiTerms } from '../uiText';
 import { absoluteTime, relativeTime, useNow } from './time';
-import { ActivityFormDialog } from './ActivityForm';
-import { deferralLabel, executionLabel, policySummary, runStateLabel, runStateTone, sourceKindLabel, sourceSummary, triggerLabel } from './activity-config';
+import { ActivityRuleEditor, ActivityRulePreview } from './ActivityForm';
+import { deferralLabel, pendingActivityConfig, runStateLabel, runStateTone, triggerLabel } from './activity-config';
+import { mainForRule, restoreRuleFocus, TellRule } from './standing-rules';
 
 /** A run is settled when its projected Work is, or the host skipped it before any Work started. */
 const settledRun = (run: ActivityRun) => run.state === 'skipped' || TERMINAL_WORK_STATES.includes(run.state);
 
 /**
- * 설정 → 자동 활동: standing delegations per Ghost. 만들기·편집·일시정지·삭제·실행·시험·기록은
- * activity.* 명령으로 곧장 저장되고, 활동이 활성화되려면 항상 소유자의 저장을 거칩니다.
+ * 설정 → 자동 활동: standing delegations per Ghost. Direct edits save through activity.*;
+ * conversation-created rules and pending owner approvals use the same reading order.
  */
 export function Activities({ navigate, scopeId }: { navigate(path: string): void; scopeId?: string }) {
   const { store, client } = useHost();
   const { state } = useHostState(store);
   const now = useNow();
   const [pending, setPending] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<Activity | null>(null);
+  const [editor, setEditor] = useState<'create' | 'tell' | Activity | null>(null);
+  const controls = useId();
+  const createId = `${controls}-create`, tellId = `${controls}-tell`;
+  const main = mainForRule(state, 'activity_propose');
   const [removing, setRemoving] = useState<Activity | null>(null);
   const [pausing, setPausing] = useState<Activity | null>(null);
   const [stopping, setStopping] = useState(false);
   const [openHistory, setOpenHistory] = useState<string | null>(null);
 
-  const ghosts = state?.ghosts ?? [];
   const connections = state?.connections ?? [];
   const runs = state?.activityRuns ?? [];
   const activities = (state?.activities ?? []).filter(activity => activity.deletedAt === null && (scopeId === undefined || activity.scopeId === scopeId))
@@ -41,8 +43,17 @@ export function Activities({ navigate, scopeId }: { navigate(path: string): void
   const stoppable = liveRuns.length > 0 || activities.some(activity => !activity.paused);
   const runsOf = (activityId: string): ActivityRun[] =>
     runs.filter(run => run.activityId === activityId).sort((a, b) => b.createdAt - a.createdAt);
-  const activeIds = new Set(activities.map(activity => activity.id));
-  const archivedRuns = scopeId === undefined ? runs.filter(run => !activeIds.has(run.activityId)).sort((a, b) => b.createdAt - a.createdAt) : [];
+  const archivedRuns = scopeId === undefined ? runs.filter(run => !activityIds.has(run.activityId)).sort((a, b) => b.createdAt - a.createdAt) : [];
+  const proposals = state?.decisions.flatMap(decision => {
+    const config = pendingActivityConfig(decision);
+    return config && (scopeId === undefined || config.scopeId === scopeId) ? [{ id: decision.id, config }] : [];
+  }) ?? [];
+  const editing = editor && typeof editor === 'object' ? editor : null;
+  const shownActivities = editing && !activityIds.has(editing.id) ? [...activities, editing] : activities;
+  const closeEditor = () => {
+    setEditor(null);
+    restoreRuleFocus(editing ? `${controls}-${editing.id}` : editor === 'tell' ? tellId : createId, createId);
+  };
 
   const act = async (label: string, work: () => Promise<unknown>, done: string) => {
     setPending(label); setError(''); setNotice('');
@@ -51,108 +62,106 @@ export function Activities({ navigate, scopeId }: { navigate(path: string): void
     finally { setPending(''); }
   };
 
-  const ghostName = (id: string) => ghosts.find(ghost => ghost.id === id)?.name ?? id;
-  const connectionOf = (activity: Activity): Connection | undefined => {
-    const source = activity.source;
-    return 'connectionId' in source ? connections.find(item => item.id === source.connectionId) : undefined;
-  };
-
-  return <section className="flex min-w-0 flex-col gap-6" aria-label={uiTerms.activities}>
+  return <section className="rule-layout" aria-label={uiTerms.activities}>
     <div className="settings-section-header flex flex-wrap items-center justify-between gap-3">
       <h2 className="section-title">{uiTerms.activities}</h2>
-      <span className="flex items-center gap-2">
-        {stoppable && scopeId === undefined && <Button variant="outline" type="button" disabled={pending !== ''} onClick={() => { setError(''); setStopping(true); }}>
+      <div className="rule-actions">
+        {stoppable && scopeId === undefined && <Button variant="outline" type="button" disabled={pending !== '' || editor !== null} onClick={() => { setError(''); setStopping(true); }}>
           <Square size={15}/>모두 멈추기
         </Button>}
-        <Button type="button" disabled={!state} onClick={() => { setError(''); setCreating(true); }}><Plus size={15}/>활동 만들기</Button>
-      </span>
+        {editor === null && <>
+          {main && <Button id={tellId} variant="ghost" type="button" onClick={() => setEditor('tell')}>{main.name}에게 말하기</Button>}
+          <Button id={createId} variant="add" type="button" disabled={!state} onClick={() => setEditor('create')}><Plus size={15}/>활동 만들기</Button>
+        </>}
+      </div>
     </div>
-    {activities.length
-      ? <SettingsGroup title={<span className="sr-only">{uiTerms.activities}</span>}>{activities.map(activity => {
-        const connection = connectionOf(activity);
-        const lastRun = runsOf(activity.id)[0];
-        const historyOpen = openHistory === activity.id;
-        const deferred = deferralLabel(activity);
-        return <Fragment key={activity.id}>
-          <SettingsRow
-            label={<span className="flex min-w-0 flex-col gap-1.5">
-              <span className="flex min-w-0 flex-wrap items-center gap-2">
-                <Badge variant="outline">{ghostName(activity.ghostId)}</Badge>
-                {activity.paused && <Badge variant="warning">일시정지</Badge>}
-                {deferred && <Badge variant="outline">대기</Badge>}
-                {activity.source.kind !== 'schedule' && activity.source.kind !== 'commit' && !connection && <Badge variant="danger">연결 없음</Badge>}
-                <span className="text-caption font-normal text-ink-3">{sourceKindLabel[activity.source.kind]}</span>
-              </span>
-              <span className="text-ui font-medium text-ink [overflow-wrap:anywhere]">{activity.name}</span>
-              <span className="text-caption font-normal text-ink-3 [overflow-wrap:anywhere]">
-                {sourceSummary(activity.source)}{connection ? ` · ${connection.name}` : ''}
-                {' · '}{executionLabel[activity.execution.kind]}
-                {activity.execution.kind === 'host' && ` · ${activity.execution.cwd}`}
-              </span>
-              {activity.lastError && <span className="activity-error [overflow-wrap:anywhere]">마지막 오류 · {activity.lastError}</span>}
-            </span>}
-            description={<>
-              {activity.paused
-                ? <>일시정지{activity.pauseReason ? ` · ${activity.pauseReason}` : ''}</>
-                : activity.nextAt ? <>다음 실행 · {absoluteTime(activity.nextAt)}</> : <>다음 실행 없음</>}
-              {deferred && <> · {deferred}</>}
-              {lastRun && <> · 마지막 {runStateLabel[lastRun.state] ?? lastRun.state}{lastRun.dryRun ? ' (시험)' : ''} · {relativeTime(lastRun.createdAt, now)}</>}
-              {activity.failureCount >= 2 && activity.lastError && <> · 연속 실패 {activity.failureCount}회</>}
-            </>}>
-            <span className="flex items-center gap-1">
-              <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${activity.name} 지금 실행`}
-                onClick={() => void act('run', () => client.send({ type: 'activity.run', activityId: activity.id }), '활동을 실행했습니다.')}>
-                <Play size={14}/>실행
-              </Button>
-              <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${activity.name} 시험 실행`}
-                onClick={() => void act('dry', () => client.send({ type: 'activity.run', activityId: activity.id, dryRun: true }), '쓰기 없이 시험하며 감시 진행 지점은 바꾸지 않습니다.')}>
-                <FlaskConical size={14}/>시험
-              </Button>
-              {activity.paused
-                ? <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} onClick={() => void act('resume', () => client.send({ type: 'activity.pause', activityId: activity.id, paused: false }), '활동을 재개했습니다.')}>
-                  <Play size={14}/>재개
-                </Button>
-                : <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} onClick={() => {
-                  setError('');
-                  if (runsOf(activity.id).some(run => !settledRun(run))) setPausing(activity);
-                  else void act('pause', () => client.send({ type: 'activity.pause', activityId: activity.id, paused: true }), '활동을 일시정지했습니다.');
-                }}>
-                  <Pause size={14}/>일시정지
-                </Button>}
-              <Button variant="ghost" size="icon" type="button" aria-label={`${activity.name} 실행 기록`} aria-expanded={historyOpen}
-                onClick={() => setOpenHistory(historyOpen ? null : activity.id)}>
-                <span aria-hidden="true" className="fold-mark"/>
-              </Button>
-              <Button variant="ghost" size="icon" type="button" aria-label={`${activity.name} 편집`} disabled={pending !== ''}
-                onClick={() => { setError(''); setEditing(activity); }}><Pencil size={15}/></Button>
-              <Button variant="ghost" size="icon" type="button" aria-label={`${activity.name} 삭제`} disabled={pending !== ''}
-                onClick={() => { setError(''); setRemoving(activity); }}><Trash2 size={15}/></Button>
-            </span>
-          </SettingsRow>
-          {historyOpen && <div className="activity-runs" role="region" aria-label={`${activity.name} 실행 기록`}>
-            <p className="activity-runs__policy">{policySummary(activity.policy)}</p>
-            {runsOf(activity.id).length
-              ? <ul className="activity-runs__list">{runsOf(activity.id).map(run => <RunRow key={run.id} run={run} now={now} navigate={navigate}/>)}</ul>
-              : <p className="activity-runs__empty">아직 실행 기록이 없습니다.</p>}
-          </div>}
-        </Fragment>;
-      })}</SettingsGroup>
-      : state && <div className="calm"><FlaskConical size={16} aria-hidden="true"/><p>등록된 자동 활동이 없습니다.</p></div>}
+    {error && <InlineError>{error}</InlineError>}
+    {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
+    {!state ? <SkeletonRows label="자동 활동을 불러오는 중…" rows={2}/> : <>
+      {editor === 'create' && <ActivityRuleEditor key={scopeId ?? 'all'} state={state} connections={connections} activity={null} initialScopeId={scopeId}
+        onClose={closeEditor} onSave={async config => { await client.send({ type: 'activity.create', config }); closeEditor(); }}/>}
+      {editor === 'tell' && <TellRule main={main} scopeId={scopeId} label="자동 활동으로 만들고 싶은 일"
+        placeholder="어떤 일이 생길 때 무엇을 해 둘까요?"
+        consequence="읽기 전용 활동은 바로 켜질 수 있습니다. 그 밖의 활동은 켜기 전에 승인을 요청합니다."
+        requestText={words => `이 말을 자동 활동으로 정리해 activity_propose를 사용해 줘. 계기, 맡길 Ghost, 할 일, 완료 기준, 한도를 정리하고, 모호한 부분은 먼저 물어봐. 요청하지 않은 권한은 추가하지 마.${scopeId ? ` 이 활동의 프로젝트는 「${state.scopes.find(item => item.id === scopeId)?.name ?? scopeId}」(scopeId: ${scopeId})야.` : ''}\n\n${words}`}
+        onClose={closeEditor}/>}
+      {proposals.length + shownActivities.length > 0
+        ? <ul className="rule-list">
+          {proposals.map(({ id, config }) => <li key={id}>
+            <article className="rule-sheet" aria-label={`${config.name} 제안`}>
+              <ActivityRulePreview config={config} state={state}/>
+              <a className="rule-review" href={`#/inbox?decision=${encodeURIComponent(id)}`}>활동 제안 확인</a>
+            </article>
+          </li>)}
+          {shownActivities.map(activity => {
+            const activityRuns = runsOf(activity.id);
+            const lastRun = activityRuns[0];
+            const historyOpen = openHistory === activity.id;
+            const deferred = deferralLabel(activity);
+            return <li key={activity.id}>
+              {editing?.id === activity.id
+                ? <ActivityRuleEditor state={state} connections={connections} activity={editing} initialScopeId={scopeId} onClose={closeEditor}
+                  onSave={async config => {
+                    await client.send({ type: 'activity.update', activityId: editing.id, expectedRevision: editing.revision, config });
+                    closeEditor();
+                  }}/>
+                : <article className="rule-sheet" aria-label={activity.name}>
+                  <ActivityRulePreview config={activity} state={state}/>
+                  {activity.lastError && <p className="activity-error m-0 [overflow-wrap:anywhere]">마지막 오류 · {activity.lastError}</p>}
+                  <div className="rule-actions rule-actions--spread">
+                    <p className="rule-facts">
+                      {activity.paused
+                        ? <>일시정지{activity.pauseReason ? ` · ${activity.pauseReason}` : ''}</>
+                        : activity.nextAt ? <>다음 실행 · {absoluteTime(activity.nextAt)}</> : <>다음 실행 없음</>}
+                      {deferred && <> · 대기 · {deferred}</>}
+                      {lastRun && <> · 마지막 {runStateLabel[lastRun.state] ?? lastRun.state}{lastRun.dryRun ? ' (시험)' : ''} · {relativeTime(lastRun.createdAt, now)}</>}
+                      {activity.failureCount >= 2 && activity.lastError && <> · 연속 실패 {activity.failureCount}회</>}
+                    </p>
+                    <div className="rule-actions">
+                      <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${activity.name} 지금 실행`}
+                        onClick={() => void act('run', () => client.send({ type: 'activity.run', activityId: activity.id }), '활동을 실행했습니다.')}>
+                        <Play size={14}/>실행
+                      </Button>
+                      <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${activity.name} 시험 실행`}
+                        title="쓰기 없이 시험" onClick={() => void act('dry', () => client.send({ type: 'activity.run', activityId: activity.id, dryRun: true }), '쓰기 없이 시험하며 감시 진행 지점은 바꾸지 않습니다.')}>
+                        <FlaskConical size={14}/>시험
+                      </Button>
+                      {activity.paused
+                        ? <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} onClick={() => void act('resume', () => client.send({ type: 'activity.pause', activityId: activity.id, paused: false }), '활동을 재개했습니다.')}>
+                          <Play size={14}/>재개
+                        </Button>
+                        : <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} onClick={() => {
+                          setError('');
+                          if (activityRuns.some(run => !settledRun(run))) setPausing(activity);
+                          else void act('pause', () => client.send({ type: 'activity.pause', activityId: activity.id, paused: true }), '활동을 일시정지했습니다.');
+                        }}>
+                          <Pause size={14}/>일시정지
+                        </Button>}
+                      <Button variant="ghost" size="icon" type="button" aria-label={`${activity.name} 실행 기록`} aria-expanded={historyOpen}
+                        onClick={() => setOpenHistory(historyOpen ? null : activity.id)}>
+                        <span aria-hidden="true" className="fold-mark"/>
+                      </Button>
+                      <Button id={`${controls}-${activity.id}`} variant="ghost" size="icon" type="button" aria-label={`${activity.name} 편집`}
+                        disabled={pending !== '' || editor !== null} onClick={() => { setError(''); setEditor(activity); }}><Pencil size={15}/></Button>
+                      <Button variant="ghost" size="icon" type="button" aria-label={`${activity.name} 삭제`} disabled={pending !== ''}
+                        onClick={() => { setError(''); setRemoving(activity); }}><Trash2 size={15}/></Button>
+                    </div>
+                  </div>
+                </article>}
+              {historyOpen && <div className="activity-runs" role="region" aria-label={`${activity.name} 실행 기록`}>
+                {activityRuns.length
+                  ? <ul className="activity-runs__list">{activityRuns.map(run => <RunRow key={run.id} run={run} now={now} navigate={navigate}/>)}</ul>
+                  : <p className="activity-runs__empty">아직 실행 기록이 없습니다.</p>}
+              </div>}
+            </li>;
+          })}
+        </ul>
+        : editor === null && <p className="rule-facts">등록된 자동 활동이 없습니다.</p>}
+    </>}
     {archivedRuns.length > 0 && <section className="activity-runs" aria-label="삭제된 활동 실행 기록">
       <h3 className="section-title">삭제된 활동 실행 기록</h3>
       <ul className="activity-runs__list">{archivedRuns.map(run => <RunRow key={run.id} run={run} now={now} navigate={navigate}/>)}</ul>
     </section>}
-    {error && <InlineError>{error}</InlineError>}
-    {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
-
-    {(creating || editing) && state && <ActivityFormDialog state={state} connections={connections} activity={editing} initialScopeId={scopeId}
-      onClose={() => { setCreating(false); setEditing(null); }}
-      onSave={async config => {
-        await client.send(editing
-          ? { type: 'activity.update', activityId: editing.id, expectedRevision: editing.revision, config }
-          : { type: 'activity.create', config });
-        setCreating(false); setEditing(null);
-      }}/>}
     {removing && <Modal title="활동 삭제" onClose={() => pending === '' && setRemoving(null)}>
       <p className="m-0">이 활동을 삭제할까요? 예약된 확인과 실행도 멈춥니다. 실행 기록은 남습니다.</p>
       {error && <div className="mt-3"><InlineError>{error}</InlineError></div>}

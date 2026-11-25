@@ -184,15 +184,19 @@ for (const theme of ['light', 'dark'] as const) {
         if (trigger) {
           if (tab === 'schedules') await page.clock.setFixedTime(new Date('2026-11-09T09:00:00.000Z'));
           await page.getByRole('button', { name: trigger, exact: true }).click();
-          await expect(page.getByRole('dialog')).toBeVisible();
-          await capture(page, `${tab}-dialog`, theme, info.project.name);
-          await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
+          const editor = page.getByRole('form', { name: trigger, exact: true });
+          await expect(editor).toBeVisible();
+          await expect(page.getByRole('dialog')).toHaveCount(0);
+          if (tab === 'schedules') await editor.getByRole('combobox', { name: '실행 방식' }).selectOption('every');
+          await capture(page, `${tab}-inline`, theme, info.project.name);
+          await editor.getByRole('button', { name: '취소', exact: true }).click();
         }
         if (tab === 'connections') {
           await page.getByRole('button', { name: 'iCloud 연결', exact: true }).click();
-          await expect(page.getByRole('dialog')).toBeVisible();
-          await capture(page, 'connection-mail-dialog', theme, info.project.name);
-          await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
+          const setup = page.getByRole('region', { name: '이메일 연결', exact: true });
+          await expect(setup).toBeVisible();
+          await capture(page, 'connection-mail-inline', theme, info.project.name);
+          await setup.getByRole('button', { name: '취소', exact: true }).click();
         }
       });
     }

@@ -1,16 +1,14 @@
-import { useState } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { Archive, ChevronLeft, Download, FolderInput, Forward, Mail, MailOpen, Paperclip, Reply, Star, Trash2 } from 'lucide-react';
 import { Button, InlineError } from '../../ui';
 import type { MailboxInfo, MailMessage } from '../../host/client';
 import { useHost } from '../../host/context';
-import { Modal } from '../../components/Modal';
 import { absoluteTime } from '../time';
 import { MAIL_IFRAME_SANDBOX, mailboxLabel, mailAddressList, mailAddressName, mailHtmlDoc, mailSizeLabel, orderMailboxes } from './mail-data';
 
 /** One reader action; the view owns the command sending and the list update. */
 export type MailReaderAction =
-  | { type: 'reply' }
-  | { type: 'forward' }
+  | { type: 'reply' | 'forward'; trigger: HTMLButtonElement }
   | { type: 'toggleSeen' }
   | { type: 'toggleFlag' }
   | { type: 'archive' }
@@ -21,7 +19,7 @@ export type MailReaderAction =
  * One message in full: headers, actions, then the body — plain text by default, HTML only
  * inside an empty-sandbox iframe whose CSP blocks scripts, remote loads and form actions.
  */
-export function MailReader({ connectionId, mailboxPath, mailboxes, message, busy, actionError, onAction, onBack }: {
+export function MailReader({ connectionId, mailboxPath, mailboxes, message, busy, actionError, onAction, onBack, draft }: {
   connectionId: string;
   mailboxPath: string;
   /** Every mailbox of the account, for 이동. */
@@ -33,10 +31,14 @@ export function MailReader({ connectionId, mailboxPath, mailboxes, message, busy
   onAction(action: MailReaderAction): void;
   /** Stacked layout only: back from the reader to the list. */
   onBack?(): void;
+  /** A reply or forward extends the message at the end of the reading column. */
+  draft?: ReactNode;
 }) {
   const { client } = useHost();
   const [html, setHtml] = useState(false);
   const [moving, setMoving] = useState(false);
+  const moveTrigger = useRef<HTMLButtonElement>(null);
+  const moveChoicesId = useId();
   const [downloading, setDownloading] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const from = message.from;
@@ -47,13 +49,27 @@ export function MailReader({ connectionId, mailboxPath, mailboxes, message, busy
     catch (reason) { setDownloadError(reason instanceof Error ? reason.message : '첨부 파일을 저장하지 못했습니다.'); }
     finally { setDownloading(''); }
   };
-  const waiting = busy !== '';
+  const waiting = busy !== '' || Boolean(draft);
+  const destinations = moving && !draft ? orderMailboxes(mailboxes).filter(mailbox => mailbox.path !== mailboxPath) : null;
+  const closeMove = () => {
+    setMoving(false);
+    moveTrigger.current?.focus();
+  };
   return <article className="mail-reader" aria-label={`메일 읽기: ${message.subject || '제목 없음'}`}>
-    <header className="mail-reader__head">
-      {onBack && <Button variant="ghost" size="sm" onClick={onBack}><ChevronLeft size={15}/>목록</Button>}
+    <header className="mail-reader__head" onKeyDown={event => {
+      if (destinations && event.key === 'Escape' && busy !== 'move') {
+        event.preventDefault();
+        closeMove();
+      }
+    }}>
+      {onBack && <Button variant="ghost" size="sm" disabled={Boolean(draft)} onClick={onBack}><ChevronLeft size={15}/>목록</Button>}
       <div className="mail-reader__actions">
-        <Button variant="outline" size="sm" disabled={waiting} onClick={() => onAction({ type: 'reply' })}><Reply size={14}/>답장</Button>
-        <Button variant="outline" size="sm" disabled={waiting} onClick={() => onAction({ type: 'forward' })}><Forward size={14}/>전달</Button>
+        <Button variant="outline" size="sm" disabled={waiting} onClick={event => {
+          setMoving(false); onAction({ type: 'reply', trigger: event.currentTarget });
+        }}><Reply size={14}/>답장</Button>
+        <Button variant="outline" size="sm" disabled={waiting} onClick={event => {
+          setMoving(false); onAction({ type: 'forward', trigger: event.currentTarget });
+        }}><Forward size={14}/>전달</Button>
         <span className="mail-reader__tools">
           <Button variant="ghost" size="icon" disabled={waiting} title={message.seen ? '안읽음으로 표시' : '읽음으로 표시'}
             aria-label={message.seen ? '안읽음으로 표시' : '읽음으로 표시'}
@@ -65,10 +81,22 @@ export function MailReader({ connectionId, mailboxPath, mailboxes, message, busy
             onClick={() => onAction({ type: 'archive' })}><Archive size={15}/></Button>
           <Button variant="ghost" size="icon" disabled={waiting} title="휴지통으로 이동" aria-label="휴지통으로 이동"
             onClick={() => onAction({ type: 'trash' })}><Trash2 size={15}/></Button>
-          <Button variant="ghost" size="icon" disabled={waiting} title="메일함 이동" aria-label="메일함 이동"
-            onClick={() => setMoving(true)}><FolderInput size={15}/></Button>
+          <Button ref={moveTrigger} variant="ghost" size="icon" disabled={waiting} title="메일함 이동" aria-label="메일함 이동"
+            aria-expanded={destinations !== null} aria-controls={destinations ? moveChoicesId : undefined}
+            onClick={() => setMoving(current => !current)}><FolderInput size={15}/></Button>
         </span>
       </div>
+      {destinations && <div id={moveChoicesId} className="mail-reader__destinations" role="group" aria-label="이동할 메일함">
+        {destinations.length > 0 ? <ul className="mail-reader__destination-list">
+          {destinations.map(mailbox => <li key={mailbox.path}>
+            <Button variant="outline" size="sm" type="button" disabled={waiting}
+              className="h-auto min-h-7 max-w-full whitespace-normal text-start [overflow-wrap:anywhere] max-[55.999rem]:min-h-11"
+              onClick={() => onAction({ type: 'move', target: mailbox.path })}>{mailboxLabel(mailbox)}</Button>
+          </li>)}
+        </ul> : <span>이동할 메일함이 없습니다.</span>}
+        {busy === 'move' && <span role="status">이동 중…</span>}
+        <Button variant="ghost" size="sm" type="button" disabled={busy === 'move'} onClick={closeMove}>취소</Button>
+      </div>}
     </header>
     {(actionError || downloadError) && <div className="mail-reader__error">
       {actionError && <InlineError>{actionError}</InlineError>}
@@ -102,14 +130,7 @@ export function MailReader({ connectionId, mailboxPath, mailboxes, message, busy
           </Button>
         </li>)}
       </ul>}
+      {draft}
     </div>
-    {moving && <Modal title="메일함 이동" onClose={() => setMoving(false)}>
-      <ul className="mail-folders mail-folders--pick">
-        {orderMailboxes(mailboxes).filter(mailbox => mailbox.path !== mailboxPath).map(mailbox => <li key={mailbox.path}>
-          <Button variant="outline" size="sm" className="mail-folder__pick" disabled={waiting}
-            onClick={() => { setMoving(false); onAction({ type: 'move', target: mailbox.path }); }}>{mailboxLabel(mailbox)}</Button>
-        </li>)}
-      </ul>
-    </Modal>}
   </article>;
 }

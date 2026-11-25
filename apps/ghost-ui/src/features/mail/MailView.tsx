@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { MailPlus, MailX, Paperclip, RotateCw, Search, Star } from 'lucide-react';
 import { Button, EmptyState, InlineError, Skeleton } from '../../ui';
 import type { MailAccounts, MailboxInfo, MailMessage } from '../../host/client';
@@ -65,6 +65,14 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
   const [busy, setBusy] = useState('');
   const [actionError, setActionError] = useState('');
   const [compose, setCompose] = useState<{ seed: ComposeSeed; accountId: string } | null>(null);
+  const composeTrigger = useRef<HTMLButtonElement | null>(null);
+  const writeButton = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (compose || !composeTrigger.current) return;
+    const trigger = composeTrigger.current;
+    composeTrigger.current = null;
+    (trigger.isConnected ? trigger : writeButton.current)?.focus();
+  }, [compose]);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** Mailboxes of each account the merged view has read, for its inbox path and the reader's 이동 list. */
   const accountMailboxes = useRef(new Map<string, MailboxInfo[]>());
@@ -299,17 +307,27 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
     setOpenKey(null); setOpenTarget(null); setOpenMessage(null); setMessageError(''); setActionError(''); setBusy('');
   };
 
+  const startCompose = (seed: ComposeSeed, accountId: string, trigger: HTMLButtonElement) => {
+    // A pending search must not switch the reader out from under a reply.
+    clearTimeout(searchTimer.current);
+    setSearch(query);
+    composeTrigger.current = trigger;
+    setCompose({ seed, accountId });
+  };
+
   const runAction = async (message: MailMessage, action: MailReaderAction) => {
     const selection = activeOpen.current;
-    if (!accountId || !mailboxPath || busy || selection?.scope !== scope || selection.uid !== message.uid) return;
+    if (!accountId || !mailboxPath || busy || compose || selection?.scope !== scope || selection.uid !== message.uid) return;
+    if (action.type === 'reply' || action.type === 'forward') {
+      startCompose({ mode: action.type, mailbox: selection.target.mailboxPath, message }, selection.target.accountId, action.trigger);
+      return;
+    }
     const { target } = selection;
     setBusy(action.type); setActionError('');
     const update = (command: { action: 'seen' | 'unseen' | 'flag' | 'unflag' | 'archive' | 'trash' | 'move'; target?: string }) =>
       client.mailUpdate({ type: 'mail.update', connectionId: target.accountId, mailbox: target.mailboxPath, uids: [message.uid], ...command });
     try {
-      if (action.type === 'reply' || action.type === 'forward') {
-        setCompose({ seed: { mode: action.type, mailbox: target.mailboxPath, message }, accountId: target.accountId });
-      } else if (action.type === 'toggleSeen') {
+      if (action.type === 'toggleSeen') {
         const seen = !message.seen;
         await update({ action: seen ? 'seen' : 'unseen' });
         if (currentScope.current !== scope || activeOpen.current !== selection) return;
@@ -393,20 +411,24 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
   const compactBack = compact
     ? <Button variant="ghost" size="sm" onClick={closeOpen}>목록으로</Button>
     : null;
-  const newMail = () => setCompose({
-    seed: { mode: 'new' },
-    accountId: unified ? (accounts.find(item => item.canSend) ?? accounts[0]!).connectionId : accountId,
-  });
+  const newMail = (event: MouseEvent<HTMLButtonElement>) =>
+    startCompose({ mode: 'new' }, unified ? (accounts.find(item => item.canSend) ?? accounts[0]!).connectionId : accountId, event.currentTarget);
   const listLabel = unified ? '전체 받은편지함' : mailbox ? mailboxLabel(mailbox) : '메일';
   const accountNames = new Map(accounts.map(item => [item.connectionId, item.name || item.address] as const));
   const readerMailboxes = unified && openTarget ? accountMailboxes.current.get(openTarget.accountId) ?? [] : mailboxes;
 
-  // The third pane: the open message, its failure, its loading state, or the quiet hint.
+  const letter = compose && <MailCompose connectionId={compose.accountId} accounts={accounts} seed={compose.seed}
+    onSent={() => { void loadList(); void reloadMailboxes(); }} onClose={() => setCompose(null)}/>;
+  const freshLetter = compose?.seed.mode === 'new';
+
+  // A new letter takes the reader's place; a reply or forward continues the message in that pane.
   let reader: ReactNode;
-  if (openMessage && openTarget) {
+  if (freshLetter) {
+    reader = <div className="mail-reader mail-reader--writing"><div className="mail-reader__scroll">{letter}</div></div>;
+  } else if (openMessage && openTarget) {
     reader = <MailReader key={`${accountId}:${mailboxPath}:${openKey}:${activeOpen.current?.generation}`} connectionId={openTarget.accountId} mailboxPath={openTarget.mailboxPath} mailboxes={readerMailboxes}
       message={openMessage} busy={busy} actionError={actionError} onAction={action => void runAction(openMessage, action)}
-      onBack={compact ? closeOpen : undefined}/>;
+      draft={letter} onBack={compact ? closeOpen : undefined}/>;
   } else if (openKey !== null && messageError) {
     reader = <div className="mail-reader mail-reader--empty">{compactBack}<InlineError>{messageError}</InlineError></div>;
   } else if (openKey !== null) {
@@ -420,11 +442,9 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
       : <div className="mail-reader mail-reader--empty"><p className="m-0 text-ui text-ink-3">메일을 선택해 주세요</p></div>;
   }
 
-  // Stacked layout: an open message takes the whole sheet; the panes stay out of the tree.
-  const stacked = compact && openKey !== null;
-  return <div className="mail">
-    {stacked ? reader : <>
-      <nav className="mail-nav" aria-label="메일함">
+  const stacked = compact && (freshLetter || openKey !== null);
+  return <div className="mail" data-writing={compose ? true : undefined}>
+    <nav className="mail-nav" aria-label="메일함" hidden={stacked} inert={Boolean(compose)}>
       {accounts.length > 1 && <select className="mail-switch" value={accountId} aria-label="메일 계정"
         onChange={event => switchAccount(event.target.value)}>
         <option value={ALL_ACCOUNTS}>전체 계정</option>
@@ -449,12 +469,12 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
               </button>
             </li>)}
           </ul>}
-      {!compact && <Button variant="ghost" size="sm" className="mail-nav__write" onClick={newMail}>
+      {!compact && <Button ref={writeButton} variant="ghost" size="sm" className="mail-nav__write" disabled={!accountId} onClick={newMail}>
         <MailPlus size={15}/>메일 쓰기</Button>}
     </nav>
-    <section className="mail-list" aria-label={`${listLabel} 목록`}>
+    <section className="mail-list" aria-label={`${listLabel} 목록`} hidden={stacked} inert={Boolean(compose)}>
       <div className="mail-list__bar">
-        {compact && <Button variant="ghost" size="icon" aria-label="메일 쓰기" onClick={newMail}>
+        {compact && <Button ref={writeButton} variant="ghost" size="icon" aria-label="메일 쓰기" disabled={!accountId} onClick={newMail}>
           <MailPlus size={16}/></Button>}
         <label className="mail-search">
           <Search size={14} aria-hidden="true"/>
@@ -500,8 +520,5 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
       </div>
     </section>
     {reader}
-    </>}
-    {compose && <MailCompose connectionId={compose.accountId} accounts={accounts} seed={compose.seed}
-      onSent={() => { void loadList(); void reloadMailboxes(); }} onClose={() => setCompose(null)}/>}
   </div>;
 }

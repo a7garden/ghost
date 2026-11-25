@@ -1,20 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import { Button, InlineError, SettingsGroup, SettingsRow } from '../ui';
-import { Modal } from '../components/Modal';
 import { useHost } from '../host/context';
 import type { LocalAuthResult, LocalAuthSource } from '@ghost/contract';
 
 const message = (reason: unknown, fallback: string) => reason instanceof Error ? reason.message : fallback;
 
 /** 이 Mac 의 다른 에이전트가 이미 가진 인증 정보를 Ghost 제공자로 복사한다. 비밀 값은 Host 안에서만 오가고 이 UI 에는 목록 정보만 온다. */
-export function LocalAuthImportDialog({ onClose, onImported }: { onClose(): void; onImported(result: LocalAuthResult, source: LocalAuthSource): void }) {
+export function LocalAuthImport({ onClose, onImported }: { onClose(): void; onImported(result: LocalAuthResult, source: LocalAuthSource): void }) {
   const { client } = useHost();
   const [sources, setSources] = useState<LocalAuthSource[] | null>(null);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [confirming, setConfirming] = useState('');
   const [importing, setImporting] = useState('');
+  const surface = useRef<HTMLElement>(null);
+  useEffect(() => { surface.current?.focus(); }, []);
 
   useEffect(() => {
     let alive = true;
@@ -31,8 +32,8 @@ export function LocalAuthImportDialog({ onClose, onImported }: { onClose(): void
     catch (reason) { setError(message(reason, '인증 정보를 가져오지 못했습니다.')); setImporting(''); }
   };
 
-  return <Modal title="다른 에이전트에서 가져오기" onClose={() => importing === '' && onClose()} className="w-[min(520px,calc(100vw-2rem))] sm:max-w-[520px]">
-    <div className="flex flex-col gap-4">
+  return <section className="setup-route provider-setup" aria-label="다른 에이전트에서 가져오기" tabIndex={-1} ref={surface}
+    onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing && importing === '') onClose(); }}>
       {sources === null && <p className="m-0 flex items-center gap-2 text-ui text-ink-2" role="status">
         <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true"/>찾는 중…
       </p>}
@@ -54,6 +55,5 @@ export function LocalAuthImportDialog({ onClose, onImported }: { onClose(): void
       <div className="flex justify-end">
         <Button variant="outline" type="button" disabled={importing !== ''} onClick={onClose}>닫기</Button>
       </div>
-    </div>
-  </Modal>;
+  </section>;
 }

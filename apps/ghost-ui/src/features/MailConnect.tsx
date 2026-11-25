@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ArrowUpRight, Sparkles } from 'lucide-react';
+import { ArrowUpRight, Mail } from 'lucide-react';
 import type { Command, MailDiscovery } from '@ghost/contract';
 import { useHost } from '../host/context';
-import { Modal } from '../components/Modal';
-import { Button, FormField, InlineError, Input, Switch } from '../ui';
+import { Button, FormField, InlineError, Input, SegmentedControl, Switch } from '../ui';
 import { ExternalAnchor } from '../components/ExternalAnchor';
 import { buildConnectionCommand, draftFromMailDiscovery, mailAddressFromParts, mailAddressReady, sameMailAddress, type ConnectionDraft } from './connection-config';
 import { serviceById, type ConnectionService } from './connection-services';
@@ -11,6 +10,7 @@ import { serviceById, type ConnectionService } from './connection-services';
 // time, so the shared ServiceIcon can stay beside the catalog that owns it.
 import { ServiceIcon } from './Connections';
 import { ConnectionOAuthPanel } from './ConnectionOAuthPanel';
+import { ConnectionRequest } from './ConnectionRequest';
 import './ConnectionSetup.css';
 
 /**
@@ -18,13 +18,14 @@ import './ConnectionSetup.css';
  * owner types the address and one secret. Servers sit under a closed disclosure that
  * opens by itself only when discovery could not find them.
  */
-export function MailConnect({ seed, initialAddress = '', canAssist, onAssist, onClose, onSave }: {
-  seed?: ConnectionService; initialAddress?: string; canAssist: boolean;
+export function MailConnect({ seed, disabled, mainName, onAssist, onClose, onSave, onConnected, onSetupLockChange }: {
+  seed?: ConnectionService; disabled?: boolean; mainName?: string;
   onAssist(service: ConnectionService, detail: string): Promise<void>;
-  onClose(): void; onSave(command: Command, requestId: string): Promise<void>;
+  onClose?(): void; onSave(command: Command, requestId: string): Promise<void>; onConnected(id: string): void;
+  onSetupLockChange?(locked: boolean): void;
 }) {
   const { client } = useHost();
-  const [address, setAddress] = useState(initialAddress);
+  const [address, setAddress] = useState('');
   const [discovery, setDiscovery] = useState<MailDiscovery | null>(null);
   const [draft, setDraft] = useState<ConnectionDraft | null>(null);
   const [serverOpen, setServerOpen] = useState(false);
@@ -32,17 +33,29 @@ export function MailConnect({ seed, initialAddress = '', canAssist, onAssist, on
   const [discoveryError, setDiscoveryError] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [method, setMethod] = useState<'direct' | 'ghost'>('direct');
+  const [oauthLocked, setOAuthLocked] = useState(false);
+  const [sending, setSending] = useState(false);
+  const addressField = useRef<HTMLInputElement>(null);
+  const secretField = useRef<HTMLInputElement>(null);
   const requestSeq = useRef(0);
+  const checking = useRef('');
   const saveRequest = useRef<string | undefined>(undefined);
   const completed = mailAddressFromParts(address, seed);
   const ready = mailAddressReady(completed);
   const resolved = discovery !== null && draft !== null && sameMailAddress(draft.username, completed);
-  const providerService = discovery?.provider ? serviceById(discovery.provider.id) : undefined;
-  const oauth = discovery?.auth === 'oauth';
-  const oauthService = oauth ? providerService ?? serviceById('outlook')! : undefined;
+  const found = resolved ? discovery : null;
+  const providerService = found?.provider ? serviceById(found.provider.id) : undefined;
+  const oauthService = found?.auth === 'oauth' ? providerService ?? serviceById('outlook')! : undefined;
   const secretLabel = discovery?.auth === 'password' ? '비밀번호' : '앱 비밀번호';
   const mailService = seed ?? serviceById('custom-mail')!;
+  const locked = saving || oauthLocked || sending;
+  const expanded = Boolean(seed || address);
+  const telling = method === 'ghost' && !!mainName;
+  useEffect(() => { onSetupLockChange?.(locked); }, [locked, onSetupLockChange]);
   const discover = useCallback((target: string) => {
+    if (checking.current === target) return;
+    checking.current = target;
     const seq = ++requestSeq.current;
     setPending(true); setDiscoveryError('');
     void client.mailDiscovery(target).then(result => {
@@ -54,30 +67,40 @@ export function MailConnect({ seed, initialAddress = '', canAssist, onAssist, on
       setServerOpen(result.imap === null);
     }).catch(() => {
       if (seq !== requestSeq.current) return;
-      setDiscovery(null); setDraft(null);
+      setDiscovery(null);
       setDiscoveryError('메일 서버 정보를 찾지 못했습니다. 주소를 확인하고 다시 시도해 주세요.');
     }).finally(() => {
-      if (seq === requestSeq.current) setPending(false);
+      if (seq === requestSeq.current) { checking.current = ''; setPending(false); }
     });
   }, [client]);
 
   useEffect(() => {
-    const target = mailAddressFromParts(address, seed);
-    if (!mailAddressReady(target)) {
-      requestSeq.current++; // whatever is still in flight belongs to a discarded address
-      setDiscovery(null); setDraft(null); setPending(false);
-      return;
-    }
-    const timer = setTimeout(() => discover(target), 400);
+    if (telling || !ready || resolved) return;
+    const timer = setTimeout(() => discover(completed), 400);
     return () => clearTimeout(timer);
-  }, [address, seed, discover]);
+  }, [completed, discover, ready, resolved, telling]);
+
+  const changeAddress = (next: string) => {
+    if (!sameMailAddress(mailAddressFromParts(next, seed), completed)) {
+      requestSeq.current++;
+      checking.current = '';
+      setPending(false); setDiscoveryError(''); setError('');
+      saveRequest.current = undefined;
+    }
+    setAddress(next);
+  };
+  const close = () => {
+    if (onClose) { onClose(); return; }
+    changeAddress(''); setDiscovery(null); setDraft(null); setMethod('direct');
+    addressField.current?.focus();
+  };
 
   const set = (patch: Partial<ConnectionDraft>) => {
     saveRequest.current = undefined;
     setDraft(prev => prev ? { ...prev, ...patch } : prev);
   };
   const save = async () => {
-    if (saving || !draft) return;
+    if (saving || !draft || !resolved || pending || telling || oauthService) return;
     const full = mailAddressFromParts(address, seed);
     const built = buildConnectionCommand({ ...draft, username: full }, null);
     if (!built.ok) {
@@ -88,52 +111,54 @@ export function MailConnect({ seed, initialAddress = '', canAssist, onAssist, on
     if (!draft.credential.trim()) { setError(`${secretLabel}를 입력해 주세요.`); return; }
     setSaving(true); setError('');
     try { await onSave(built.command, saveRequest.current ??= crypto.randomUUID()); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : '연결을 저장하지 못했습니다.'); setSaving(false); }
+    catch (reason) { setError(reason instanceof Error ? `연결을 저장하지 못했습니다. ${reason.message}` : '연결을 저장하지 못했습니다.'); setSaving(false); }
   };
   const addressKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== 'Enter') return;
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing || telling) return;
     event.preventDefault();
-    if (resolved && !pending) event.currentTarget.form?.requestSubmit();
+    if (resolved && !pending) secretField.current?.focus();
     else if (ready) discover(completed);
+    else setError('이메일 주소를 확인해 주세요.');
   };
 
-  return <Modal title="이메일 연결" onClose={() => { if (!saving) onClose(); }} className="sm:max-w-[560px]">
-    {/* The address field holds only the local part when a provider tile seeds the domain; save() validates the full address itself. */}
-    <form noValidate className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void save(); }}>
-      <FormField label="이메일 주소" required>
-        {control => <Input {...control} type="email" inputMode="email" autoComplete="username" placeholder={seed?.domain ? `이름@${seed.domain}` : 'name@example.com'}
-          value={address} maxLength={320} required disabled={saving}
-          onChange={event => { setAddress(event.target.value); saveRequest.current = undefined; }}
-          onKeyDown={addressKeyDown}
-          onBlur={() => { if (ready && !resolved) discover(completed); }}/>}
+  return <section className={seed ? 'setup-route service-setup' : 'mail-entry'} aria-label={seed ? '이메일 연결' : '이메일 주소로 연결'}
+    onKeyDown={event => { if (expanded && event.key === 'Escape' && !event.nativeEvent.isComposing && !locked) close(); }}>
+    {!seed && <span className="service-icon mail-entry__icon" aria-hidden="true"><Mail size={21}/></span>}
+    <div className="mail-entry__content">
+      <FormField label={seed ? '이메일 주소' : '이메일 주소로 연결'} required>
+        {control => <Input {...control} ref={addressField} autoFocus={Boolean(seed)} type={seed?.domain ? 'text' : 'email'} inputMode="email" autoComplete="username" spellCheck={false}
+          placeholder={seed?.domain ? `이름@${seed.domain}` : 'name@example.com'} value={address} maxLength={320}
+          disabled={locked || disabled || telling} onChange={event => changeAddress(event.target.value)} onKeyDown={addressKeyDown}/>}
       </FormField>
-      {pending && <p className="m-0 text-caption text-ink-3" role="status">서버 정보를 찾는 중…</p>}
-      {discoveryError && !pending && <>
-        <InlineError>{discoveryError}</InlineError>
-        <div><Button type="button" variant="outline" disabled={saving || !ready} onClick={() => discover(completed)}>다시 찾기</Button></div>
-      </>}
-      {discovery && !pending && <>
-        <div className="mail-provider">
-          <ServiceIcon service={providerService}/>
-          <div className="mail-provider__identity">
-            <p className="text-ui font-medium">{discovery.provider?.name ?? discovery.domain}</p>
-            {address.trim() !== completed && <p>{completed}</p>}
+      {expanded && mainName && <SegmentedControl aria-label="연결 방법" value={method} onValueChange={setMethod} options={[
+        { value: 'direct', label: '직접 연결', disabled: locked },
+        { value: 'ghost', label: `${mainName}에게 말하기`, disabled: locked },
+      ]}/>}
+      {telling && mainName ? <ConnectionRequest service={providerService ?? mailService} mainName={mainName} initialDetail={completed}
+        onAssist={onAssist} onClose={close} onSendingChange={setSending}/>
+      : expanded && <form noValidate className="setup-route__body" aria-busy={saving} onSubmit={event => { event.preventDefault(); void save(); }}>
+        {pending && <p className="m-0 text-caption text-ink-2" role="status">서버 정보를 찾는 중…</p>}
+        {discoveryError && !pending && <InlineError onRetry={() => discover(completed)} retryLabel="다시 찾기">{discoveryError}</InlineError>}
+        {found && !pending && <>
+          <div className="mail-provider">
+            {!seed && <ServiceIcon service={providerService}/>}
+            <div className="mail-provider__identity">
+              <p className="text-ui font-medium">{found.provider?.name ?? found.domain}</p>
+              {address.trim() !== completed && <p>{completed}</p>}
+            </div>
+            {oauthService && found.setupUrl && <ExternalAnchor href={found.setupUrl} target="_blank" rel="noopener noreferrer" className="setup-route__link">인증 설정 열기<ArrowUpRight size={12} aria-hidden="true"/></ExternalAnchor>}
           </div>
-          {discovery.setupUrl && <ExternalAnchor href={discovery.setupUrl} target="_blank" rel="noopener noreferrer" className="text-caption text-ink-2 underline underline-offset-4">{discovery.auth === 'password' ? '인증 설정 열기' : '앱 비밀번호 발급'}<ArrowUpRight className="ml-1 inline" size={12}/></ExternalAnchor>}
-        </div>
-        {discovery.note && <p className="m-0 text-caption text-ink-2">{discovery.note}</p>}
-      </>}
-      {!canAssist || discovery ? null : <Button type="button" variant="outline" disabled={saving || pending} onClick={async () => {
-        setSaving(true); setError('');
-        try { await onAssist(mailService, completed); }
-        catch (reason) { setError(reason instanceof Error ? reason.message : '연결 요청을 보내지 못했습니다.'); setSaving(false); }
-      }}><Sparkles size={15}/>Ghost에게 연결 맡기기</Button>}
-      {oauth ? oauthService && <ConnectionOAuthPanel service={oauthService} ghosts={[]} defaultUsername={completed} onConnected={onClose}/> : <>
-        <FormField label={secretLabel} description="인증 정보는 Host에만 저장되며 대화에 전달되지 않습니다.">
-          {control => <Input {...control} type="password" value={draft?.credential ?? ''} autoComplete="new-password" disabled={saving || !draft} onChange={event => set({ credential: event.target.value })}/>}
-        </FormField>
-        <button type="button" className="connection-advanced" aria-expanded={serverOpen} disabled={saving || !draft} onClick={() => setServerOpen(!serverOpen)}>서버 설정<span aria-hidden="true" className="fold-mark"/></button>
-        {serverOpen && draft && <div className="flex flex-col gap-4">
+          {oauthService
+            ? <ConnectionOAuthPanel key={completed} service={oauthService} ghosts={[]} defaultUsername={completed} onConnected={onConnected} onLockChange={setOAuthLocked}/>
+            : <div className="setup-route__credential">
+              <FormField label={secretLabel} description={found.note ?? undefined}>
+                {control => <Input {...control} ref={secretField} type="password" value={draft?.credential ?? ''} autoComplete="new-password" disabled={saving} onChange={event => set({ credential: event.target.value })}/>}
+              </FormField>
+              {found.setupUrl && <ExternalAnchor href={found.setupUrl} target="_blank" rel="noopener noreferrer" className="setup-route__link">{found.auth === 'password' ? '인증 설정 열기' : '앱 비밀번호 발급'}<ArrowUpRight size={12} aria-hidden="true"/></ExternalAnchor>}
+            </div>}
+        </>}
+        {found && !oauthService && <button type="button" className="connection-advanced" aria-expanded={serverOpen} disabled={saving} onClick={() => setServerOpen(!serverOpen)}>서버 설정<span aria-hidden="true" className="fold-mark"/></button>}
+        {found && !oauthService && serverOpen && draft && <div className="flex flex-col gap-4">
           <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_100px]">
             <FormField label="IMAP 서버" required>{control => <Input {...control} value={draft.host} required disabled={saving} onChange={event => set({ host: event.target.value })}/>}</FormField>
             <FormField label="IMAP 포트">{control => <Input {...control} type="number" min={1} max={65535} value={draft.port} disabled={saving} onChange={event => set({ port: event.target.value })}/>}</FormField>
@@ -145,12 +170,12 @@ export function MailConnect({ seed, initialAddress = '', canAssist, onAssist, on
           </div>
           <label className="activity-check"><span className="activity-check__copy"><span>SMTP 암시적 TLS</span><small>끄면 STARTTLS로 연결합니다. 두 방식 모두 인증서를 확인합니다.</small></span><Switch aria-label="SMTP 암시적 TLS" checked={draft.smtpSecure} disabled={saving} onCheckedChange={smtpSecure => set({ smtpSecure })}/></label>
         </div>}
-      </>}
-      {error && <InlineError>{error}</InlineError>}
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" type="button" disabled={saving} onClick={onClose}>취소</Button>
-        {!oauth && <Button type="submit" disabled={saving || pending || !resolved}>{saving ? '처리 중…' : '연결'}</Button>}
-      </div>
-    </form>
-  </Modal>;
+        {error && <InlineError>{error}</InlineError>}
+        <div className="setup-route__actions">
+          <Button variant="ghost" type="button" disabled={locked} onClick={close}>취소</Button>
+          {found && !oauthService && <Button type="submit" disabled={saving || pending}>{saving ? '저장 중…' : '연결하고 확인'}</Button>}
+        </div>
+      </form>}
+    </div>
+  </section>;
 }

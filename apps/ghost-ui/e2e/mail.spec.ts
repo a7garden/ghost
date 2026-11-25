@@ -236,16 +236,19 @@ test('lost send response locks the preserved draft and retries the identical rec
   });
   await openMail(page); await expect(row(page, 'A INBOX #1')).toBeVisible();
   await page.getByRole('button', { name: '메일 쓰기', exact: true }).click();
-  await page.getByRole('textbox', { name: '받는 사람', exact: true }).fill('recipient@example.com');
-  await page.getByRole('textbox', { name: '제목', exact: true }).fill('Keep this subject');
-  await page.getByRole('textbox', { name: '본문', exact: true }).fill('Keep this body');
-  await page.getByRole('button', { name: '보내기', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: '제목', exact: true })).toHaveValue('Keep this subject');
-  await expect(page.getByRole('textbox', { name: '본문', exact: true })).toHaveValue('Keep this body');
-  await expect(page.getByRole('textbox', { name: '제목', exact: true })).toBeDisabled();
-  await expect(page.getByRole('textbox', { name: '본문', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: '전송 상태 확인', exact: true }).click();
+  const letter = page.getByRole('form', { name: '메일 쓰기', exact: true });
+  await expect(letter).toBeVisible();
   await expect(page.getByRole('dialog', { name: '메일 쓰기', exact: true })).toHaveCount(0);
+  await letter.getByRole('textbox', { name: '받는 사람', exact: true }).fill('recipient@example.com');
+  await letter.getByRole('textbox', { name: '제목', exact: true }).fill('Keep this subject');
+  await letter.getByRole('textbox', { name: '본문', exact: true }).fill('Keep this body');
+  await letter.getByRole('button', { name: '보내기', exact: true }).click();
+  await expect(letter.getByRole('textbox', { name: '제목', exact: true })).toHaveValue('Keep this subject');
+  await expect(letter.getByRole('textbox', { name: '본문', exact: true })).toHaveValue('Keep this body');
+  await expect(letter.getByRole('textbox', { name: '제목', exact: true })).toBeDisabled();
+  await expect(letter.getByRole('textbox', { name: '본문', exact: true })).toBeDisabled();
+  await letter.getByRole('button', { name: '전송 상태 확인', exact: true }).click();
+  await expect(letter).toHaveCount(0);
   expect(requests).toHaveLength(2); expect(requests[1]).toEqual(requests[0]); expect(deliveries).toBe(1);
 });
 
@@ -260,6 +263,7 @@ test('known validation refusal preserves an editable draft', async ({ page }) =>
     && response.request().postDataJSON().command.type === 'mail.send');
   await page.getByRole('button', { name: '보내기', exact: true }).click();
   await refused; await painted(page);
+  await expect(page.getByRole('form', { name: '메일 쓰기', exact: true }).getByText('보내지 않았습니다. 받는 주소를 확인해 주세요.')).toBeVisible();
   await expect(page.getByRole('textbox', { name: '제목', exact: true })).toBeEnabled(); await expect(page.getByRole('textbox', { name: '제목', exact: true })).toHaveValue('Preserved');
   await expect(page.getByRole('button', { name: '전송 상태 확인', exact: true })).toHaveCount(0);
 });
@@ -282,6 +286,43 @@ test('phone can change account and mailbox without pushing the message list down
   await expect(folder).toHaveValue('Archive');
 });
 
+test('메일함 이동 opens under the message actions and can be dismissed or chosen by keyboard', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const api = await mailApi(page);
+  let refused = false;
+  await page.route('**/api/commands', async route => {
+    const { command } = route.request().postDataJSON();
+    if (command.type !== 'mail.update' || command.action !== 'move' || refused) return route.fallback();
+    refused = true;
+    return json(route, { ok: false, error: { code: 'invalid', message: '메일을 옮기지 못했습니다.' } });
+  });
+  await openMail(page); await row(page, 'A INBOX #1').click();
+  const reader = page.getByRole('article', { name: '메일 읽기: A read' });
+  const move = reader.getByRole('button', { name: '메일함 이동', exact: true });
+  const destinations = reader.getByRole('group', { name: '이동할 메일함', exact: true });
+  const archive = destinations.getByRole('button', { name: '보관함', exact: true });
+  await expect(move).toBeEnabled();
+  await move.press('Enter');
+  await expect(move).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('dialog', { name: '메일함 이동' })).toHaveCount(0);
+  await expect(destinations.getByRole('button', { name: '받은편지함', exact: true })).toHaveCount(0);
+  await page.keyboard.press('Tab');
+  await expect(archive).toBeFocused();
+  await archive.press('Escape');
+  await expect(destinations).toHaveCount(0);
+  await expect(move).toBeFocused();
+  await move.click();
+  await destinations.getByRole('button', { name: '취소', exact: true }).click();
+  await expect(move).toHaveAttribute('aria-expanded', 'false');
+  await move.press('Enter');
+  await archive.press('Enter');
+  await expect(reader.getByText('메일을 옮기지 못했습니다.')).toBeVisible();
+  await expect(archive).toBeEnabled();
+  await archive.press('Enter');
+  await expect(reader).toHaveCount(0);
+  expect(api.updates.at(-1)).toMatchObject({ connectionId: 'A', mailbox: 'INBOX', uids: [10], action: 'move', target: 'Archive' });
+});
+
 test('a narrow native Mac window retains mailbox selection, compose, and reader back controls', async ({ page }) => {
   await page.setViewportSize({ width: 800, height: 900 });
   await page.addInitScript(() => {
@@ -292,8 +333,19 @@ test('a narrow native Mac window retains mailbox selection, compose, and reader 
   await expect(page.locator('html')).toHaveAttribute('data-desktop-shell', '');
   await expect(page.getByRole('combobox', { name: '메일함', exact: true })).toBeVisible();
   await page.getByRole('combobox', { name: '메일함', exact: true }).selectOption('Archive'); await expect(row(page, 'A Archive #1')).toBeVisible();
-  await page.getByRole('button', { name: '메일 쓰기', exact: true }).filter({ visible: true }).click(); await expect(page.getByRole('dialog', { name: '메일 쓰기', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '취소', exact: true }).click(); await row(page, 'A Archive #1').click();
+  const write = page.getByRole('button', { name: '메일 쓰기', exact: true });
+  await write.click();
+  const letter = page.getByRole('form', { name: '메일 쓰기', exact: true });
+  const recipient = letter.getByRole('textbox', { name: '받는 사람', exact: true });
+  await expect(recipient).toBeFocused();
+  await recipient.press('Enter');
+  const subject = letter.getByRole('textbox', { name: '제목', exact: true });
+  await expect(subject).toBeFocused();
+  await subject.press('Enter');
+  await expect(letter.getByRole('textbox', { name: '본문', exact: true })).toBeFocused();
+  await letter.getByRole('button', { name: '취소', exact: true }).click();
+  await expect(write).toBeFocused();
+  await row(page, 'A Archive #1').click();
   await expect(page.getByRole('article', { name: '메일 읽기: A read' })).toBeVisible(); await page.getByRole('button', { name: '목록', exact: true }).click();
   await expect(page.getByRole('combobox', { name: '메일함', exact: true })).toBeVisible();
 });
@@ -319,14 +371,15 @@ test('mail empty-state opens the shared account setup, where an address brings i
   await page.getByRole('button', { name: '메일 계정 연결', exact: true }).click();
   await expect(page).toHaveURL(/#\/settings\?tab=connections$/);
   await page.getByRole('button', { name: 'Gmail 연결', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: '이메일 연결', exact: true });
-  const address = dialog.getByRole('textbox', { name: '이메일 주소', exact: true });
+  const setup = page.getByRole('region', { name: '이메일 연결', exact: true });
+  await expect(page.getByRole('dialog', { name: '이메일 연결', exact: true })).toHaveCount(0);
+  const address = setup.getByRole('textbox', { name: '이메일 주소', exact: true });
   await expect(address).toHaveAttribute('placeholder', '이름@gmail.com');
   await address.fill('owner');
-  await expect(dialog.locator('.mail-provider')).toContainText('owner@gmail.com');
-  await dialog.getByRole('button', { name: '서버 설정', exact: true }).click();
-  await expect(dialog.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toHaveValue('imap.gmail.com');
-  await expect(dialog.getByRole('textbox', { name: 'SMTP 서버', exact: true })).toHaveValue('smtp.gmail.com');
+  await expect(setup.locator('.mail-provider')).toContainText('owner@gmail.com');
+  await setup.getByRole('button', { name: '서버 설정', exact: true }).click();
+  await expect(setup.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toHaveValue('imap.gmail.com');
+  await expect(setup.getByRole('textbox', { name: 'SMTP 서버', exact: true })).toHaveValue('smtp.gmail.com');
 });
 
 test('first visit with two accounts opens the merged inbox; reading one account\'s message marks only that account\'s row', async ({ page }) => {
@@ -353,24 +406,55 @@ test('a merged-view reply stays on the receiving account, a new mail can pick th
     sent.push(command); return json(route, { ok: true, result: { messageId: '<sent@example.com>' } });
   });
   await openMail(page); await row(page, 'B INBOX #1').click();
-  await page.getByRole('button', { name: '답장', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: '보내는 계정' })).toHaveCount(0);
-  await page.getByRole('textbox', { name: '받는 사람', exact: true }).fill('recipient@example.com');
-  await page.getByRole('textbox', { name: '본문', exact: true }).fill('Reply body');
-  await page.getByRole('button', { name: '보내기', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: '답장 쓰기', exact: true })).toHaveCount(0);
+  const reader = page.getByRole('article', { name: '메일 읽기: B read' });
+  const replyButton = reader.getByRole('button', { name: '답장', exact: true });
+  await replyButton.click();
+  const reply = reader.getByRole('form', { name: '답장 쓰기', exact: true });
+  await expect(reply).toBeVisible();
+  await expect(reply.getByRole('combobox', { name: '보내는 계정' })).toHaveCount(0);
+  const body = reply.getByRole('textbox', { name: '본문', exact: true });
+  await expect(body).toBeFocused();
+  await expect(body).toHaveValue(/> B read body/);
+  await reply.getByRole('textbox', { name: '받는 사람', exact: true }).fill('recipient@example.com');
+  await body.fill('Reply body');
+  await reply.getByRole('button', { name: '보내기', exact: true }).click();
+  await expect(reply).toHaveCount(0);
+  await expect(replyButton).toBeFocused();
   expect(sent).toHaveLength(1); expect(sent[0]).toMatchObject({ connectionId: 'B', replyTo: { mailbox: 'INBOX', uid: 10 } });
   await page.getByRole('button', { name: '메일 쓰기', exact: true }).click();
-  const sender = page.getByRole('combobox', { name: '보내는 계정' });
+  const letter = page.getByRole('form', { name: '메일 쓰기', exact: true });
+  const sender = letter.getByRole('combobox', { name: '보내는 계정' });
   await expect(sender).toHaveValue('A'); await sender.selectOption('B');
-  await page.getByRole('textbox', { name: '받는 사람', exact: true }).fill('recipient@example.com');
-  await page.getByRole('textbox', { name: '제목', exact: true }).fill('From B');
-  await page.getByRole('textbox', { name: '본문', exact: true }).fill('New body');
-  await page.getByRole('button', { name: '보내기', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: '메일 쓰기', exact: true })).toHaveCount(0);
+  await letter.getByRole('textbox', { name: '받는 사람', exact: true }).fill('recipient@example.com');
+  await letter.getByRole('textbox', { name: '제목', exact: true }).fill('From B');
+  await letter.getByRole('textbox', { name: '본문', exact: true }).fill('New body');
+  await letter.getByRole('button', { name: '보내기', exact: true }).click();
+  await expect(letter).toHaveCount(0);
   expect(sent).toHaveLength(2); expect(sent[1]).toMatchObject({ connectionId: 'B' }); expect(sent[1]!.replyTo).toBeUndefined();
   await page.getByRole('combobox', { name: '메일 계정' }).selectOption('B');
   await page.reload(); await expect(page.getByRole('combobox', { name: '메일 계정' })).toHaveValue('B');
+});
+
+test('on a 390px screen forwarding continues the message, with copy recipients folded into its letterhead', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mailApi(page); await openMail(page); await row(page, 'A INBOX #1').click();
+  const reader = page.getByRole('article', { name: '메일 읽기: A read' });
+  const forwardButton = reader.getByRole('button', { name: '전달', exact: true });
+  await forwardButton.click();
+  const forward = reader.getByRole('form', { name: '전달 쓰기', exact: true });
+  await expect(forward.getByRole('textbox', { name: '받는 사람', exact: true })).toBeFocused();
+  await expect(forward.getByRole('textbox', { name: '제목', exact: true })).toHaveValue('Fwd: A read');
+  await expect(forward.getByRole('textbox', { name: '본문', exact: true })).toHaveValue(/전달하는 메일:[\s\S]*A read body/);
+  const disclosure = forward.getByRole('button', { name: /^참조/ });
+  const bcc = forward.getByRole('textbox', { name: '숨은참조', exact: true });
+  await expect(bcc).toHaveCount(0);
+  await disclosure.click(); await bcc.fill('copy@example.com');
+  await disclosure.click(); await expect(bcc).toHaveCount(0);
+  await expect(disclosure).toHaveAccessibleName('참조 있음');
+  await disclosure.click(); await expect(bcc).toHaveValue('copy@example.com');
+  await forward.getByRole('button', { name: '취소', exact: true }).click();
+  await expect(forward).toHaveCount(0);
+  await expect(forwardButton).toBeFocused();
 });
 
 test('a quiet refresh puts new mail on top without a click', async ({ page }) => {

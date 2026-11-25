@@ -237,11 +237,11 @@ test('scope edits retain inherited global rules and generic trigger sources', as
 
   await page.goto(`${host.baseUrl}/#/scopes/${scopeId}?view=triggers`);
   await page.getByRole('button', { name: '활동 만들기', exact: true }).click();
-  const commitForm = page.getByRole('dialog', { name: '활동 만들기', exact: true });
+  const commitForm = page.getByRole('form', { name: '활동 만들기', exact: true });
   await commitForm.getByRole('textbox', { name: '이름', exact: true }).fill('커밋 연결 없이 저장');
   await commitForm.getByRole('textbox', { name: '활동 지시', exact: true }).fill('새 커밋에서 바뀐 파일을 읽는다.');
   await commitForm.getByRole('textbox', { name: '완료 기준', exact: true }).fill('읽은 변경 내용이 정리된다.');
-  await commitForm.getByRole('radio', { name: '커밋', exact: true }).click();
+  await commitForm.getByRole('combobox', { name: '활동 소스', exact: true }).selectOption('commit');
   await expect(commitForm.getByRole('combobox', { name: '커밋을 살필 프로젝트', exact: true })).toHaveValue(scopeId);
   await expect(commitForm.getByRole('combobox', { name: '연결 계정', exact: true })).toHaveCount(0);
   await commitForm.getByRole('button', { name: '활동 만들기', exact: true }).click();
@@ -262,7 +262,7 @@ test('scope edits retain inherited global rules and generic trigger sources', as
   await command(page, { type: 'activity.pause', activityId, paused: true });
   await page.reload();
   await page.getByRole('button', { name: '폴링 원본 유지 편집', exact: true }).click();
-  const pollForm = page.getByRole('dialog', { name: '활동 편집', exact: true });
+  const pollForm = page.getByRole('form', { name: '활동 편집', exact: true });
   await expect(pollForm.getByRole('textbox', { name: '확인할 주소', exact: true })).toHaveValue('/changes');
   await expect(pollForm.getByLabel('목록 위치', { exact: true })).toHaveValue('/data/entries');
   await expect(pollForm.getByLabel('항목 구분 값 위치', { exact: true })).toHaveValue('/identity/key');

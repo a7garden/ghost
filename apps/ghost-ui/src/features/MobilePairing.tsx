@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { toDataURL } from 'qrcode';
 import { Pencil, QrCode, Smartphone, Trash2 } from 'lucide-react';
-import { Badge, Button, FormField, InlineError, Input, SettingsGroup, SettingsRow } from '../ui'
+import { Badge, Button, InlineError, Input, SettingsGroup, SettingsRow } from '../ui';
 import type { Device } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -21,7 +21,8 @@ export function MobilePairing() {
   const { state } = useHostState(store);
   const devices = state?.devices ?? [];
   const [offer, setOffer] = useState<{ code: string; expiresAt: number; origin: string }>();
-  const [editing, setEditing] = useState<Device>();
+  const [renameTarget, setRenameTarget] = useState<string>();
+  const editingId = renameTarget && devices.some(device => device.id === renameTarget) ? renameTarget : undefined;
   const [revoking, setRevoking] = useState<Device>();
   const [qr, setQr] = useState('');
   const [pending, setPending] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
@@ -80,27 +81,19 @@ export function MobilePairing() {
       </div>
     </section>}
     {devices.length
-      ? <SettingsGroup title={<span className="sr-only">등록된 기기</span>}>{devices.map(device => <SettingsRow key={device.id} label={<span className="flex min-w-0 items-center gap-3">
-        <Smartphone size={17} className="shrink-0 text-ink-3" aria-hidden="true"/>
-        <span className="flex min-w-0 flex-col gap-1">
-          <span className="flex flex-wrap items-center gap-2 text-ui font-medium text-ink [overflow-wrap:anywhere]">{device.name}
-            {device.pushEnabled && <Badge variant="outline">알림</Badge>}
-            {device.lastSeenAt && <span className="text-caption font-normal text-ink-3">마지막 연결 {seen(device.lastSeenAt)}</span>}
-          </span>
-        </span>
-      </span>}>
-        <span className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" type="button" aria-label={`${device.name} 이름 변경`} disabled={pending !== ''} onClick={() => { setError(''); setEditing(device); }}><Pencil size={15}/></Button>
-          <Button variant="ghost" size="icon" type="button" aria-label={`${device.name} 연결 해제`} disabled={pending !== ''} onClick={() => { setError(''); setRevoking(device); }}><Trash2 size={15}/></Button>
-        </span>
-      </SettingsRow>)}</SettingsGroup>
+      ? <SettingsGroup title={<span className="sr-only">등록된 기기</span>}>{devices.map(device =>
+        <PairedDeviceRow key={device.id} device={device} editing={editingId === device.id}
+          busy={pending !== '' || !!revoking || (!!editingId && editingId !== device.id)}
+          onEdit={() => { setNotice(''); setRenameTarget(device.id); }}
+          onClose={() => setRenameTarget(undefined)}
+          onSave={async name => {
+            await client.send({ type: 'device.update', deviceId: device.id, name });
+            setNotice('기기를 저장했습니다.');
+          }}
+          onRevoke={() => { setError(''); setRevoking(device); }}/>)}</SettingsGroup>
       : state && <div className="calm"><Smartphone size={16} aria-hidden="true"/><p>페어링된 기기 없음</p></div>}
     {error && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
-    {editing && <NameEditor key={editing.id} initialName={editing.name} busy={pending !== ''} onClose={() => setEditing(undefined)} onSave={async name => {
-      const saved = await run(() => client.send({ type: 'device.update', deviceId: editing.id, name }), '기기를 저장했습니다.');
-      if (saved) setEditing(undefined);
-    }}/>}
     {revoking && <Modal title="기기 연결 해제" onClose={() => pending === '' && setRevoking(undefined)}>
       <p className="m-0">{revoking.name}의 페어링을 해제할까요? 이 기기는 더 이상 Ghost에 접근할 수 없습니다.</p>
       {error && <div className="mt-3"><InlineError>{error}</InlineError></div>}
@@ -112,31 +105,70 @@ export function MobilePairing() {
   </section>;
 }
 
-function NameEditor({ initialName, busy, onClose, onSave }: {
-  initialName: string;
+function PairedDeviceRow({ device, editing, busy, onEdit, onClose, onSave, onRevoke }: {
+  device: Device;
+  editing: boolean;
   busy: boolean;
+  onEdit(): void;
   onClose(): void;
   onSave(name: string): Promise<void>;
+  onRevoke(): void;
 }) {
-  const [name, setName] = useState(initialName);
-  const [error, setError] = useState(''), [saving, setSaving] = useState(false);
+  const formId = useId();
+  const pencil = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
+  const [name, setName] = useState(device.name);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const locked = busy || saving;
+  useLayoutEffect(() => {
+    if (!editing && restoreFocus.current) {
+      pencil.current?.focus();
+      restoreFocus.current = false;
+    }
+  }, [editing]);
+  const close = () => {
+    restoreFocus.current = true;
+    onClose();
+  };
   const save = async () => {
     if (locked) return;
-    if (!name.trim()) { setError('기기 이름을 입력해 주세요.'); return; }
+    const next = name.trim();
+    if (!next) { setError('기기 이름을 입력해 주세요.'); return; }
+    if (next === device.name) { close(); return; }
     setSaving(true); setError('');
-    try { await onSave(name.trim()); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : '저장하지 못했습니다.'); }
+    try { await onSave(next); close(); }
+    catch { setError('기기 이름을 저장하지 못했습니다.'); }
     finally { setSaving(false); }
   };
-  return <Modal title="기기 이름 변경" onClose={() => !locked && onClose()}>
-    <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void save(); }}>
-      <FormField label="기기 이름">{control => <Input {...control} value={name} onChange={event => setName(event.target.value)} required maxLength={128} disabled={locked}/>}</FormField>
-      {error && <InlineError>{error}</InlineError>}
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" type="button" disabled={locked} onClick={onClose}>취소</Button>
-        <Button type="submit" disabled={locked || !name.trim()}>{saving ? '저장 중…' : '저장'}</Button>
-      </div>
-    </form>
-  </Modal>;
+  const keys = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape' && !event.nativeEvent.isComposing && !locked) {
+      event.preventDefault(); event.stopPropagation(); close();
+    }
+  };
+  return <SettingsRow label={<div className="flex min-w-0 items-start gap-3">
+    <Smartphone size={17} className="mt-1 shrink-0 text-ink-3" aria-hidden="true"/>
+    <div className="grid min-w-0 flex-1 gap-1">
+      {editing ? <form id={formId} className="grid min-w-0 gap-2" aria-label="기기 이름 변경" aria-busy={saving}
+        onSubmit={event => { event.preventDefault(); void save(); }} onKeyDown={keys}>
+        <Input aria-label="기기 이름" aria-required aria-describedby={error ? `${formId}-error` : undefined}
+          className="min-h-11 text-base sm:min-h-8 sm:text-ui" type="text" value={name} autoFocus
+          onChange={event => { setName(event.target.value); if (error) setError(''); }} maxLength={128} readOnly={locked}/>
+        {error && <InlineError id={`${formId}-error`}>{error}</InlineError>}
+      </form> : <span className="text-ui font-medium text-ink [overflow-wrap:anywhere]">{device.name}</span>}
+      {(device.pushEnabled || device.lastSeenAt) && <span className="flex flex-wrap items-center gap-2 text-caption font-normal text-ink-3">
+        {device.pushEnabled && <Badge variant="outline">알림</Badge>}
+        {device.lastSeenAt && <span>마지막 연결 {seen(device.lastSeenAt)}</span>}
+      </span>}
+    </div>
+  </div>}>
+    {editing ? <div className="flex flex-wrap gap-2" onKeyDown={keys}>
+      <Button variant="ghost" type="button" disabled={locked} onClick={close}>취소</Button>
+      <Button type="submit" form={formId} disabled={locked}>{saving ? '저장 중…' : '저장'}</Button>
+    </div> : <div className="flex items-center gap-1">
+      <Button ref={pencil} variant="ghost" size="icon" type="button" aria-label={`${device.name} 이름 변경`} disabled={busy}
+        onClick={() => { setName(device.name); setError(''); onEdit(); }}><Pencil size={15}/></Button>
+      <Button variant="ghost" size="icon" type="button" aria-label={`${device.name} 연결 해제`} disabled={busy} onClick={onRevoke}><Trash2 size={15}/></Button>
+    </div>}
+  </SettingsRow>;
 }

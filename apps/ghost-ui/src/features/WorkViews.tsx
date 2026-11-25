@@ -1,20 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
-import { Button, FormField, Page, PageHeader, InlineError, Input, SegmentedControl, SelectField, Textarea } from '../ui'
-import type { ExecutionTarget, State, Work } from '@ghost/contract';
+import { Button, Page, PageHeader, SegmentedControl, SelectField } from '../ui';
+import type { State, Work } from '@ghost/contract';
 import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { PresenceAvatar, WorkLane } from '../components/agent';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { Modal } from '../components/Modal';
 import { uiTerms } from '../uiText';
 import { ghostPresence, visibleGhosts } from './ghostState';
 import { useNow } from './time';
 import { useHost } from '../host/context';
 import { useCompact } from '../ui/adaptive';
-import { useProjectMentions } from '../components/composer/ProjectMentions';
-import { WorkModelFields } from './WorkModelFields';
-import { DocAttachments } from './DocAttachments';
-import type { DocRef } from '@ghost/contract';
+import { WorkDispatch } from './WorkBrief';
 
 type WorkTab = 'active' | 'finished';
 
@@ -35,7 +31,10 @@ export function WorkView({ state, navigate, filterGhostId, createRequested = fal
   const [tab, setTab] = useState<WorkTab>('active');
   const [cancelling, setCancelling] = useState<Work | null>(null);
   const [creating, setCreating] = useState(createRequested);
-  useEffect(() => { if (createRequested) setCreating(true); }, [createRequested]);
+  const createButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (createRequested) { setTab('active'); setCreating(true); }
+  }, [createRequested]);
   const names = new Map(state.ghosts.map(ghost => [ghost.id, ghost.name]));
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
   const settled = (work: Work) => TERMINAL_WORK_STATES.includes(work.state);
@@ -55,7 +54,13 @@ export function WorkView({ state, navigate, filterGhostId, createRequested = fal
       branch={children.length > 0 ? children.map(lane) : undefined}/>;
   };
   const ghosts = visibleGhosts(state.ghosts);
-  const createAction = <Button aria-label="일 맡기기" onClick={() => setCreating(true)} disabled={!state.ghosts.length}><Plus/><span>일 맡기기</span></Button>;
+  const closeCreator = () => {
+    setCreating(false);
+    if (createRequested) onCreateClosed?.();
+  };
+  const createAction = !creating && <Button ref={createButton} aria-label="일 맡기기" onClick={() => { setTab('active'); setCreating(true); }} disabled={!ghosts.length}>
+    <Plus/><span>일 맡기기</span>
+  </Button>;
   return <Page className="work-board grid content-start gap-6">
     {!compact && <PageHeader title={uiTerms.work} className="work-board__header mb-2" actions={createAction}/>}
     <div className="board-bar">
@@ -84,12 +89,13 @@ export function WorkView({ state, navigate, filterGhostId, createRequested = fal
           </button>)}
         </div>)}
     </div>
+    {creating && <WorkDispatch ghosts={ghosts} hasProjects={state.scopes.length > 0}
+      defaultGhostId={ghosts.find(ghost => ghost.id === filterGhostId)?.id ?? ghosts.find(ghost => ghost.isDefault)?.id ?? ghosts[0]?.id ?? ''}
+      onClose={() => { closeCreator(); requestAnimationFrame(() => createButton.current?.focus()); }}
+      onCreated={id => { closeCreator(); navigate(`/work/${encodeURIComponent(id)}`); }}/>}
     {roots.length > 0
       ? <div className="lanes">{roots.map(lane)}</div>
-      : <div className="calm"><p>{tab === 'active' ? '진행 중인 일 없음' : '끝난 일 없음'}</p></div>}
-    {creating && <NewWorkModal state={state} defaultGhostId={filterGhostId && ghosts.some(ghost => ghost.id === filterGhostId) ? filterGhostId : ghosts.find(ghost => ghost.isDefault)?.id ?? ghosts[0]?.id ?? ''}
-      onClose={() => { setCreating(false); if (createRequested) onCreateClosed?.(); }}
-      onCreated={id => { setCreating(false); if (createRequested) onCreateClosed?.(); navigate(`/work/${encodeURIComponent(id)}`); }}/>}
+      : (!creating || tab === 'finished') && <div className="calm"><p>{tab === 'active' ? '진행 중인 일 없음' : '끝난 일 없음'}</p></div>}
     {cancelling && <CancelWorkDialog work={cancelling} onCancel={() => client.send({ type: 'work.cancel', workId: cancelling.id })} onClose={() => setCancelling(null)}/>}
   </Page>;
 }
@@ -103,106 +109,4 @@ export function CancelWorkDialog({ work, onCancel, onClose }: { work: Work; onCa
     <p className="m-0">「{work.title}」의 진행을 멈춥니다. 기다리던 확인 요청은 닫히고, 이 일이 위임한 일도 함께 취소됩니다.</p>
     <p className="m-0">취소한 일은 다시 이어 갈 수 없습니다.</p>
   </ConfirmDialog>;
-}
-
-/** 일 맡기기: one Ghost, what to do, how it is judged finished, and when it must be done. */
-export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
-  state: State;
-  defaultGhostId: string | null;
-  onClose(): void;
-  onCreated(workId: string): void;
-}) {
-  const { client } = useHost();
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const ghosts = visibleGhosts(state.ghosts);
-  const [ghostId, setGhostId] = useState(defaultGhostId ?? ghosts[0]?.id ?? '');
-  const [execution, setExecution] = useState<'workspace' | 'container' | 'host'>('workspace');
-  const [cwd, setCwd] = useState('');
-  const [slot, setSlot] = useState(''), [retrySlot, setRetrySlot] = useState('');
-  const [docAttachments, setDocAttachments] = useState<DocRef[]>([]);
-  const [briefText, setBriefText] = useState('');
-  const briefRef = useRef<HTMLTextAreaElement>(null);
-  const projects = useProjectMentions(briefText, setBriefText, briefRef, [], busy);
-  const selected = ghosts.find(ghost => ghost.id === ghostId) ?? null;
-  const hostAllowed = selected?.hostExecution === true;
-  const pickGhost = (id: string) => {
-    setGhostId(id);
-    // PC execution is per-Ghost owner grant; losing it must never leave host selected invisibly.
-    if (ghosts.find(ghost => ghost.id === id)?.hostExecution !== true) { setExecution('workspace'); setCwd(''); }
-  };
-  const submit = (data: FormData) => {
-    const title = String(data.get('title')).trim();
-    const brief = String(data.get('brief')).trim();
-    const criteria = String(data.get('criteria') ?? '').trim();
-    const deadline = String(data.get('deadline'));
-    if (!title || !brief || !ghostId) return;
-    let target: ExecutionTarget = { kind: execution === 'container' ? 'container' : 'workspace' };
-    if (execution === 'host') {
-      const path = cwd.trim();
-      if (!path.startsWith('/')) { setError('작업 폴더는 /로 시작하는 전체 경로여야 합니다.'); return; }
-      if (path.length > 4096) { setError('작업 폴더 경로는 4,096자 이하여야 합니다.'); return; }
-      target = { kind: 'host', cwd: path };
-    }
-    setBusy(true); setError('');
-    void (async () => {
-      try {
-        const created = await client.send<{ workId: string }>({
-          type: 'work.create', ghostId, title, brief, scopeId: projects.scopeIds[0] ?? null,
-          slot: slot || null, retry: retrySlot ? { slot: retrySlot } : null, attachments: docAttachments,
-          ...(criteria ? { acceptance: { criteria, checks: [], reviewer: null } } : {}),
-          ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}),
-          execution: target,
-        });
-        onCreated(created.workId);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : '맡긴 일을 만들지 못했습니다. 다시 시도해 주세요.');
-        setBusy(false);
-      }
-    })();
-  };
-  return <Modal title="일 맡기기" onClose={() => { if (!busy) onClose(); }}>
-    <form className="grid gap-4" onSubmit={e => { e.preventDefault(); submit(new FormData(e.currentTarget)); }}>
-      <FormField label="맡길 Ghost" required>
-        {control => <SelectField {...control} label="맡길 Ghost" value={ghostId} onValueChange={pickGhost} required
-          options={ghosts.map(ghost => ({ value: ghost.id, label: ghost.isDefault ? `${ghost.name} · 메인` : ghost.name }))}/>}
-      </FormField>
-      <FormField label="제목" required>
-        {control => <Input {...control} name="title" placeholder="예: 1분기 회고 자료 모으기" required maxLength={256}/>}
-      </FormField>
-      <FormField label="할 일" required>
-        {control => <div className="relative">
-          {projects.above}{projects.chips}
-          <Textarea {...control} {...projects.inputAria} ref={briefRef} name="brief" value={briefText}
-            onChange={event => projects.onChange(event.target.value)} onSelect={projects.onSelect} onKeyDown={projects.onKeyDown}
-            placeholder="무엇을, 어떻게 완료할지 적어 주세요." required maxLength={32768} rows={5}/>
-        </div>}
-      </FormField>
-      <FormField label="완료 기준">
-        {control => <Input {...control} name="criteria" placeholder="무엇이 되면 끝난 것인지" maxLength={8192}/>}
-      </FormField>
-      <FormField label="기한" description="비워 두면 기한 없이 진행합니다.">
-        {control => <Input {...control} type="datetime-local" name="deadline"/>}
-      </FormField>
-      <WorkModelFields slot={slot} retrySlot={retrySlot} onSlot={setSlot} onRetry={setRetrySlot}/>
-      <details><summary>문서 붙임</summary><div className="pt-4"><DocAttachments value={docAttachments} onChange={setDocAttachments} scopeId={projects.scopeIds[0]}/></div></details>
-      <FormField label="실행 환경" description={selected
-        ? hostAllowed ? undefined : '이 Ghost는 PC 직접 실행이 허용되지 않았습니다. Ghost 설정의 운영에서 허용할 수 있습니다.'
-        : undefined}>
-        {control => <SegmentedControl {...control} aria-label="실행 환경" value={execution}
-          onValueChange={value => setExecution(value as 'workspace' | 'container' | 'host')}
-          options={[{ value: 'workspace', label: '작업 공간', disabled: busy }, { value: 'container', label: '컨테이너', disabled: busy },
-            { value: 'host', label: '이 Mac', disabled: busy || !hostAllowed }]}/>}
-      </FormField>
-      {execution === 'host' && <>
-        <FormField label="작업 폴더" required description="이 폴더 안에서 파일과 명령을 곧바로 실행합니다.">
-          {control => <Input {...control} name="cwd" value={cwd} required maxLength={4096} placeholder="/Users/garden/Workspace"
-            onChange={event => setCwd(event.target.value)}/>}
-        </FormField>
-        <p className="activity-warn">이 Mac 실행은 샌드박스 없이 셸을 씁니다. PC 전체와 네트워크에 영향을 줄 수 있습니다.</p>
-      </>}
-      {error && <InlineError>{error}</InlineError>}
-      <Button type="submit" className="justify-self-end" disabled={busy}>{busy ? '맡기는 중…' : '일 맡기기'}</Button>
-    </form>
-  </Modal>;
 }

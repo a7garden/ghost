@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Bell, BellOff, ChevronRight, LogOut } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Bell, BellOff, LogOut, Minus, Plus } from 'lucide-react';
 import type { Device, Ghost, NotificationKind, QuietHours } from '@ghost/contract';
 import { Button, InlineError, Input, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { DotAvatar } from '../components/DotAvatar';
@@ -21,12 +21,16 @@ export function ThisDevice({ device, ghosts }: { device: Device; ghosts: Ghost[]
   const [permission, setPermission] = useState<PermissionStatus>();
   const [alerts, setAlerts] = useState(device.alerts);
   const [error, setError] = useState('');
+  const [alertError, setAlertError] = useState('');
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [query, setQuery] = useState('');
+  const [pendingMutes, setPendingMutes] = useState(0);
+  const ghostAlertsId = useId();
+  const muteTrigger = useRef<HTMLButtonElement>(null);
   const [writer] = useState(() => new AlertWriter(device.alerts, next => client.send({ type: 'device.alerts_update', alerts: next }), setAlerts,
-    reason => setError(reason instanceof Error ? reason.message : '알림 설정을 저장하지 못했습니다.')));
+    () => setAlertError('알림 설정을 저장하지 못했습니다.')));
   useEffect(() => writer.sync(device.alerts), [writer, device.alerts]);
   useEffect(() => {
     if (!shell) return;
@@ -46,7 +50,9 @@ export function ThisDevice({ device, ghosts }: { device: Device; ghosts: Ghost[]
   };
   const muted = ghosts.filter(ghost => alerts.mutedGhostIds.includes(ghost.id));
   const quiet = alerts.quietHours ?? null;
-  const setQuiet = (next: QuietHours | null) => { setError(''); void writer.toggle({ quietHours: next }); };
+  const filter = query.trim().toLocaleLowerCase();
+  const shownGhosts = picking ? ghosts.filter(ghost => ghost.name.toLocaleLowerCase().includes(filter)) : [];
+  const setQuiet = (next: QuietHours | null) => { setAlertError(''); void writer.toggle({ quietHours: next }); };
   return <section className="this-device" aria-label="이 기기">
     <header><span className="text-caption text-ink-3">이 기기</span><h2 className="section-title">{device.name}</h2></header>
     <SettingsGroup title="알림">
@@ -57,13 +63,46 @@ export function ThisDevice({ device, ghosts }: { device: Device; ghosts: Ghost[]
       </SettingsRow>
       <div className="device-alert-kinds" role="group" aria-label="받을 알림">
         {kinds.map(item => { const enabled = !alerts.mutedKinds.includes(item.kind); return <button type="button" key={item.kind} data-tone={item.tone} aria-pressed={enabled}
-          onClick={() => { setError(''); void writer.toggle({ kind: item.kind }); }}>
+          onClick={() => { setAlertError(''); void writer.toggle({ kind: item.kind }); }}>
           {enabled ? <Bell size={18}/> : <BellOff size={18}/>}<span>{item.label}</span><i aria-hidden="true"/>
         </button>; })}
       </div>
-      <button type="button" className="device-ghost-mutes" onClick={() => setPicking(true)}>
-        <span>Ghost별 알림</span><span className="device-muted-portraits">{muted.slice(0, 4).map(ghost => <DotAvatar key={ghost.id} profileId={ghost.id} tone={toneFor(ghost.id)} size={24}/>)}{muted.length > 0 && <span>{muted.length} 끔</span>}</span><ChevronRight size={16}/>
-      </button>
+      <div className="device-ghost-control" onKeyDown={event => {
+        if (picking && event.key === 'Escape' && !event.nativeEvent.isComposing) {
+          event.preventDefault(); event.stopPropagation(); setPicking(false); setQuery(''); muteTrigger.current?.focus();
+        }
+      }}>
+        <button ref={muteTrigger} type="button" className="device-ghost-mutes" aria-label="Ghost별 알림"
+          aria-expanded={picking} aria-controls={ghostAlertsId} aria-describedby={muted.length ? `${ghostAlertsId}-muted` : undefined}
+          onClick={() => { if (picking) setQuery(''); setPicking(!picking); }}>
+          <span>Ghost별 알림</span>
+          {muted.length > 0 && <span className="device-muted-portraits">
+            {muted.slice(0, 4).map(ghost => <DotAvatar key={ghost.id} profileId={ghost.id} tone={toneFor(ghost.id)} size={24}/>)}
+            <span id={`${ghostAlertsId}-muted`}>{muted.length} 끔</span>
+          </span>}
+          {picking ? <Minus size={16} aria-hidden="true"/> : <Plus size={16} aria-hidden="true"/>}
+        </button>
+        <section id={ghostAlertsId} className="device-ghost-panel" aria-label="Ghost별 알림" hidden={!picking}>
+          {picking && <>
+            {ghosts.length > 0 && <Input type="text" enterKeyHint="search" aria-label="Ghost 검색" placeholder="Ghost 검색"
+              value={query} onChange={event => setQuery(event.target.value)} onKeyDown={blurTouchSearchOnEnter}/>}
+            {shownGhosts.length ? <ul className="device-ghost-list" aria-label="Ghost" role="list">
+              {shownGhosts.map(ghost => {
+                const enabled = !alerts.mutedGhostIds.includes(ghost.id);
+                return <li key={ghost.id}><button type="button" aria-pressed={enabled} onClick={() => {
+                  setAlertError(''); setPendingMutes(count => count + 1);
+                  void writer.toggle({ ghostId: ghost.id }).finally(() => setPendingMutes(count => count - 1));
+                }}>
+                  <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={32}/><span className="device-ghost-name">{ghost.name}</span>
+                  {enabled ? <Bell size={18} aria-hidden="true"/> : <BellOff size={18} aria-hidden="true"/>}
+                </button></li>;
+              })}
+            </ul> : <p className="device-ghost-feedback">{ghosts.length ? '검색 결과 없음' : 'Ghost 없음'}</p>}
+          </>}
+        </section>
+        {pendingMutes > 0 && <p className="device-ghost-feedback" role="status">저장 중…</p>}
+        {alertError && <InlineError className="mb-2">{alertError}</InlineError>}
+      </div>
       <SettingsRow label="방해금지" htmlFor="device-quiet-hours">
         <Switch id="device-quiet-hours" checked={quiet !== null} onCheckedChange={on => setQuiet(on ? { start: '22:00', end: '07:00' } : null)}/>
       </SettingsRow>
@@ -77,15 +116,6 @@ export function ThisDevice({ device, ghosts }: { device: Device; ghosts: Ghost[]
     </SettingsGroup>
     {error && <InlineError>{error}</InlineError>}
     <Button variant="ghost" className="self-start text-danger" onClick={() => setDisconnecting(true)}><LogOut size={17}/>연결 해제</Button>
-    {picking && <Modal title="Ghost별 알림" onClose={() => setPicking(false)}>
-      <Input type="text" enterKeyHint="search" aria-label="Ghost 검색" placeholder="Ghost 검색" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={blurTouchSearchOnEnter}/>
-      <div className="device-ghost-list">{ghosts.filter(ghost => ghost.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(ghost => {
-        const enabled = !alerts.mutedGhostIds.includes(ghost.id);
-        return <button type="button" key={ghost.id} aria-pressed={enabled} onClick={() => { setError(''); void writer.toggle({ ghostId: ghost.id }); }}>
-          <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={32}/><span className="device-ghost-name">{ghost.name}</span>{enabled ? <Bell size={19}/> : <BellOff size={19}/>}
-        </button>;
-      })}</div>
-    </Modal>}
     {disconnecting && <Modal title="연결 해제" onClose={() => !busy && setDisconnecting(false)}>
       <p>{device.name}에서 Ghost 연결을 해제할까요?</p>
       {error && <InlineError>{error}</InlineError>}

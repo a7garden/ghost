@@ -71,6 +71,18 @@ completed in reading order where the result will live, and edited in place after
 Ghost can structure free words, saying it to the Ghost is an equal way in, and its proposal comes
 back in the same shape. Dialogs remain for confirmations that name an irreversible consequence.
 
+Shapes chosen per record (2026-11-26):
+
+- **목표**: one statement (see Goals).
+- **맡긴 일**: a brief addressed to a Ghost at the head of the Work list (and above a project when handed off from it, project and receiver prefilled): recipient → title and instruction → 완료 기준 → 기한 and project, with attachments and run options folded below. The detail edits title, instruction, criteria and deadline where they are read.
+- **자동 활동**: a 계기 → 할 일 → 한도 rail, the same shape for drafts, saved rules and the main Ghost's proposals. Tools collapse to one selected-tools line that unfolds into a searchable checklist; folder choice unfolds in place. Telling the main may switch a read-only activity on at once and otherwise returns it for approval.
+- **반복 작업**: a timeline from a start point, with a dashed cadence only when it repeats.
+- **연결·메일·제공자**: the service, address or provider row is the form; authentication opens as a branch of that row and its result lands on the account. A saved credential is distinguished from a tested one. Asking the main Ghost to set it up is a branch of the same row.
+- **금고**: drafts use the item's own card frame, and stored secrets are never read back into inputs. CSV import previews non-secret row identities in place before confirmation, and the Host reports what it imported, skipped or rejected.
+- **기기**: per-Ghost alerts unfold as a searchable roster on the device row; a paired device is renamed on its row.
+- **메일**: new mail is a letter in the reading pane; replies and forwards continue under the original. 메일함 이동 is a row of destinations under the message actions.
+- **프로젝트 문서**: title and body are edited on the same page, with the index beside it on wide screens and the page taking the list's place on phones.
+
 ## Agent components
 
 Built for supervising agents instead of reusing generic cards and badges

@@ -163,17 +163,21 @@ test('editing an item keeps stored secrets out of the body and shows them as 저
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
   await page.goto(`${baseUrl}/#/settings?tab=vault`);
-  await expect(page.getByText('서비스 로그인')).toBeVisible();
-  await page.getByRole('button', { name: '고치기' }).first().click();
-  await expect(page.getByRole('heading', { name: '금고 항목 고치기' })).toBeVisible();
-  // Stored secrets come back as words, never as values.
-  await expect(page.getByLabel('비밀번호')).toHaveValue('');
-  await expect(page.getByText('저장됨 · 새 값을 입력하면 바꿉니다.').first()).toBeVisible();
-  await page.getByRole('button', { name: '자동 생성' }).click();
-  const generated = await page.getByLabel('비밀번호').inputValue();
+  const row = page.getByRole('article', { name: '서비스 로그인', exact: true });
+  await row.getByRole('button', { name: '고치기' }).click();
+  const editor = page.getByRole('form', { name: '금고 항목 고치기' });
+  await expect(page.getByRole('list', { name: '금고 항목' }).getByRole('form')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  // The mask describes stored credentials; the editor never receives their value.
+  const password = editor.getByLabel('비밀번호', { exact: true });
+  await expect(password).toHaveValue('');
+  await expect(password).toHaveAttribute('type', 'password');
+  await expect(password).toHaveAccessibleDescription('저장됨 · 비워 두면 바뀌지 않습니다.');
+  await editor.getByRole('button', { name: '자동 생성' }).click();
+  const generated = await password.inputValue();
   expect(generated).toMatch(/^[abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$%^&*_=+-]{20}$/);
-  await page.getByRole('checkbox', { name: '기록가' }).check();
-  await page.getByRole('button', { name: '저장', exact: true }).click();
+  await editor.getByRole('checkbox', { name: '기록가' }).check();
+  await editor.getByRole('button', { name: '저장', exact: true }).click();
   await expect.poll(() => patches.length).toBe(1);
   const patch = patches[0];
   expect(patch).toMatchObject({
@@ -198,13 +202,26 @@ test('creating a login demands its primary fields and stores the generated passw
     posts.push(body);
     const invalid = validateVaultWrite(body);
     if (invalid) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ ok: false, error: { code: 'invalid', message: invalid } }) });
+    if (posts.length === 1) return route.fulfill({ status: 503, json: { error: { message: body.password } } });
     return route.fulfill({ status: 201, contentType: 'application/json', body: '{}' });
   });
   await page.goto(`${baseUrl}/#/settings?tab=vault`);
-  await page.getByRole('button', { name: '새 항목' }).click();
-  await expect(page.getByRole('heading', { name: '새 금고 항목' })).toBeVisible();
-  await page.getByRole('textbox', { name: '항목 이름', exact: true }).fill('새 로그인');
-  await page.getByLabel('주소', { exact: true }).fill('https://new.example.com');
+  const add = page.getByRole('button', { name: '새 항목', exact: true });
+  await add.click();
+  const form = page.getByRole('form', { name: '새 금고 항목' });
+  const title = form.getByRole('textbox', { name: '항목 이름', exact: true });
+  await expect(title).toBeFocused();
+  await title.fill('버릴 초안');
+  await title.press('Escape');
+  await expect(form).toHaveCount(0);
+  await expect(add).toBeFocused();
+  await add.click();
+  await expect(title).toHaveValue('');
+  await title.fill('새 로그인');
+  await title.press('Enter');
+  const origin = form.getByLabel('주소', { exact: true });
+  await expect(origin).toBeFocused();
+  await origin.fill('https://new.example.com');
   await page.getByLabel('사용자 이름').fill('new@example.com');
   await page.getByRole('button', { name: '저장', exact: true }).click();
   await expect(page.getByText('사용자 이름과 비밀번호를 입력해 주세요.')).toBeVisible();
@@ -212,8 +229,14 @@ test('creating a login demands its primary fields and stores the generated passw
   const generated = await page.getByLabel('비밀번호').inputValue();
   expect(generated).toHaveLength(20);
   await page.getByRole('checkbox', { name: '연구원' }).check();
-  await page.getByRole('button', { name: '저장', exact: true }).click();
-  await expect.poll(() => posts.length).toBe(1);
+  await form.getByRole('button', { name: '저장', exact: true }).click();
+  await expect(form.getByRole('alert')).toHaveText('금고에 저장하지 못했습니다.');
+  await expect(form).not.toContainText(generated);
+  await expect(form.getByLabel('비밀번호')).toHaveValue(generated);
+  await expect(title).toHaveValue('새 로그인');
+  await origin.press('Control+Enter');
+  await expect.poll(() => posts.length).toBe(2);
+  expect(posts[1]).toEqual(posts[0]);
   expect(posts[0]).toMatchObject({
     kind: 'login', title: '새 로그인', origin: 'https://new.example.com', username: 'new@example.com',
     password: generated,
@@ -235,11 +258,11 @@ test('API credential type transition and metadata edits stay write-only against 
   const headers = { authorization: `Bearer ${token}` };
   try {
     await page.getByRole('button', { name: '새 항목', exact: true }).click();
-    const create = page.getByRole('dialog', { name: '새 금고 항목', exact: true });
+    const create = page.getByRole('form', { name: '새 금고 항목', exact: true });
     await create.getByRole('textbox', { name: '항목 이름', exact: true }).fill(title);
     await create.getByRole('textbox', { name: '사용자 이름', exact: true }).fill('discarded-login-user');
     await create.getByLabel('비밀번호', { exact: true }).fill('discarded-login-password');
-    await create.getByRole('radiogroup', { name: '항목 종류', exact: true }).getByRole('radio', { name: 'API 키', exact: true }).click();
+    await create.getByRole('combobox', { name: '항목 종류', exact: true }).selectOption('api');
     await create.getByRole('textbox', { name: '주소', exact: true }).fill('https://openapi.example.com');
     await create.getByRole('textbox', { name: '클라이언트 ID', exact: true }).fill('client-before');
     await create.getByLabel('비밀 키', { exact: true }).fill(secret);
@@ -253,9 +276,9 @@ test('API credential type transition and metadata edits stay write-only against 
     expect(createdResponse.request().postDataJSON()).not.toHaveProperty('password');
     expect(JSON.stringify(created)).not.toContain(secret);
 
-    const row = page.locator('.ghost-settings-row').filter({ has: page.getByText(title, { exact: true }) });
+    const row = page.getByRole('article', { name: title, exact: true });
     await row.getByRole('button', { name: '고치기', exact: true }).click();
-    const edit = page.getByRole('dialog', { name: '금고 항목 고치기', exact: true });
+    const edit = page.getByRole('form', { name: '금고 항목 고치기', exact: true });
     await expect(edit.getByRole('textbox', { name: '클라이언트 ID', exact: true })).toHaveValue('client-before');
     await expect(edit.getByLabel('비밀 키', { exact: true })).toHaveValue('');
     await edit.getByRole('textbox', { name: '클라이언트 ID', exact: true }).fill('');
@@ -284,22 +307,39 @@ test('API credential type transition and metadata edits stay write-only against 
   }
 });
 
-test('CSV import posts the file text once and reports the counts', async ({ page }) => {
+test('CSV selection and drop preview metadata locally, then send the original file on confirmation', async ({ page }) => {
   const { baseUrl } = readRunState();
   const imports: Record<string, unknown>[] = [];
   await mockVaultApi(page);
   await page.route('**/api/vault/import', async route => {
     imports.push(route.request().postDataJSON() as Record<string, unknown>);
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ imported: 2, skipped: 1, rejected: 0 }) });
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ imported: 1, skipped: 0, rejected: 0 }) });
   });
   await page.goto(`${baseUrl}/#/settings?tab=vault`);
   await page.getByRole('button', { name: 'CSV 가져오기' }).click();
+  const preview = page.getByRole('region', { name: 'CSV 가져오기 미리보기' });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser'),
-    page.getByRole('button', { name: '파일 고르기' }).click(),
+    preview.getByRole('button', { name: '파일 고르기' }).click(),
   ]);
-  await chooser.setFiles({ name: 'passwords.csv', mimeType: 'text/csv', buffer: Buffer.from('Title,URL,Username,Password\n사이트,https://a.com,user,pw') });
-  await expect(page.getByText('가져옴 2 · 건너뜀 1 · 거부됨 0')).toBeVisible();
-  await expect.poll(() => imports.length).toBe(1);
-  expect(String(imports[0].csv)).toContain('사이트,https://a.com,user,pw');
+  await chooser.setFiles({ name: 'first.csv', mimeType: 'text/csv', buffer: Buffer.from('name,url,username,password\n첫 사이트,https://a.com,user,first-password') });
+  await expect(preview.getByText('첫 사이트', { exact: true })).toBeVisible();
+  await expect(preview).not.toContainText('first-password');
+  const dropped = 'Title,URL,Username,Password,OTPAuth\n둘째 사이트,https://b.com/login?token=url-token,user,second-password,JBSWY3DPEHPK3PXP';
+  const transfer = await page.evaluateHandle(csv => {
+    const data = new DataTransfer();
+    data.items.add(new File([csv], 'second.csv', { type: 'text/csv' }));
+    return data;
+  }, dropped);
+  await preview.dispatchEvent('drop', { dataTransfer: transfer });
+  await transfer.dispose();
+  await expect(preview.getByText('둘째 사이트', { exact: true })).toBeVisible();
+  await expect(preview.getByText('https://b.com · user', { exact: true })).toBeVisible();
+  await expect(preview).not.toContainText(/첫 사이트|second-password|JBSWY3DPEHPK3PXP|url-token/);
+  expect(imports).toHaveLength(0);
+  await preview.getByRole('button', { name: '가져오기', exact: true }).click();
+  await expect(page.getByText('가져옴 1 · 건너뜀 0 · 거부됨 0')).toBeVisible();
+  await expect(preview).toHaveCount(0);
+  expect(imports).toEqual([{ csv: dropped }]);
 });

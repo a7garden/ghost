@@ -20,7 +20,7 @@ type Mode = 'talk' | 'work';
  * Assigning unfolds the brief's completion criteria and deadline in place, so a request
  * becomes a 맡긴 일 without a separate form. Nothing is assigned unless the owner chose it.
  */
-export function HandoffComposer({ ghosts, navigate, initialScopeIds = [], initialMode = 'talk' }: { ghosts: Ghost[]; navigate(path: string): void; initialScopeIds?: string[]; initialMode?: Mode }) {
+export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigate(path: string): void }) {
   const { client, store } = useHost();
   const { state } = useHostState(store);
   const roster = visibleGhosts(ghosts);
@@ -28,7 +28,7 @@ export function HandoffComposer({ ghosts, navigate, initialScopeIds = [], initia
   const [criteria, setCriteria] = useState('');
   const [deadline, setDeadline] = useState('');
   const [slot, setSlot] = useState(''), [retrySlot, setRetrySlot] = useState('');
-  const [mode, setMode] = useState<Mode>(initialMode);
+  const [mode, setMode] = useState<Mode>('talk');
   const [ghostId, setGhostId] = useState<string>();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
@@ -38,7 +38,7 @@ export function HandoffComposer({ ghosts, navigate, initialScopeIds = [], initia
   const modeButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachments = useAttachments();
-  const projects = useProjectMentions(text, setText, inputRef, initialScopeIds, sending);
+  const projects = useProjectMentions(text, setText, inputRef, [], sending);
   const scope = state?.scopes.find(item => item.id === projects.scopeIds[0]);
   const target = roster.find(ghost => ghost.id === ghostId)
     ?? roster.find(ghost => ghost.id === scope?.ghostId)

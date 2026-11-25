@@ -149,7 +149,7 @@
 
 .ghost-markdown-editor .cm-editor {
   min-width: 0;
-  min-height: 240px;
+  min-height: var(--ghost-editor-min-height, 240px);
   background: transparent;
   color: inherit;
   font: var(--atomic-editor-body-size) / var(--atomic-editor-body-leading) var(--atomic-editor-font);
@@ -168,7 +168,7 @@
   min-width: 0;
   max-width: var(--atomic-editor-measure);
   margin-inline: auto;
-  padding: var(--ghost-space-8, 32px) var(--ghost-layout-page-gutter, 32px) var(--ghost-space-16, 64px);
+  padding: var(--ghost-editor-top-padding, var(--ghost-space-8, 32px)) var(--ghost-editor-gutter, var(--ghost-layout-page-gutter, 32px)) var(--ghost-space-16, 64px);
   color: var(--ghost-ink, #1a1c1f);
   font-family: var(--atomic-editor-font);
   font-size: var(--atomic-editor-body-size);

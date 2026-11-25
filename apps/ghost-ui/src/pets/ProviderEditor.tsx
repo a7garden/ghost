@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ChevronRight, ExternalLink, Search } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Plus, Search } from 'lucide-react';
 import { Button, Checkbox, FormField, InlineError, Input, SegmentedControl, SelectField } from '../ui';
 import type { ModelInfo, Provider, ProviderKind, ProviderPreset } from '@ghost/contract';
-import { Modal } from '../components/Modal';
 import { ExternalAnchor } from '../components/ExternalAnchor';
 import { ProviderModels } from './ProviderModels';
 import { oauthName, OAUTH_KINDS } from '../uiText';
+import '../features/ConnectionSetup.css';
 
 const KINDS: { value: ProviderKind; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
@@ -36,25 +36,32 @@ export function ProviderEditor({ initial, presets, providerIds, busy, onClose, o
   const [preset, setPreset] = useState<ProviderPreset>();
   const [query, setQuery] = useState('');
   const visible = presets.filter(item => `${item.name} ${providerKindLabel(item.kind)}`.toLowerCase().includes(query.trim().toLowerCase()));
-  if (initial || preset) return <ProviderForm initial={initial} preset={preset ?? presets.find(item => item.kind === initial?.kind)} presets={presets}
-    providerIds={providerIds} busy={busy} onClose={onClose} onBack={initial ? undefined : () => setPreset(undefined)} onSave={onSave}/>;
-  return <Modal title="제공자 추가" onClose={onClose} className="w-[min(480px,calc(100vw-2rem))] sm:max-w-[480px]">
-    <div className="flex flex-col gap-3">
-      <div className="relative"><Search size={15} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3"/>
-        <Input aria-label="제공자 검색" placeholder="제공자 검색" value={query} onChange={event => setQuery(event.target.value)} className="pl-9"/>
+  if (initial) return <ProviderForm initial={initial} presets={presets} providerIds={providerIds} busy={busy} onClose={onClose} onSave={onSave}/>;
+  return <section className="provider-enrollment" aria-label="제공자 추가"
+    onKeyDown={event => { if (!preset && event.key === 'Escape' && !event.nativeEvent.isComposing && !busy) onClose(); }}>
+    {!preset && <div className="provider-enrollment__tools">
+      <div className="relative min-w-0 flex-1"><Search size={15} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3"/>
+        <Input aria-label="제공자 검색" placeholder="제공자 검색" value={query} autoFocus onChange={event => setQuery(event.target.value)} className="pl-9"/>
       </div>
-      <div className="flex flex-col" aria-label="제공자 목록">
-        {visible.map(item => <button key={item.id} type="button" disabled={busy} onClick={() => setPreset(item)}
-          className="flex min-h-16 items-center gap-3 rounded-control px-3 py-3 text-left outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 disabled:opacity-50">
-          <span className="flex size-9 flex-none items-center justify-center rounded-control bg-hover text-ui font-semibold text-ink" aria-hidden="true">{item.kind === 'openai_compatible' ? '+' : item.name.slice(0, 1)}</span>
-          <span className="min-w-0 flex-1"><span className="block text-ui font-semibold text-ink">{item.name}</span>
-            <span className="block text-caption text-ink-3">{OAUTH_KINDS.has(item.kind) ? `${oauthName(item.kind)} 구독 · API 키` : item.kind === 'openai_compatible' ? '주소와 모델 직접 설정' : 'API 키'}</span>
-          </span><ChevronRight size={15} className="flex-none text-ink-3" aria-hidden="true"/>
-        </button>)}
-      </div>
-      {!visible.length && <p className="m-0 px-3 py-4 text-ui text-ink-3">일치하는 제공자가 없습니다.</p>}
-    </div>
-  </Modal>;
+      <Button variant="ghost" type="button" disabled={busy} onClick={onClose}>취소</Button>
+    </div>}
+    <ul className="provider-enrollment__choices" aria-label="제공자 목록">
+      {(preset ? [preset] : visible).map(item => <li key={item.id} className="provider-enrollment__choice">
+        {preset ? <>
+          <div className="provider-enrollment__identity">
+            <span className="provider-enrollment__mark" aria-hidden="true">{item.name.slice(0, 1)}</span>
+            <h3 className="m-0 text-ui font-semibold">{item.name}</h3>
+          </div>
+          <ProviderForm preset={item} presets={presets} providerIds={providerIds} busy={busy}
+            onClose={onClose} onBack={() => setPreset(undefined)} onSave={onSave}/>
+        </> : <button type="button" className="provider-enrollment__identity provider-enrollment__pick" disabled={busy} onClick={() => setPreset(item)}>
+          <span className="provider-enrollment__mark" aria-hidden="true">{item.name.slice(0, 1)}</span>
+          <span className="min-w-0 flex-1 font-medium">{item.name}</span><Plus size={15} className="flex-none text-ink-3" aria-hidden="true"/>
+        </button>}
+      </li>)}
+    </ul>
+    {!preset && !visible.length && <p className="m-0 text-caption text-ink-2">일치하는 제공자가 없습니다.</p>}
+  </section>;
 }
 
 function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, onBack, onSave }: {
@@ -74,6 +81,8 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const mounted = useRef(true);
+  const surface = useRef<HTMLElement>(null);
+  useEffect(() => { surface.current?.focus(); }, []);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const locked = busy || saving;
   const currentPreset = presets.find(item => item.kind === value.kind);
@@ -107,29 +116,31 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
         ...(removeKey ? { apiKey: null } : effectiveMethod === 'api_key' && key ? { apiKey: key } : {}),
         ...(effectiveMethod === 'oauth' && !removeKey && initial?.authType !== 'oauth' ? { login: true } : {}),
       });
-    } catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : '저장하지 못했습니다.'); }
+    } catch (reason) { if (mounted.current) setError(reason instanceof Error ? `제공자 설정을 저장하지 못했습니다. ${reason.message}` : '제공자 설정을 저장하지 못했습니다.'); }
     finally { if (mounted.current) setSaving(false); }
   };
-  return <Modal title={initial ? `${initial.name} 설정` : preset!.name} onClose={() => !locked && onClose()} className="w-[min(560px,calc(100vw-2rem))] sm:max-w-[560px]">
-    <form className="flex max-h-[calc(100dvh-8rem)] min-w-0 flex-col gap-4" onSubmit={event => { event.preventDefault(); void save(); }}>
-      <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
-      {onBack && <Button variant="ghost" size="sm" type="button" className="self-start" disabled={locked} onClick={onBack}><ArrowLeft size={14}/>다른 제공자</Button>}
+  return <section className="setup-route provider-setup" aria-label={initial ? `${initial.name} 설정` : `${preset!.name} 연결`} tabIndex={-1} ref={surface}
+    onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing && !locked) onClose(); }}>
+    <form className="setup-route__body" aria-busy={locked} onSubmit={event => { event.preventDefault(); void save(); }}>
       {oauthAllowed && <SegmentedControl aria-label="인증 방법" value={method} onValueChange={chooseMethod}
         options={[{ value: 'oauth', label: `${oauthName(value.kind)} 구독`, disabled: locked }, { value: 'api_key', label: 'API 키', disabled: locked }]}/>}
-      {effectiveMethod === 'oauth'
-        ? <p className="m-0 text-ui text-ink-2">{initial?.authType === 'oauth' ? `저장된 ${oauthName(value.kind)} 인증을 사용합니다.` : `저장 후 인증 페이지에서 ${oauthName(value.kind)} 계정으로 로그인합니다.`}</p>
-        : <FormField label={initial?.hasCredential ? '새 API 키' : 'API 키'} description={initial?.hasCredential && initial.authType !== 'oauth' ? '비워 두면 저장된 인증 정보를 유지합니다.' : '키는 호스트에만 저장되며 다시 표시되지 않습니다.'}>
-          {control => <div className="flex flex-col gap-2"><Input {...control} type="password" value={apiKey} maxLength={4096} autoComplete="off" disabled={locked || removeKey} onChange={event => setApiKey(event.target.value)}/>
-            {currentPreset?.credentialUrl && <ExternalAnchor href={currentPreset.credentialUrl} target="_blank" rel="noopener noreferrer" className="flex w-fit items-center gap-1 text-caption text-ink-2 underline underline-offset-4">API 키 발급<ExternalLink size={12} aria-hidden="true"/></ExternalAnchor>}
-          </div>}
-        </FormField>}
       {value.kind === 'openai_compatible' && <FormField label="서버 주소">{control => <Input {...control} type="url" value={value.baseUrl ?? ''} placeholder="https://api.example.com/v1" required disabled={locked} onChange={event => patch({ baseUrl: event.target.value.trim() || null })}/>}</FormField>}
-      <ProviderModels catalog={catalog} selected={value.models} automatic={automatic} disabled={locked} onChange={models => patch({ models })}/>
-      {automatic && <p className="m-0 text-caption text-ink-3">모델 목록은 자동으로 갱신됩니다. 사용 가능 여부는 계정의 권한을 따릅니다.</p>}
+      {effectiveMethod === 'oauth'
+        ? initial?.authType === 'oauth' && <p className="m-0 text-caption text-ink-2">저장된 {oauthName(value.kind)} 인증을 사용합니다.</p>
+        : <div className="setup-route__credential"><FormField label={initial?.hasCredential ? '새 API 키' : 'API 키'} description={initial?.hasCredential && initial.authType !== 'oauth' ? '비워 두면 저장된 인증 정보를 유지합니다.' : undefined}>
+          {control => <Input {...control} type="password" value={apiKey} maxLength={4096} autoComplete="new-password" disabled={locked || removeKey} onChange={event => setApiKey(event.target.value)}/>}
+          </FormField>
+          {currentPreset?.credentialUrl && <ExternalAnchor href={currentPreset.credentialUrl} target="_blank" rel="noopener noreferrer" className="setup-route__link">API 키 발급<ExternalLink size={12} aria-hidden="true"/></ExternalAnchor>}
+        </div>}
+      {automatic ? <details>
+        <summary className="connection-advanced">모델 목록<span aria-hidden="true" className="fold-mark"/></summary>
+        <ProviderModels catalog={catalog} selected={value.models} automatic disabled={locked} onChange={models => patch({ models })}/>
+        <p className="m-0 text-caption text-ink-3">모델 목록은 자동으로 갱신됩니다. 사용 가능 여부는 계정의 권한을 따릅니다.</p>
+      </details> : <ProviderModels catalog={catalog} selected={value.models} disabled={locked} onChange={models => patch({ models })}/>}
       <details className="border-t border-dashed border-line-strong pt-3">
-        <summary className="cursor-pointer text-caption font-medium text-ink-2">고급 설정</summary>
-        <div className="mt-4 flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+        <summary className="connection-advanced">고급 설정<span aria-hidden="true" className="fold-mark"/></summary>
+        <div className="mt-3 flex min-w-0 flex-col gap-3">
+          <div className="setup-route__pair">
             <FormField label="이름">{control => <Input {...control} value={value.name} maxLength={128} disabled={locked} onChange={event => patch({ name: event.target.value })}/>}</FormField>
             <FormField label="제공자 ID">{control => <Input {...control} value={value.id} maxLength={64} disabled={locked || !!initial} onChange={event => patch({ id: event.target.value.toLowerCase() })}/>}</FormField>
           </div>
@@ -138,12 +149,12 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
           {initial?.hasCredential && <label className="flex items-center gap-2.5 text-caption text-ink"><Checkbox checked={removeKey} disabled={locked} onCheckedChange={checked => setRemoveKey(checked === true)}/>저장된 인증 정보 삭제</label>}
         </div>
       </details>
-      </div>
       {error && <InlineError>{error}</InlineError>}
-      <div className="flex flex-none justify-end gap-2 border-t border-dashed border-line-strong pt-3">
-        <Button variant="outline" type="button" disabled={locked} onClick={onClose}>취소</Button>
+      <div className="setup-route__actions">
+        {onBack && <Button variant="ghost" size="sm" type="button" className="mr-auto" disabled={locked} onClick={onBack}><ArrowLeft size={14}/>다른 제공자</Button>}
+        <Button variant="ghost" type="button" disabled={locked} onClick={onClose}>취소</Button>
         <Button type="submit" disabled={locked}>{saving ? '저장 중…' : effectiveMethod === 'oauth' && initial?.authType !== 'oauth' && !removeKey ? `${oauthName(value.kind)}로 로그인` : '저장'}</Button>
       </div>
     </form>
-  </Modal>;
+  </section>;
 }

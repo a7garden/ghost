@@ -152,6 +152,17 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(page.getByText('진행 중인 일 없음')).toBeVisible();
         await assignee.selectOption('');
         await expect(page.locator('.work-board').getByText('회의 메모 요약', { exact: true })).toBeVisible();
+        await assign.tap();
+        const dispatch = page.getByRole('form', { name: '일 맡기기', exact: true });
+        await expect(dispatch.getByRole('combobox', { name: '맡길 Ghost', exact: true })).toBeVisible();
+        await expect(page.getByRole('dialog', { name: '일 맡기기', exact: true })).toHaveCount(0);
+        const dispatchBounds = (await dispatch.boundingBox())!;
+        expect(dispatchBounds.x).toBeGreaterThanOrEqual(0);
+        expect(dispatchBounds.x + dispatchBounds.width).toBeLessThanOrEqual(390);
+        await screenshot(page, `work-dispatch-${theme}-iphone.png`);
+        await dispatch.getByRole('button', { name: '취소', exact: true }).tap();
+        await expect(dispatch).toHaveCount(0);
+        await expect(assign).toBeFocused();
       }
       await screenshot(page, `${screen.name}-${theme}-iphone.png`);
       if (screen.name === 'home') {
@@ -184,29 +195,39 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(page.locator('.compact-settings-list')).toBeVisible();
       }
     });
-    test('device alert sheet', async ({ page }) => {
+    test('per-Ghost alerts unfold on the device row', async ({ page }) => {
       await openScreen(page, screens.find(screen => screen.name === 'devices')!, theme);
-      await page.getByRole('button', { name: 'Ghost별 알림' }).click();
-      await expect(page.getByRole('dialog')).toBeVisible();
-      const bounds = await page.getByRole('dialog').boundingBox();
-      expect(bounds?.x).toBe(0);
-      expect(bounds?.width).toBe(390);
-      await expect(page.getByRole('textbox', { name: 'Ghost 검색' })).toBeVisible();
-      const search = page.getByRole('textbox', { name: 'Ghost 검색' });
+      const disclosure = page.getByRole('button', { name: 'Ghost별 알림', exact: true });
+      const roster = page.getByRole('region', { name: 'Ghost별 알림', exact: true });
+      await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+      await disclosure.tap();
+      await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+      await expect(roster).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      const row = (await disclosure.boundingBox())!;
+      const bounds = (await roster.boundingBox())!;
+      expect(bounds.y).toBeGreaterThanOrEqual(row.y + row.height - 1);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+      const search = roster.getByRole('textbox', { name: 'Ghost 검색' });
+      await disclosure.press('Tab');
       await expect(search).toBeFocused();
-      await expect(page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true })).toHaveCount(1);
-      await expect(page.locator('.ghost-sheet-handle')).toHaveAttribute('aria-hidden', 'true');
-      expect(await page.locator('.ghost-sheet-handle').evaluate(element => (element as HTMLElement).tabIndex)).toBe(-1);
+      await search.fill('없는 Ghost');
+      await expect(roster.getByText('검색 결과 없음')).toBeVisible();
+      await search.fill('');
       await search.press('Enter');
       await expect(search).not.toBeFocused();
-      const mutedRow = page.locator('.device-ghost-list').getByRole('button', { name: '기록가', exact: true });
-      await mutedRow.click();
+      const mutedRow = roster.getByRole('button', { name: '기록가', exact: true });
+      const write = page.waitForRequest(request => request.url().endsWith('/api/commands') && request.postDataJSON()?.command?.type === 'device.alerts_update');
+      await mutedRow.tap();
+      expect((await write).postDataJSON().command.alerts.mutedGhostIds).toContain(readRunState().scribeGhostId);
       await expect(mutedRow).toHaveAttribute('aria-pressed', 'false');
       await expect(mutedRow.locator('.dot-avatar')).toHaveCSS('opacity', '0.4');
       await expect(mutedRow.locator('.lucide-bell-off')).toBeVisible();
-      await screenshot(page, `ghost-alerts-sheet-${theme}-iphone.png`);
-      await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
-      await expect(page.getByRole('dialog')).not.toBeVisible();
+      await expect(disclosure).toHaveAccessibleDescription('1 끔');
+      await screenshot(page, `ghost-alerts-inline-${theme}-iphone.png`);
+      await disclosure.tap();
+      await expect(roster).not.toBeVisible();
+      await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
     });
     test('conversation and touch composer', async ({ page }) => {
       await openScreen(page, { name: 'conversation', route: state => `/ghosts/${state.defaultGhostId}`, waits: () => ['맡긴 일에서 볼 수 있어요'], prepare: mockIPhone }, theme);

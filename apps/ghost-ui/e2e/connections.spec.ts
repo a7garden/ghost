@@ -21,7 +21,7 @@ const isMessageSend = (post: Posted): post is Posted & { command: Extract<Comman
   post.command.type === 'message.send';
 
 /**
- * Client journeys against an isolated real Host: the address-first mail dialog,
+ * Client journeys against an isolated real Host: the address-first mail row,
  * per-service connected state, one-click Mac sign-ins, API grants, PR-source
  * exclusion and validation retention. Gitea uses a real local authentication
  * endpoint; the Host's `/api/connect/*` routes are stubbed with `page.route`
@@ -93,7 +93,8 @@ async function openService(page: Page, query: string, serviceName: string): Prom
   const tile = page.locator('.service-tile', { hasText: serviceName });
   await expect(tile).toHaveCount(1);
   await tile.getByRole('button', { name: new RegExp(`${serviceName} (연결|계정 추가)`) }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('region', { name: `${serviceName} 연결`, exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 }
 
 /** The Host's mail discovery, stubbed per domain: known providers, and one domain it cannot resolve. */
@@ -106,7 +107,7 @@ const mailDiscovery = (email: string): MailDiscovery => {
   return { email, domain, provider: null, imap: null, smtp: null, auth: 'password', setupUrl: null, note: null, source: 'none', ...(known[domain] ?? {}) };
 };
 
-/** GET /api/connect/mail, stubbed; returns the addresses the dialog asked about. */
+/** GET /api/connect/mail, stubbed; returns the addresses the setup row asked about. */
 function interceptMailDiscovery(page: Page): string[] {
   const asked: string[] = [];
   void page.route('**/api/connect/mail*', async route => {
@@ -187,28 +188,28 @@ test('mail connects by address; host-resolved servers stay hidden until they are
   const posts = interceptAuthTests(page);
   const asked = interceptMailDiscovery(page);
 
-  // The single address entry at the top of the page opens the same dialog a tile opens.
+  // The account starts in its address row and resolves without a second input.
   const gmailAddress = 'owner@gmail.com';
   const gmailSecret = 'e2e-gmail-app-password-1';
-  await page.getByRole('textbox', { name: '이메일 주소로 연결', exact: true }).fill(gmailAddress);
-  await page.getByRole('button', { name: '계속', exact: true }).click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('textbox', { name: '이메일 주소', exact: true })).toHaveValue(gmailAddress);
-
-  // Debounced discovery resolves the provider quietly; servers are never asked up front.
-  await expect(dialog.locator('.mail-provider')).toHaveText(/Gmail/);
-  expect(asked).toContain(gmailAddress);
-  await expect(dialog.getByRole('button', { name: '서버 설정', exact: true })).toHaveAttribute('aria-expanded', 'false');
-  await expect(dialog.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toHaveCount(0);
-  await expect(dialog.getByRole('link', { name: /앱 비밀번호 발급/ })).toHaveAttribute('href', 'https://myaccount.google.com/apppasswords');
-  await expect(dialog.getByText('2단계 인증을 먼저 켜야 합니다.')).toBeVisible();
-
-  const secret = dialog.getByLabel('앱 비밀번호', { exact: true });
-  await expect(secret).toHaveAttribute('type', 'password');
-  await secret.fill(gmailSecret);
-  await dialog.getByRole('button', { name: '연결', exact: true }).click();
+  const addressRow = page.getByRole('region', { name: '이메일 주소로 연결', exact: true });
+  const address = addressRow.getByRole('textbox', { name: '이메일 주소로 연결', exact: true });
+  await address.fill(gmailAddress);
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(address).toHaveValue(gmailAddress);
+  await expect(addressRow.locator('.mail-provider')).toHaveText(/Gmail/);
+  expect(asked).toContain(gmailAddress);
+  await expect(addressRow.getByRole('button', { name: '서버 설정', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(addressRow.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toHaveCount(0);
+  await expect(addressRow.getByRole('link', { name: /앱 비밀번호 발급/ })).toHaveAttribute('href', 'https://myaccount.google.com/apppasswords');
+  await expect(addressRow.getByText('2단계 인증을 먼저 켜야 합니다.')).toBeVisible();
+
+  const secret = addressRow.getByLabel('앱 비밀번호', { exact: true });
+  await expect(secret).toHaveAttribute('type', 'password');
+  await address.press('Enter');
+  await expect(secret).toBeFocused();
+  await secret.fill(gmailSecret);
+  await addressRow.getByRole('button', { name: '연결하고 확인', exact: true }).click();
+  await expect(address).toHaveValue('');
 
   // The saved command carries the discovered servers verbatim plus the typed secret.
   const gmailUpserts = posts.filter(isMailUpsert).filter(post => post.command.config.username === gmailAddress);
@@ -226,31 +227,31 @@ test('mail connects by address; host-resolved servers stay hidden until they are
   await expect(gmailTile.locator('.service-state')).toHaveText('연결됨');
   await expect(gmailTile.getByRole('button', { name: 'Gmail 계정 추가', exact: true })).toBeVisible();
 
-  // A provider tile seeds the dialog: only the local part is left to type.
+  // A provider tile seeds its own row: only the local part is left to type.
   await gmailTile.getByRole('button', { name: 'Gmail 계정 추가', exact: true }).click();
-  const seeded = page.getByRole('dialog');
+  const seeded = page.getByRole('region', { name: '이메일 연결', exact: true });
   const seededAddress = seeded.getByRole('textbox', { name: '이메일 주소', exact: true });
   await expect(seededAddress).toHaveAttribute('placeholder', '이름@gmail.com');
   await seededAddress.fill('second');
   await expect(seeded.locator('.mail-provider')).toHaveText(/second@gmail.com/);
   await seeded.getByLabel('앱 비밀번호', { exact: true }).fill('e2e-gmail-app-password-2');
-  await seeded.getByRole('button', { name: '연결', exact: true }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await seeded.getByRole('button', { name: '연결하고 확인', exact: true }).click();
+  await expect(seeded).toHaveCount(0);
   await waitForConnection(page, 'Gmail · second@gmail.com');
   await expect(gmailTile.locator('.service-state')).toHaveText('연결됨 2');
 
   // An address the Host cannot resolve opens the server disclosure by itself.
-  await page.getByRole('textbox', { name: '이메일 주소로 연결', exact: true }).fill('me@selfhost.test');
-  await page.getByRole('button', { name: '계속', exact: true }).click();
-  const selfDialog = page.getByRole('dialog');
-  await expect(selfDialog.getByRole('button', { name: '서버 설정', exact: true })).toHaveAttribute('aria-expanded', 'true');
-  await expect(selfDialog.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toHaveValue('');
-  await selfDialog.getByRole('textbox', { name: 'IMAP 서버', exact: true }).fill('imap.selfhost.test');
-  const selfSecret = selfDialog.getByLabel('비밀번호', { exact: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await address.fill('me@selfhost.test');
+  await expect(addressRow.getByRole('button', { name: '서버 설정', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(addressRow.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toHaveValue('');
+  await expect.poll(() => addressRow.evaluate(row => row.scrollWidth <= row.clientWidth)).toBe(true);
+  await addressRow.getByRole('textbox', { name: 'IMAP 서버', exact: true }).fill('imap.selfhost.test');
+  const selfSecret = addressRow.getByLabel('비밀번호', { exact: true });
   await expect(selfSecret).toHaveAttribute('type', 'password');
   await selfSecret.fill('e2e-self-password-3');
-  await selfDialog.getByRole('button', { name: '연결', exact: true }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await addressRow.getByRole('button', { name: '연결하고 확인', exact: true }).click();
+  await expect(address).toHaveValue('');
   const selfUpserts = posts.filter(isMailUpsert).filter(post => post.command.config.username === 'me@selfhost.test');
   expect(selfUpserts).toHaveLength(1);
   expect(selfUpserts[0]!.command).toMatchObject({
@@ -269,7 +270,6 @@ test('mail connects by address; host-resolved servers stay hidden until they are
   await expect(gmailTile.locator('img[src="/service-icons/gmail.svg"]')).toBeVisible();
   await expect(gmailAccount.locator('.connection-tile__identity h3')).toHaveText(`Gmail · ${gmailAddress}`);
   await expect(gmailAccount.locator('.connection-tile__identity p')).toHaveCount(0);
-  await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await expect.poll(() => gmailAccount.evaluate(row => row.scrollWidth <= row.clientWidth)).toBe(true);
 });
@@ -278,23 +278,30 @@ test('an oauth mail domain offers login only, with the address as the username',
   const run = readRunState();
   await page.goto(`${run.baseUrl}/#/settings?tab=connections`);
   interceptMailDiscovery(page);
-  await page.route('**/api/connection-oauth/outlook', async route => route.fulfill({
-    status: 200, contentType: 'application/json',
-    body: JSON.stringify({ serviceId: 'outlook', configured: true, clientId: 'e2e-client', redirectUri: 'https://host.test/callback', state: 'idle', authorizationUrl: null, connectionId: null, message: null }),
-  }));
+  let requestedUsername: string | undefined;
+  await page.route('**/api/connection-oauth/outlook', async route => {
+    if (route.request().method() === 'POST') requestedUsername = route.request().postDataJSON().username;
+    const state = requestedUsername ? 'pending' : 'idle';
+    return route.fulfill({ json: {
+      serviceId: 'outlook', configured: true, clientId: 'e2e-client', redirectUri: 'https://host.test/callback',
+      state, authorizationUrl: state === 'pending' ? 'https://login.microsoftonline.com/test' : null, connectionId: null, message: null,
+    } });
+  });
 
   const outlookTile = page.locator('.service-tile', { hasText: 'Outlook' });
   await outlookTile.getByRole('button', { name: 'Outlook 연결', exact: true }).click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByRole('textbox', { name: '이메일 주소', exact: true }).fill('me@outlook.com');
-  await expect(dialog.locator('.mail-provider')).toHaveText(/Outlook/);
+  const setup = page.getByRole('region', { name: '이메일 연결', exact: true });
+  await setup.getByRole('textbox', { name: '이메일 주소', exact: true }).fill('me@outlook.com');
+  await expect(setup.locator('.mail-provider')).toHaveText(/Outlook/);
 
-  // Login only: no app-password field, no manual server form, no manual submit.
-  await expect(dialog.getByLabel('앱 비밀번호', { exact: true })).toHaveCount(0);
-  await expect(dialog.getByRole('button', { name: '서버 설정', exact: true })).toHaveCount(0);
-  await expect(dialog.getByRole('button', { name: '연결', exact: true })).toHaveCount(0);
-  await expect(dialog.getByRole('textbox', { name: '메일 주소', exact: true })).toHaveValue('me@outlook.com');
-  await expect(dialog.getByRole('button', { name: 'Outlook 로그인', exact: true })).toBeVisible();
+  // One address, login only, and the handoff stays under the Outlook tile.
+  await expect(setup.getByLabel('앱 비밀번호', { exact: true })).toHaveCount(0);
+  await expect(setup.getByRole('button', { name: '서버 설정', exact: true })).toHaveCount(0);
+  await expect(setup.getByRole('button', { name: '연결하고 확인', exact: true })).toHaveCount(0);
+  await setup.getByRole('button', { name: 'Outlook 로그인', exact: true }).click();
+  await expect(setup.getByRole('link', { name: 'Outlook에서 로그인' })).toBeVisible();
+  expect(requestedUsername).toBe('me@outlook.com');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
 test('a github account already signed in on this mac connects with one click', async ({ page }) => {
@@ -323,13 +330,13 @@ test('gitea authentication test succeeds and fails against the real endpoint', a
   try {
     await page.goto(`${run.baseUrl}/#/settings?tab=connections`);
     await openService(page, 'gitea', 'Gitea');
-    const dialog = page.getByRole('dialog');
-    await expect(dialog.getByRole('textbox', { name: '서버 주소', exact: true })).toBeVisible();
-    await dialog.getByRole('textbox', { name: '이름', exact: true }).fill('CI 저장소 성공');
-    await dialog.getByRole('textbox', { name: '서버 주소', exact: true }).fill(`http://127.0.0.1:${port}`);
-    await dialog.getByLabel('접근 토큰', { exact: true }).fill(okToken);
-    await dialog.getByRole('button', { name: '연결', exact: true }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const setup = page.getByRole('region', { name: 'Gitea 연결', exact: true });
+    await expect(setup.getByRole('textbox', { name: '서버 주소', exact: true })).toBeVisible();
+    await setup.getByRole('textbox', { name: '이름', exact: true }).fill('CI 저장소 성공');
+    await setup.getByRole('textbox', { name: '서버 주소', exact: true }).fill(`http://127.0.0.1:${port}`);
+    await setup.getByLabel('접근 토큰', { exact: true }).fill(okToken);
+    await setup.getByRole('button', { name: '연결하고 확인', exact: true }).click();
+    await expect(setup).toHaveCount(0);
 
     // The host itself probed the endpoint with the gitea token prefix preset.
     const okTile = page.locator('.connection-account', { hasText: 'CI 저장소 성공' });
@@ -341,12 +348,11 @@ test('gitea authentication test succeeds and fails against the real endpoint', a
 
     // A rejected token surfaces as a failed account test under its service.
     await openService(page, 'gitea', 'Gitea');
-    const badDialog = page.getByRole('dialog');
-    await badDialog.getByRole('textbox', { name: '이름', exact: true }).fill('CI 저장소 실패');
-    await badDialog.getByRole('textbox', { name: '서버 주소', exact: true }).fill(`http://127.0.0.1:${port}`);
-    await badDialog.getByLabel('접근 토큰', { exact: true }).fill(badToken);
-    await badDialog.getByRole('button', { name: '연결', exact: true }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await setup.getByRole('textbox', { name: '이름', exact: true }).fill('CI 저장소 실패');
+    await setup.getByRole('textbox', { name: '서버 주소', exact: true }).fill(`http://127.0.0.1:${port}`);
+    await setup.getByLabel('접근 토큰', { exact: true }).fill(badToken);
+    await setup.getByRole('button', { name: '연결하고 확인', exact: true }).click();
+    await expect(setup).toHaveCount(0);
     const badTile = page.locator('.connection-account', { hasText: 'CI 저장소 실패' });
     await expect(badTile.locator('.connection-tile__status')).toHaveAttribute('data-phase', 'error');
     expect(apiRequests.some(request => request.authorization === `token ${badToken}`)).toBe(true);
@@ -354,12 +360,12 @@ test('gitea authentication test succeeds and fails against the real endpoint', a
 
     // Editing again never refills the stored secret.
     await okTile.getByRole('button', { name: 'CI 저장소 성공 편집', exact: true }).click();
-    const editDialog = page.getByRole('dialog');
-    await expect(editDialog.getByLabel('접근 토큰', { exact: true })).toHaveValue('');
-    await expect(editDialog.getByRole('textbox', { name: '서버 주소', exact: true })).toHaveValue(`http://127.0.0.1:${port}/api/v1`);
-    await expect(editDialog.getByRole('checkbox', { name: '저장된 인증 정보 삭제', exact: true })).toBeVisible();
-    await editDialog.getByRole('button', { name: '취소', exact: true }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const edit = okTile.getByRole('region', { name: 'CI 저장소 성공 편집', exact: true });
+    await expect(edit.getByLabel('접근 토큰', { exact: true })).toHaveValue('');
+    await expect(edit.getByRole('textbox', { name: '서버 주소', exact: true })).toHaveValue(`http://127.0.0.1:${port}/api/v1`);
+    await expect(edit.getByRole('checkbox', { name: '저장된 인증 정보 삭제', exact: true })).toBeVisible();
+    await edit.getByRole('button', { name: '취소', exact: true }).click();
+    await expect(edit).toHaveCount(0);
 
     const state = await stateSnapshot(page);
     expect(JSON.stringify(state)).not.toContain(okToken);
@@ -374,25 +380,25 @@ test('notion api defaults, explicit ghost grants, and pull-request activity excl
   const posts = interceptAuthTests(page);
   await page.goto(`${run.baseUrl}/#/settings?tab=connections`);
   await openService(page, 'notion', 'Notion');
-  const dialog = page.getByRole('dialog');
-  // Login is offered first; switch to the token form without exercising the login panel.
-  await expect(dialog.getByRole('button', { name: '로그인', exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: '키로 직접 연결', exact: true }).click();
+  const setup = page.getByRole('region', { name: 'Notion 연결', exact: true });
+  // Login is offered first; switch to the token form without exercising OAuth.
+  await expect(setup.getByRole('radio', { name: '로그인', exact: true })).toBeChecked();
+  await setup.getByRole('radio', { name: '키로 직접 연결', exact: true }).click();
 
   const notionSecret = 'e2e-notion-integration-token-3';
-  await dialog.getByLabel('개인 접근 토큰 또는 통합 토큰', { exact: true }).fill(notionSecret);
-  await dialog.getByRole('checkbox', { name: '기록가', exact: true }).check();
-  const advanced = dialog.getByRole('button', { name: '고급 설정', exact: true });
+  await setup.getByLabel('개인 접근 토큰 또는 통합 토큰', { exact: true }).fill(notionSecret);
+  await setup.getByRole('checkbox', { name: '기록가', exact: true }).check();
+  const advanced = setup.getByRole('button', { name: '고급 설정', exact: true });
   await expect(advanced).toHaveAttribute('aria-expanded', 'false');
   await advanced.click();
-  await expect(dialog.getByRole('textbox', { name: 'API 주소', exact: true })).toHaveValue('https://api.notion.com/v1/');
-  await expect(dialog.getByRole('textbox', { name: '계정 확인 API 경로', exact: true })).toHaveValue('users/me');
-  await expect(dialog.getByRole('textbox', { name: '인증 헤더', exact: true })).toHaveValue('Authorization');
-  await expect(dialog.getByRole('textbox', { name: '인증 접두어', exact: true })).toHaveValue('Bearer');
-  await expect(dialog.getByRole('textbox', { name: '추가 헤더 (JSON)', exact: true })).toHaveValue(/"Notion-Version"/);
+  await expect(setup.getByRole('textbox', { name: 'API 주소', exact: true })).toHaveValue('https://api.notion.com/v1/');
+  await expect(setup.getByRole('textbox', { name: '계정 확인 API 경로', exact: true })).toHaveValue('users/me');
+  await expect(setup.getByRole('textbox', { name: '인증 헤더', exact: true })).toHaveValue('Authorization');
+  await expect(setup.getByRole('textbox', { name: '인증 접두어', exact: true })).toHaveValue('Bearer');
+  await expect(setup.getByRole('textbox', { name: '추가 헤더 (JSON)', exact: true })).toHaveValue(/"Notion-Version"/);
 
-  await dialog.getByRole('button', { name: '연결', exact: true }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await setup.getByRole('button', { name: '연결하고 확인', exact: true }).click();
+  await expect(setup).toHaveCount(0);
   await expect(page.locator('.connection-account', { hasText: 'Notion' }).locator('.connection-tile__status')).toHaveAttribute('data-phase', 'ok');
 
   const notionUpserts = posts.filter(isUpsert);
@@ -411,17 +417,15 @@ test('notion api defaults, explicit ghost grants, and pull-request activity excl
   // An api-kind account is not a pull-request activity account; mail is neither.
   await page.getByRole('tab', { name: '자동 활동', exact: true }).click();
   await page.getByRole('button', { name: '활동 만들기', exact: true }).click();
-  const activityDialog = page.getByRole('dialog');
-  await expect(activityDialog).toBeVisible();
-  await activityDialog.getByRole('radio', { name: 'PR', exact: true }).click();
-  await activityDialog.getByRole('combobox', { name: '연결 계정', exact: true }).click();
-  const options = page.getByRole('option');
+  const activity = page.getByRole('form', { name: '활동 만들기', exact: true });
+  await expect(activity).toBeVisible();
+  await activity.getByRole('combobox', { name: '활동 소스', exact: true }).selectOption('pull_request');
+  const options = activity.getByRole('combobox', { name: '연결 계정', exact: true }).locator('option');
   await expect(options.filter({ hasText: 'PR 후보' })).toHaveCount(1);
-  await expect(page.getByRole('option', { name: 'Notion', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('option', { name: /Gmail/ })).toHaveCount(0);
-  await page.keyboard.press('Escape');
-  await activityDialog.getByRole('button', { name: '취소', exact: true }).click();
-  await expect(activityDialog).toHaveCount(0);
+  await expect(options.filter({ hasText: 'Notion' })).toHaveCount(0);
+  await expect(options.filter({ hasText: 'Gmail' })).toHaveCount(0);
+  await activity.getByRole('button', { name: '취소', exact: true }).click();
+  await expect(activity).toHaveCount(0);
 });
 
 test('server validation failure keeps typed values and a fresh form starts without the secret', async ({ page }) => {
@@ -438,44 +442,44 @@ test('server validation failure keeps typed values and a fresh form starts witho
   await page.getByRole('textbox', { name: '서비스 검색', exact: true }).fill('존재하지 않는 서비스 zzz');
   await expect(page.locator('.service-tile')).toHaveCount(0);
   await page.getByRole('button', { name: '다른 서비스 연결', exact: true }).click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible();
-  // The custom service form starts with its advanced protocol section open.
-  await expect(dialog.getByRole('button', { name: '고급 설정', exact: true })).toHaveAttribute('aria-expanded', 'true');
-  await expect(dialog.getByRole('textbox', { name: '계정 확인 API 경로', exact: true })).toBeVisible();
+  const setup = page.getByRole('region', { name: '다른 서비스 연결', exact: true });
+  await expect(setup).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  // The custom service starts with its advanced protocol section open.
+  await expect(setup.getByRole('button', { name: '고급 설정', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(setup.getByRole('textbox', { name: '계정 확인 API 경로', exact: true })).toBeVisible();
 
   const badUrl = 'https://wiki.example.com/api?probe=1';
   const customSecret = 'e2e-custom-api-key-4';
-  await dialog.getByRole('textbox', { name: '이름', exact: true }).fill('팀 위키');
-  await dialog.getByRole('textbox', { name: 'API 주소', exact: true }).fill(badUrl);
-  await dialog.getByRole('textbox', { name: '계정 확인 API 경로', exact: true }).fill('me');
-  await dialog.getByLabel('API 키', { exact: true }).fill(customSecret);
+  await setup.getByRole('textbox', { name: '이름', exact: true }).fill('팀 위키');
+  await setup.getByRole('textbox', { name: 'API 주소', exact: true }).fill(badUrl);
+  await setup.getByRole('textbox', { name: '계정 확인 API 경로', exact: true }).fill('me');
+  await setup.getByLabel('API 키', { exact: true }).fill(customSecret);
 
   // The host rejects the URL shape the form alone accepts.
-  await dialog.getByRole('button', { name: '연결', exact: true }).click();
-  await expect(dialog.getByRole('alert')).toBeVisible();
+  await setup.getByRole('button', { name: '연결하고 확인', exact: true }).click();
+  await expect(setup.getByRole('alert')).toBeVisible();
   expect(upsertStatuses).toContain(400);
-  await expect(dialog.getByRole('textbox', { name: '이름', exact: true })).toHaveValue('팀 위키');
-  await expect(dialog.getByRole('textbox', { name: 'API 주소', exact: true })).toHaveValue(badUrl);
-  await expect(dialog.getByRole('textbox', { name: '계정 확인 API 경로', exact: true })).toHaveValue('me');
-  await expect(dialog.getByLabel('API 키', { exact: true })).toHaveValue(customSecret);
+  await expect(setup.getByRole('textbox', { name: '이름', exact: true })).toHaveValue('팀 위키');
+  await expect(setup.getByRole('textbox', { name: 'API 주소', exact: true })).toHaveValue(badUrl);
+  await expect(setup.getByRole('textbox', { name: '계정 확인 API 경로', exact: true })).toHaveValue('me');
+  await expect(setup.getByLabel('API 키', { exact: true })).toHaveValue(customSecret);
 
   // Retrying without an edit must neither duplicate nor silently succeed.
-  await dialog.getByRole('button', { name: '연결', exact: true }).click();
-  await expect(dialog.getByRole('alert')).toBeVisible();
+  await setup.getByRole('button', { name: '연결하고 확인', exact: true }).click();
+  await expect(setup.getByRole('alert')).toBeVisible();
   await expect.poll(() => upsertStatuses.length).toBe(2);
   expect(upsertStatuses.every(status => status >= 400)).toBe(true);
   expect(JSON.stringify(await stateSnapshot(page))).not.toContain(customSecret);
 
-  await dialog.getByRole('button', { name: '취소', exact: true }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await setup.getByRole('button', { name: '취소', exact: true }).click();
+  await expect(setup).toHaveCount(0);
   // A reopened form starts fresh; the secret is never refilled.
-  await page.getByRole('button', { name: 'Ghost에게 연결 맡기기', exact: true }).click();
-  const reopened = page.getByRole('dialog');
-  await expect(reopened.getByRole('textbox', { name: '이름', exact: true })).toHaveValue('다른 서비스');
-  await expect(reopened.getByLabel('API 키', { exact: true })).toHaveValue('');
-  await reopened.getByRole('button', { name: '취소', exact: true }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: '다른 서비스 연결', exact: true }).click();
+  await expect(setup.getByRole('textbox', { name: '이름', exact: true })).toHaveValue('다른 서비스');
+  await expect(setup.getByLabel('API 키', { exact: true })).toHaveValue('');
+  await setup.getByRole('textbox', { name: '이름', exact: true }).press('Escape');
+  await expect(setup).toHaveCount(0);
 });
 
 test('ghost assist targets the main direct conversation and navigates to it at the client boundary', async ({ page }) => {
@@ -491,13 +495,15 @@ test('ghost assist targets the main direct conversation and navigates to it at t
     return route.continue();
   });
   await page.goto(`${run.baseUrl}/#/settings?tab=connections`);
-  await page.getByRole('button', { name: 'Ghost에게 연결 맡기기', exact: true }).click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible();
-
+  await page.getByRole('button', { name: '다른 서비스 연결', exact: true }).click();
+  const setup = page.getByRole('region', { name: '다른 서비스 연결', exact: true });
+  const apiKey = 'test-only-must-not-reach-chat';
+  await setup.getByLabel('API 키', { exact: true }).fill(apiKey);
+  await setup.getByRole('radio', { name: /에게 말하기$/ }).click();
+  await expect(setup.getByLabel('API 키', { exact: true })).toHaveCount(0);
   const ownerName = '팀 위키 도구';
-  await dialog.getByRole('textbox', { name: '이름', exact: true }).fill(ownerName);
-  await dialog.getByRole('button', { name: 'Ghost에게 연결 맡기기', exact: true }).click();
+  await setup.getByRole('textbox', { name: /에게 말하기$/ }).fill(ownerName);
+  await setup.getByRole('button', { name: '연결 요청 보내기', exact: true }).click();
 
   await expect(page).toHaveURL(new RegExp(`#/ghosts/${run.defaultGhostId}`));
   const main = (await stateSnapshot(page)).ghosts.find(ghost => ghost.isDefault);
@@ -505,4 +511,5 @@ test('ghost assist targets the main direct conversation and navigates to it at t
   expect(admissions).toHaveLength(1);
   expect(admissions[0]!.command).toMatchObject({ type: 'message.send', conversationId: main?.directConversationId });
   expect(admissions[0]!.command.text).toContain(ownerName);
+  expect(admissions[0]!.command.text).not.toContain(apiKey);
 });

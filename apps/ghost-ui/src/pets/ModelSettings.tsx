@@ -1,17 +1,16 @@
-import { useEffect, useState } from 'react';
-import { Check, ChevronRight, Download, KeyRound, LogIn, ShieldOff, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Check, ChevronRight, Download, KeyRound, LogIn, ShieldOff, Trash2 } from 'lucide-react';
 import { Button, SettingsGroup, SettingsRow, InlineError, SelectField, Badge, SegmentedControl, Switch } from '../ui';
 import type { LocalAuthResult, LocalAuthSource, Provider, ProviderPreset, Thinking } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
-import { ChatGptLoginDialog } from './ChatGptLogin';
-import { LocalAuthImportDialog } from './LocalAuthImport';
+import { ChatGptLogin } from './ChatGptLogin';
+import { LocalAuthImport } from './LocalAuthImport';
 import { NO_MODEL, modelFromKey, modelSelectOptions } from './ModelPicker';
-import { ProviderEditor } from './ProviderEditor';
+import { ProviderEditor, type ProviderSave } from './ProviderEditor';
 import { ProviderQuotaGroup } from './ProviderQuota';
 import { FallbackSteps, editFallbacks, type FallbackAction } from '../features/fallbacks';
-import type { ProviderSave } from './ProviderEditor';
 import { oauthName, OAUTH_KINDS } from '../uiText';
 
 export function ModelSettings() {
@@ -25,7 +24,28 @@ export function ModelSettings() {
   const [login, setLogin] = useState<Provider>();
   const [importAuth, setImportAuth] = useState(false);
   const [pending, setPending] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const [savedProvider, setSavedProvider] = useState<{ id: string; message: string }>();
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const savedRow = useRef<HTMLDivElement>(null);
+  const focusAfterSave = useRef(false);
   const options = modelSelectOptions(settings);
+  const providerIds = settings?.providers.map(provider => provider.id) ?? [];
+  const adding = !!editor && !editor.initial;
+
+  useEffect(() => {
+    if (!focusAfterSave.current || !savedRow.current || login) return;
+    focusAfterSave.current = false;
+    savedRow.current.focus();
+  }, [savedProvider, settings?.providers, login]);
+
+  const closeSetup = () => {
+    setEditor(undefined); setLogin(undefined); setImportAuth(false);
+    requestAnimationFrame(() => returnFocus.current?.focus());
+  };
+  const beginSetup = (trigger: HTMLElement) => {
+    returnFocus.current = trigger;
+    setError(''); setNotice('');
+  };
 
   useEffect(() => {
     let alive = true;
@@ -58,29 +78,39 @@ export function ModelSettings() {
   const fallbackCommand = (action: FallbackAction) =>
     void run('fallbacks', () => client.send({ type: 'settings.update', defaultFallbacks: editFallbacks(settings?.defaultFallbacks ?? [], action) }), '기본 대체 모델을 저장했습니다.');
   const saveProvider = async ({ draft, apiKey, login: startLogin }: ProviderSave) => {
-    await client.send({ type: 'provider.upsert', id: draft.id, kind: draft.kind, name: draft.name, baseUrl: draft.baseUrl, models: draft.models,
-      ...(apiKey === undefined ? {} : { apiKey }),
-    });
-    setEditor(undefined);
-    setNotice(`${draft.name} 설정을 저장했습니다.${settings?.defaultModel ? '' : ' 아래에서 기본 모델을 선택해 주세요.'}`);
-    if (startLogin) setLogin({ ...draft, hasCredential: false });
+    setPending('provider');
+    try {
+      await client.send({ type: 'provider.upsert', id: draft.id, kind: draft.kind, name: draft.name, baseUrl: draft.baseUrl, models: draft.models,
+        ...(apiKey === undefined ? {} : { apiKey }),
+      });
+      setEditor(undefined);
+      focusAfterSave.current = true;
+      setSavedProvider({ id: draft.id, message: '설정 저장됨' });
+      if (startLogin) setLogin({ ...draft, hasCredential: false });
+    } finally { setPending(''); }
   };
-  const authImported = (_result: LocalAuthResult, source: LocalAuthSource) => {
+  const authImported = (result: LocalAuthResult, source: LocalAuthSource) => {
     setImportAuth(false);
-    setNotice(`${source.agentName}에서 ${source.target.name} 인증 정보를 가져왔습니다.${settings?.defaultModel ? '' : ' 아래에서 기본 모델을 선택해 주세요.'}`);
+    focusAfterSave.current = true;
+    setSavedProvider({ id: result.providerId, message: `${source.agentName}에서 인증 정보를 가져왔습니다.` });
   };
 
   return <section className="flex min-w-0 flex-col gap-6" aria-label="모델 설정">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 className="section-title">제공자</h2>
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" type="button" disabled={pending !== '' || !settings} onClick={() => { setError(''); setNotice(''); setImportAuth(true); }}><Download size={15}/>다른 에이전트에서 가져오기</Button>
-        <Button variant="add" type="button" disabled={pending !== '' || !settings || catalogLoading || !catalog.length} onClick={() => { setError(''); setEditor({}); }}>{catalogLoading ? '목록 불러오는 중…' : '제공자 추가'}</Button>
+        <Button variant="outline" type="button" aria-expanded={importAuth} disabled={pending !== '' || !settings || !!editor || !!login || importAuth}
+          onClick={event => { beginSetup(event.currentTarget); setImportAuth(true); }}><Download size={15}/>다른 에이전트에서 가져오기</Button>
+        <Button variant="add" type="button" aria-expanded={adding} disabled={pending !== '' || !settings || catalogLoading || !catalog.length || !!editor || !!login || importAuth}
+          onClick={event => { beginSetup(event.currentTarget); setEditor({}); }}>{catalogLoading ? '목록 불러오는 중…' : '제공자 추가'}</Button>
       </div>
     </div>
     {catalogError && <InlineError pending={catalogLoading} onRetry={() => setCatalogAttempt(value => value + 1)} retryLabel="다시 불러오기">{catalogError}</InlineError>}
-    {(settings?.providers.length ?? 0) > 0
-      ? <SettingsGroup title={<span className="sr-only">제공자 목록</span>}>{(settings?.providers ?? []).map(provider => <SettingsRow key={provider.id}
+    {importAuth && <LocalAuthImport onClose={closeSetup} onImported={authImported}/>}
+    {adding && <ProviderEditor presets={catalog} providerIds={providerIds} busy={pending !== ''} onClose={closeSetup} onSave={saveProvider}/>}
+    {(settings?.providers.length ?? 0) > 0 && <SettingsGroup title={<span className="sr-only">제공자 목록</span>}>
+      {settings!.providers.map(provider => <div key={provider.id} className="provider-record" tabIndex={-1} ref={provider.id === savedProvider?.id ? savedRow : undefined}>
+      <SettingsRow
         label={<span className="flex min-w-0 flex-wrap items-center gap-2 text-ui font-semibold text-ink [overflow-wrap:anywhere]">{provider.name}
           {provider.hasCredential
             ? <Badge variant="outline"><KeyRound aria-hidden="true"/>{provider.authType === 'oauth' ? `${oauthName(provider.kind)} 인증 저장됨` : 'API 키 저장됨'}</Badge>
@@ -88,15 +118,26 @@ export function ModelSettings() {
         </span>}
         description={<>
           {provider.models.length ? `${provider.models.slice(0, 2).map(model => model.name || model.id).join(', ')}${provider.models.length > 2 ? ` 외 ${provider.models.length - 2}개` : ''}` : '등록된 모델 없음'}
-          {provider.baseUrl && <span className="mt-0.5 block">{provider.baseUrl}</span>}
+          {provider.baseUrl && <span className="mt-0.5 block [overflow-wrap:anywhere]">{provider.baseUrl}</span>}
+          {provider.id === savedProvider?.id && login?.id !== provider.id && <span className="mt-0.5 block text-success" role="status">{savedProvider.message}</span>}
         </>}>
         <span className="flex flex-wrap items-center gap-1">
-          {OAUTH_KINDS.has(provider.kind) && !provider.baseUrl && (!provider.hasCredential || provider.authType === 'oauth') && <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} ${oauthName(provider.kind)}로 로그인`} onClick={() => { setError(''); setLogin(provider); }}><LogIn size={14}/>{provider.authType === 'oauth' ? '다시 로그인' : `${oauthName(provider.kind)} 로그인`}</Button>}
-          <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} 설정`} onClick={() => { setError(''); setEditor({ initial: provider }); }}>설정<ChevronRight size={14}/></Button>
-          <Button variant="ghost" size="icon" type="button" aria-label={`${provider.name} 제공자 삭제`} disabled={pending !== ''} onClick={() => { setError(''); setRemove(provider); }}><Trash2 size={15}/></Button>
+          {OAUTH_KINDS.has(provider.kind) && !provider.baseUrl && (!provider.hasCredential || provider.authType === 'oauth') && <Button variant="ghost" size="sm" type="button"
+            disabled={pending !== '' || !!editor || !!login || importAuth} aria-expanded={login?.id === provider.id}
+            aria-label={`${provider.name} ${oauthName(provider.kind)}로 로그인`} onClick={event => { beginSetup(event.currentTarget); setLogin(provider); }}><LogIn size={14}/>{provider.authType === 'oauth' ? '다시 로그인' : `${oauthName(provider.kind)} 로그인`}</Button>}
+          <Button variant="ghost" size="sm" type="button" disabled={pending !== '' || !!login || importAuth || (!!editor && editor.initial?.id !== provider.id)}
+            aria-expanded={editor?.initial?.id === provider.id} aria-label={`${provider.name} 설정`}
+            onClick={event => { if (editor?.initial?.id === provider.id) closeSetup(); else { beginSetup(event.currentTarget); setEditor({ initial: provider }); } }}>설정<ChevronRight size={14}/></Button>
+          <Button variant="ghost" size="icon" type="button" aria-label={`${provider.name} 제공자 삭제`} disabled={pending !== '' || !!editor || !!login || importAuth} onClick={() => { setError(''); setRemove(provider); }}><Trash2 size={15}/></Button>
         </span>
-      </SettingsRow>)}</SettingsGroup>
-      : settings && <div className="calm"><Plus size={16} aria-hidden="true"/><p>사용할 제공자를 추가해 주세요</p></div>}
+      </SettingsRow>
+      {editor?.initial?.id === provider.id && <ProviderEditor initial={editor.initial} presets={catalog} providerIds={providerIds}
+        busy={pending !== ''} onClose={closeSetup} onSave={saveProvider}/>}
+      {login?.id === provider.id && <ChatGptLogin provider={login} onClose={closeSetup}/>}
+      </div>)}
+    </SettingsGroup>}
+    {settings && !settings.providers.length && !adding && !importAuth && !catalogLoading && catalog.length > 0 &&
+      <p className="m-0 text-caption text-ink-2">연결된 제공자가 없습니다.</p>}
     {error && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 flex items-start gap-1.5 text-caption text-success" role="status"><Check size={14} className="mt-0.5 flex-none"/>{notice}</p>}
     <ProviderQuotaGroup/>
@@ -133,9 +174,6 @@ export function ModelSettings() {
           disabled={pending !== '' || !settings} onValueChange={key => roleCommand('suggestionModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
       </SettingsRow>}
     </SettingsGroup>
-    {editor && <ProviderEditor initial={editor.initial} presets={catalog} providerIds={settings?.providers.map(provider => provider.id) ?? []} busy={pending !== ''} onClose={() => setEditor(undefined)} onSave={saveProvider}/>}
-    {login && <ChatGptLoginDialog provider={login} onClose={() => setLogin(undefined)}/>}
-    {importAuth && <LocalAuthImportDialog onClose={() => setImportAuth(false)} onImported={authImported}/>}
     {remove && <Modal title="제공자 삭제" onClose={() => pending === '' && setRemove(undefined)}>
       <p className="m-0">{remove.name}의 서버 설정과 저장된 인증 정보를 삭제합니다.</p>
       {error && <div className="mt-3"><InlineError>{error}</InlineError></div>}

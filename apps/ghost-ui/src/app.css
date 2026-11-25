@@ -686,13 +686,6 @@ details.transcript-event[open] { background: var(--ghost-hover); }
 .timeline__result summary { width: fit-content; color: var(--ghost-ink3); font-size: var(--text-micro); cursor: pointer; }
 .timeline__result pre { max-height: 200px; margin: 6px 0 0; overflow: auto; padding: 8px 10px; border-radius: var(--radius-chip); color: var(--ghost-ink2); background: var(--ghost-inset); font: 11px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 
-/* Vault ------------------------------------------------------------------- */
-.vault-gen { display: flex; align-items: center; gap: 8px; }
-.vault-gen input { flex: 1; min-width: 0; }
-.vault-grants { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; padding: 0; border: 0; }
-.vault-grants legend { padding: 0; color: var(--ghost-ink2); font-size: var(--text-ui); font-weight: 550; }
-.vault-grant { display: inline-flex; align-items: center; gap: 7px; color: var(--ghost-ink); font-size: var(--text-ui); cursor: pointer; }
-
 }
 
 /* 근무 중에는 Ghost 가 스스로 일하고 있다는 것이 보이도록 원버튼에 색을 얹고, 퇴근하면 색을 빼 쉬는 상태로 둔다.

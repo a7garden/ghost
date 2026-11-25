@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { VaultItem } from '@ghost/contract';
 import { emptyVaultForm, generatePassword, toggleGhostGrant, vaultFormFromItem, vaultGrantsLabel, vaultRowDetail, vaultWriteBody } from './VaultView';
+import { previewVaultCsv } from './vaultCsvPreview';
 
 const item = (patch: Partial<VaultItem> = {}): VaultItem => ({
   id: 'v1', kind: 'login', title: '예시 로그인', origin: 'https://app.example.com', username: 'owner@example.com',
@@ -194,5 +195,44 @@ describe('vaultRowDetail and vaultGrantsLabel', () => {
     expect(expiryLabel.startsWith('Ghost 권한 없음 · ')).toBe(true);
     expect(expiryLabel.endsWith('에 삭제')).toBe(true);
     expect(expiryLabel).not.toContain('일회용');
+  });
+});
+
+describe('previewVaultCsv', () => {
+  it('previews only identities from quoted Apple Passwords rows', () => {
+    const csv = '\uFEFFTitle,URL,Username,Password,Notes,OTPAuth\r\n'
+      + '"내 ""로그인""",https://EXAMPLE.com/login?token=query-token,"owner,팀","first\r\nsecond ""pass""","private note","private seed"\r\n';
+    expect(previewVaultCsv(csv)).toEqual({
+      rows: [{ record: 1, title: '내 "로그인"', origin: 'https://example.com', username: 'owner,팀' }],
+      omitted: 0,
+    });
+  });
+
+  it('keeps Chrome row order, accepts a blank username and does not expose rejected addresses', () => {
+    const csv = 'name,url,username,password,note\n'
+      + ',https://a.com/path,,password,ignored\n'
+      + 'Rejected,https://owner:secret@b.com/path,owner,password,ignored\n'
+      + 'No password,https://b.com,owner,"",ignored\n\n'
+      + '다음,https://c.com,user,password,';
+    expect(previewVaultCsv(csv)).toEqual({
+      rows: [
+        { record: 1, title: 'https://a.com', origin: 'https://a.com', username: '' },
+        { record: 4, title: '다음', origin: 'https://c.com', username: 'user' },
+      ],
+      omitted: 2,
+    });
+  });
+
+  it.each([
+    'url,username\nhttps://example.com,owner',
+    'url,URL,username,password\nhttps://a.com,https://a.com,u,p',
+    'title,name,url,username,password\nName,Name,https://a.com,u,p',
+    'url,username,password\nhttps://example.com,owner',
+    'url,username,password\nhttps://example.com,owner,"unterminated',
+    'url,username,password\nhttps://example.com,owner,p"ass',
+    'url,username,password\nhttps://example.com,owner,"pass"extra',
+    'url,username,password\nhttps://example.com,owner,pass\0',
+  ])('does not return a partial preview for malformed CSV (%#)', csv => {
+    expect(previewVaultCsv(csv)).toBeNull();
   });
 });

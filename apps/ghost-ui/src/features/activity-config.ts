@@ -1,6 +1,8 @@
 import {
   type Activity,
-  type ActivityConfig,
+  ActivityConfig,
+  validate,
+  type Decision,
   type ActivityPolicy,
   type ActivitySource,
   type ExecutionTarget,
@@ -9,6 +11,14 @@ import {
   type ScheduleSpec,
 } from '@ghost/contract';
 import { fromLocalInput, intervalLabel, toLocalInput } from './Schedules';
+
+/** The Host projects the effect's proposal and policy classification onto the decision. */
+export function pendingActivityConfig(decision: Decision): ActivityConfig | null {
+  if (decision.kind !== 'approve_effect' || decision.state !== 'pending') return null;
+  const policy = decision.proposal?.policy as { classification?: { tool?: unknown } } | undefined;
+  const config = decision.proposal?.config;
+  return policy?.classification?.tool === 'activity_propose' && validate(ActivityConfig, config) ? config : null;
+}
 
 /** A new activity starts on the contract defaults: read-only tools, deny writes, ten runs a day at most. Memory search is intrinsic to every Ghost conversation, not an activity grant. */
 export const DEFAULT_ACTIVITY_TOOLS: readonly GhostTool[] = ['read', 'web_search', 'web_read'];

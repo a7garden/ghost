@@ -1,9 +1,56 @@
 @layer components {
-  /* Address-first mail entry — one input and a continue affordance. */
-  .mail-entry { display: flex; align-items: flex-end; gap: 8px; }
-  .mail-entry__field { display: grid; flex: 1; gap: 6px; min-width: 0; }
-  .mail-entry__field > label { color: var(--ghost-ink2); font-size: var(--text-caption); font-weight: 500; }
-  .mail-entry > button { flex: none; }
+  /* The address is the first line of an account, not a launch form. */
+  .mail-entry {
+    display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 12px;
+    padding: 14px 16px; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-btn);
+  }
+  .mail-entry__icon { margin-top: 16px; }
+  .mail-entry__content, .setup-route__body { display: grid; gap: 12px; min-width: 0; }
+
+  /* Credentials are a branch of their service/account, with a test result at the row. */
+  .setup-route {
+    display: grid; min-width: 0; gap: 12px; padding: 4px 0 4px 14px;
+    border-inline-start: 1px solid var(--ghost-line-strong);
+  }
+  .service-setup { margin: 4px 16px 14px 60px; }
+  .connection-account > .setup-route { grid-area: setup; margin: 8px 0 4px; }
+  .setup-route__pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 12px; }
+  .setup-route__credential { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: 12px; row-gap: 6px; }
+  .setup-route__credential > .setup-route__link { margin-top: 22px; }
+  .setup-route__link {
+    display: inline-flex; align-items: center; gap: 4px; width: fit-content; min-height: 30px;
+    color: var(--ghost-ink2); font-size: var(--text-caption); text-decoration: underline; text-underline-offset: 3px;
+  }
+  .setup-route__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
+  .setup-route__actions > button { white-space: normal; }
+  .setup-route [role="radiogroup"], .mail-entry [role="radiogroup"] { justify-self: start; }
+
+  .provider-enrollment { display: grid; min-width: 0; gap: 12px; }
+  .provider-enrollment__tools { display: flex; align-items: center; gap: 8px; }
+  .provider-enrollment__choices {
+    display: grid; min-width: 0; margin: 0; padding: 0; list-style: none;
+    border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-btn);
+  }
+  .provider-enrollment__choice { min-width: 0; }
+  .provider-enrollment__choice + .provider-enrollment__choice { border-top: 1px solid var(--ghost-line); }
+  .provider-enrollment__identity {
+    display: flex; align-items: center; width: 100%; min-height: 48px; gap: 10px; padding: 8px 14px;
+    color: var(--ghost-ink); text-align: start; overflow-wrap: anywhere;
+  }
+  .provider-enrollment__pick { border-radius: var(--radius-xl); }
+  .provider-enrollment__pick:not(:disabled):hover { background: var(--ghost-hover); cursor: pointer; }
+  .provider-enrollment__pick:focus-visible, .setup-route:focus-visible { outline: 2px solid var(--ghost-ink2); outline-offset: -2px; }
+  .provider-enrollment__mark {
+    display: grid; flex: none; width: 26px; height: 26px; place-items: center;
+    border-radius: var(--radius-control); background: var(--ghost-hover); font-weight: 600;
+  }
+  .provider-setup { margin: 4px 14px 14px; }
+  .provider-enrollment__choice > .provider-setup { margin-inline-start: 50px; }
+  .provider-record:focus-visible { outline: 2px solid var(--ghost-ink2); outline-offset: -2px; }
+  .provider-record + .provider-record { border-top: 1px solid var(--ghost-line); }
+  .setup-route details > summary { list-style: none; }
+  .setup-route details > summary::-webkit-details-marker { display: none; }
+  .setup-route details[open] > summary .fold-mark { transform: rotate(45deg); }
 
   /* Accounts already signed in on this Mac (GitHub CLI). */
   .local-accounts { display: grid; gap: 10px; padding: 16px 20px; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-btn); }
@@ -25,21 +72,26 @@
 
   /* Indented under the service's name: 16px padding + 32px icon + 12px gap. */
   ul.service-block__accounts { display: grid; margin: 0; padding: 0 16px 8px 60px; list-style: none; }
-  .connection-account { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "identity actions" "status actions"; align-items: center; column-gap: 12px; row-gap: 2px; padding: 8px 0; }
+  .connection-account { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "identity actions" "status actions" "setup setup"; align-items: center; column-gap: 12px; row-gap: 2px; padding: 8px 0; }
   .connection-account + .connection-account { box-shadow: inset 0 1px 0 var(--ghost-line); }
   .connection-account > .service-icon { display: none; }
   .connection-account .connection-tile__identity { grid-area: identity; gap: 2px; }
   .connection-account .connection-tile__status { grid-area: status; }
   .connection-account .connection-tile__actions { grid-area: actions; margin-top: 0; padding-top: 0; }
 
-  /* Resolved provider row inside the mail dialog. */
-  .mail-provider { display: flex; align-items: center; gap: 12px; }
+  .mail-provider { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
   .mail-provider__identity { display: grid; flex: 1; min-width: 0; gap: 2px; }
   .mail-provider__identity p { margin: 0; overflow-wrap: anywhere; }
   .mail-provider__identity p + p { color: var(--ghost-ink2); font-size: var(--text-caption); }
 
   @media (max-width: 640px) {
     .service-tile { gap: 10px; padding-inline: 12px; }
+    .service-setup { margin-inline: 16px 12px; }
+    .provider-enrollment__choice > .provider-setup { margin-inline-start: 16px; }
+    .mail-entry:has(.setup-route__body) { grid-template-columns: minmax(0, 1fr); }
+    .mail-entry:has(.setup-route__body) > .mail-entry__icon { display: none; }
+    .setup-route__credential { grid-template-columns: minmax(0, 1fr); }
+    .setup-route__credential > .setup-route__link { margin-top: 0; }
     ul.service-block__accounts { padding: 0 12px 8px 54px; }
     .local-accounts { padding: 14px 16px; }
     .local-account { flex-wrap: wrap; row-gap: 8px; }

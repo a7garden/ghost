@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react';
 import { ChevronRight, FolderPlus } from 'lucide-react';
 import { Button, Page, PageHeader, Row, SkeletonText } from '../ui';
 import type { PageSummary, Scope, State } from '@ghost/contract';
@@ -6,10 +6,9 @@ import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { routeLabels } from '../uiText';
 import { useNow } from './time';
-import { ghostPresence } from './ghostState';
-import { Modal } from '../components/Modal';
+import { ghostPresence, visibleGhosts } from './ghostState';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { HandoffComposer } from '../components/HandoffComposer';
+import { WorkDispatch } from './WorkBrief';
 import { DocumentIndex } from '../components/projects/DocumentIndex';
 import { ProjectBar } from '../components/projects/ProjectBar';
 import { ProjectPulse } from '../components/projects/ProjectPulse';
@@ -21,9 +20,9 @@ import { ProjectSettings, settingsParts } from './ProjectSettings';
 import { projectWork } from './scopeState';
 import './scopes.css';
 
-const PageEditorDrawer = lazy(() => import('./PageEditorDrawer'));
+const PageEditor = lazy(() => import('./PageEditor'));
 
-/** The document list and its editor sit side by side from here up; below it the editor is a drawer. */
+/** The editor takes the index's place until both can fit side by side. */
 const wideQuery = '(min-width: 72rem)';
 const subscribeWide = (notify: () => void) => { const media = matchMedia(wideQuery); media.addEventListener('change', notify); return () => media.removeEventListener('change', notify); };
 
@@ -50,25 +49,46 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
   const { state } = useHostState(store);
   const scopes = state?.scopes ?? [];
   const scope = scopes.find(item => item.id === selectedScope);
-  const ghosts = (state?.ghosts ?? []).filter(ghost => ghost.state === 'active' && ghost.deletedAt === null);
+  const ghosts = visibleGhosts(state?.ghosts ?? []).filter(ghost => ghost.state === 'active');
   const receiver = scope?.ghostId ? ghosts.find(ghost => ghost.id === scope.ghostId) : ghosts.find(ghost => ghost.isDefault);
   const [creating, setCreating] = useState(Boolean(createRequested));
   const [search, setSearch] = useState(''), [pages, setPages] = useState<PageSummary[]>([]), [total, setTotal] = useState(0);
   const [pagesLoading, setPagesLoading] = useState(false), [listError, setListError] = useState(''), [reload, setReload] = useState(0);
-  const [open, setOpen] = useState<{ pageId: string | null }>(), [handoff, setHandoff] = useState(false);
-  const [discard, setDiscard] = useState<{ pageId: string | null }>();
+  type DocumentOpening = { scopeId: string; pageId: string | null; trigger: HTMLButtonElement };
+  const [open, setOpen] = useState<DocumentOpening>();
+  const [handoff, setHandoff] = useState<HTMLButtonElement | null>(null);
+  const [discard, setDiscard] = useState<DocumentOpening>();
+  const index = useRef<HTMLDivElement>(null);
+  const dispatch = useRef<HTMLDivElement>(null);
   const dirty = useRef(false);
   const [toolsHost, setToolsHost] = useState<HTMLDivElement | null>(null);
   const wide = useSyncExternalStore(subscribeWide, () => matchMedia(wideQuery).matches, () => false);
   const now = useNow();
   const active = tabOf(section, receiver ? 'conversation' : 'work');
+  const opened = open && open.scopeId === scope?.id ? open : undefined;
   const select = (id: string) => onSelectScope ? onSelectScope(id) : navigate(id ? `/scopes/${encodeURIComponent(id)}` : '/scopes');
   const changeSection = (id: string) => onSectionChange ? onSectionChange(id) : navigate(`/scopes/${encodeURIComponent(scope!.id)}?view=${id}`);
   /** Opening another document over unsaved edits asks first. */
-  const openPage = (pageId: string | null) => {
-    if (wide && dirty.current && open && open.pageId !== pageId) setDiscard({ pageId });
-    else setOpen({ pageId });
+  const openPage = (pageId: string | null, trigger: HTMLButtonElement) => {
+    if (!scope || (opened && opened.pageId === pageId)) return;
+    const next = { scopeId: scope.id, pageId, trigger };
+    if (opened && dirty.current) setDiscard(next);
+    else setOpen(next);
   };
+  const closeEditor = () => {
+    dirty.current = false;
+    setOpen(undefined);
+    requestAnimationFrame(() => {
+      if (opened?.trigger.isConnected) opened.trigger.focus();
+      else index.current?.querySelector('input')?.focus();
+    });
+  };
+  useEffect(() => {
+    if (active === 'documents' && opened) return;
+    dirty.current = false;
+    setOpen(undefined);
+    setDiscard(undefined);
+  }, [active, opened]);
   useEffect(() => { if (createRequested) setCreating(true); }, [createRequested]);
   useEffect(() => {
     setPages([]); setListError('');
@@ -89,17 +109,32 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
   if (selectedScope && !scope) return <Page width="reading"><PageHeader title="프로젝트를 찾을 수 없습니다"/><Button variant="outline" onClick={() => select('')}>프로젝트 목록</Button></Page>;
   if (scope && state) {
     const canHandoff = Boolean(receiver) && scope.state !== 'paused';
+    const openHandoff = (event: MouseEvent<HTMLButtonElement>) => {
+      if (handoff) dispatch.current?.querySelector('select')?.focus();
+      else setHandoff(event.currentTarget);
+    };
+    const closeHandoff = () => {
+      setHandoff(null);
+      requestAnimationFrame(() => { if (handoff?.isConnected) handoff.focus(); });
+    };
     const tabs = [{ id: 'conversation', label: '대화' }, { id: 'work', label: '맡긴 일', count: projectWork(state, scope.id).pending.length }, { id: 'documents', label: '문서' }, { id: 'goals', label: '목표' }, { id: 'settings', label: '설정' }];
-    const editor = (inline: boolean) => open && <Suspense fallback={inline ? <SkeletonText label="편집기를 불러오는 중…" lines={6}/> : <Modal title="문서" onClose={() => setOpen(undefined)} drawer focusClose><SkeletonText label="편집기를 불러오는 중…" lines={6}/></Modal>}>
-      <PageEditorDrawer key={inline ? open.pageId ?? 'new' : undefined} scopeId={scope.id} pageId={open.pageId} inline={inline} onClose={() => { dirty.current = false; setOpen(undefined); }}
+    const editor = opened && <Suspense fallback={<section className="doc-pane" aria-label="문서">
+      <div className="doc-pane__bar"><Button variant="ghost" size="sm" onClick={closeEditor}>문서 목록</Button></div>
+      <SkeletonText label="편집기를 불러오는 중…" lines={6}/>
+    </section>}>
+      <PageEditor key={`${scope.id}:${opened.pageId ?? 'new'}`} scopeId={scope.id} pageId={opened.pageId} onClose={closeEditor}
         onSaved={() => setReload(value => value + 1)} onDirtyChange={value => { dirty.current = value; }}/>
     </Suspense>;
-    return <div className="project" data-view={active}>
+    return <div className="project" data-view={active} data-handoff={Boolean(handoff) || undefined}>
       <ProjectBar scope={scope} receiver={receiver ? { id: receiver.id, name: receiver.name, presence: ghostPresence(receiver, state).state } : null}
         folder={scope.paths[0] ?? scope.vaultPath ?? undefined} tabs={tabs} active={active} onTab={changeSection} toolsRef={setToolsHost}
-        canHandoff={canHandoff} onHandoff={() => setHandoff(true)} onManage={() => changeSection('settings')}
+        canHandoff={canHandoff} onHandoff={openHandoff} onManage={() => changeSection('settings')}
         onRename={async name => { await client.send({ type: 'scope.update', scopeId: scope.id, name }); }}/>
       <div className="project__body">
+        {handoff && <div ref={dispatch} className="project__page project__dispatch">
+          <WorkDispatch ghosts={ghosts} defaultGhostId={receiver?.id ?? ''} hasProjects initialScopeId={scope.id}
+            onClose={closeHandoff} onCreated={id => { setHandoff(null); navigate(`/work/${encodeURIComponent(id)}`); }}/>
+        </div>}
         {active === 'conversation' && (receiver
           ? <>
             <ProjectPulse state={state} scope={scope} now={now} navigate={navigate} onAll={() => changeSection('work')}/>
@@ -107,19 +142,19 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
               initialScopeIds={[scope.id]} projectId={scope.id} toolsHost={toolsHost}/>
           </>
           : <div className="project__page"><div className="calm"><p>받을 Ghost를 정하면 여기서 대화할 수 있습니다.</p><Button variant="outline" size="sm" className="ml-auto" onClick={() => changeSection('settings')}>받을 Ghost 정하기</Button></div></div>)}
-        {active === 'work' && <div className="project__page"><ProjectWork state={state} scope={scope} now={now} navigate={navigate} onHandoff={canHandoff ? () => setHandoff(true) : undefined}/></div>}
+        {active === 'work' && <div className="project__page"><ProjectWork state={state} scope={scope} now={now} navigate={navigate} onHandoff={canHandoff ? openHandoff : undefined}/></div>}
         {active === 'documents' && (scope.vaultPath
           ? <div className="project__page project__page--docs" data-split={wide || undefined}>
-            <DocumentIndex pages={pages} total={total} search={search} onSearch={setSearch} loading={pagesLoading} error={listError}
-              activeId={wide ? open?.pageId ?? null : undefined} onOpen={openPage} onCreate={() => openPage(null)}/>
-            {wide && (open ? editor(true) : <div className="calm doc-pane__empty"><p>문서를 고르면 여기서 읽고 고칩니다</p></div>)}
+            <div ref={index} hidden={!wide && Boolean(opened)}>
+              <DocumentIndex pages={pages} total={total} search={search} onSearch={setSearch} loading={pagesLoading} error={listError}
+                activeId={opened?.pageId ?? null} onOpen={openPage} onCreate={trigger => openPage(null, trigger)}/>
+            </div>
+            {opened ? editor : wide && <div className="calm doc-pane__empty"><p>문서를 고르면 여기서 읽고 고칩니다</p></div>}
           </div>
           : <div className="project__page"><div className="calm"><p>문서 금고가 지정되지 않았습니다.</p><Button variant="outline" size="sm" className="ml-auto" onClick={() => changeSection('settings')}>금고 경로 설정</Button></div></div>)}
         {active === 'goals' && <div className="project__page"><ScopeGoals state={state} navigate={navigate} scopeId={scope.id}/></div>}
         {active === 'settings' && <div className="project__page"><ProjectSettings scope={scope} part={section ?? 'settings'} onPart={changeSection} navigate={navigate} onDeleted={() => select('')}/></div>}
       </div>
-      {handoff && receiver && <Modal title="일 맡기기" onClose={() => setHandoff(false)}><HandoffComposer ghosts={ghosts} navigate={navigate} initialScopeIds={[scope.id]} initialMode="work"/></Modal>}
-      {!wide && editor(false)}
       {discard && <ConfirmDialog title="저장하지 않은 변경" confirmLabel="버리고 열기" onConfirm={() => { dirty.current = false; setOpen(discard); }} onClose={() => setDiscard(undefined)}>
         열려 있는 문서에 저장하지 않은 변경이 있습니다. 버리고 다른 문서를 열까요?
       </ConfirmDialog>}

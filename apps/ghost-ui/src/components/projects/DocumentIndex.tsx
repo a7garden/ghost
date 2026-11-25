@@ -15,10 +15,10 @@ export function DocumentIndex({ pages, total, search, onSearch, loading, error, 
   onSearch(value: string): void;
   loading: boolean;
   error?: string;
-  onOpen(pageId: string): void;
-  onCreate(): void;
-  /** The document open beside the index; the rest open in a drawer. */
-  activeId?: string | null;
+  onOpen(pageId: string, trigger: HTMLButtonElement): void;
+  onCreate(trigger: HTMLButtonElement): void;
+  /** The open document, when a saved page is selected. */
+  activeId: string | null;
 }) {
   const query = search.trim();
   return <section className="doc" aria-label="저장된 문서">
@@ -33,7 +33,7 @@ export function DocumentIndex({ pages, total, search, onSearch, loading, error, 
             <X aria-hidden="true"/>
           </button>}
         </span>
-        <Button variant="add" size="sm" type="button" onClick={onCreate}>새 문서</Button>
+        <Button variant="add" size="sm" type="button" onClick={event => onCreate(event.currentTarget)}>새 문서</Button>
       </div>
     </div>
     {loading && pages.length === 0 && !error && <SkeletonRows label="문서를 불러오는 중…" rows={3} className="p-3"/>}
@@ -42,9 +42,9 @@ export function DocumentIndex({ pages, total, search, onSearch, loading, error, 
       {pages.map(item => {
         const legacy = !isEditableProfile(item.profile);
         return <li key={item.pageId}>
-          <Row className="doc__row" aria-haspopup={activeId === undefined ? 'dialog' : undefined} aria-current={item.pageId === activeId ? 'true' : undefined}
+          <Row className="doc__row" aria-current={item.pageId === activeId ? 'true' : undefined}
             aria-label={`${item.title}, ${item.profile}${legacy ? ', 읽기 전용' : ''}`}
-            onClick={() => onOpen(item.pageId)}>
+            onClick={event => onOpen(item.pageId, event.currentTarget)}>
             <span className="doc__title">{item.title}</span>
             <span className="doc__profile" data-legacy={legacy || undefined}>{item.profile}</span>
           </Row>

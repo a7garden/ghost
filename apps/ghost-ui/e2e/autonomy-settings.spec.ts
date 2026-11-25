@@ -59,17 +59,17 @@ test.describe('Connection and activity edits', () => {
       email: 'owner@example.test', domain: 'example.test', provider: null, imap: null, smtp: null, auth: 'password', setupUrl: null, note: null, source: 'none',
     } }));
     await page.getByRole('button', { name: '다른 메일 계정 연결', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '이메일 연결', exact: true });
-    await dialog.getByRole('textbox', { name: '이메일 주소', exact: true }).fill('owner@example.test');
-    await expect(dialog.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toBeVisible();
+    const setup = page.getByRole('region', { name: '이메일 연결', exact: true });
+    await setup.getByRole('textbox', { name: '이메일 주소', exact: true }).fill('owner@example.test');
+    await expect(setup.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toBeVisible();
     const fields = [
       ['IMAP 서버', 'imap.example.test'], ['IMAP 포트', '1993'], ['메일함', 'Priority'],
       ['SMTP 서버', 'smtp.example.test'], ['SMTP 포트', '2465'],
     ] as const;
-    for (const [label, value] of fields) await dialog.getByRole(label.endsWith('포트') ? 'spinbutton' : 'textbox', { name: label, exact: true }).fill(value);
-    const implicitTLS = dialog.getByRole('switch', { name: 'SMTP 암시적 TLS', exact: true });
+    for (const [label, value] of fields) await setup.getByRole(label.endsWith('포트') ? 'spinbutton' : 'textbox', { name: label, exact: true }).fill(value);
+    const implicitTLS = setup.getByRole('switch', { name: 'SMTP 암시적 TLS', exact: true });
     if (await implicitTLS.getAttribute('aria-checked') !== 'true') await implicitTLS.click();
-    await dialog.getByLabel('비밀번호', { exact: true }).fill('synthetic-retry-secret');
+    await setup.getByLabel('비밀번호', { exact: true }).fill('synthetic-retry-secret');
     let attempts = 0;
     await page.route('**/api/commands', async route => {
       if (route.request().postDataJSON()?.command?.type === 'connection.upsert') {
@@ -79,18 +79,18 @@ test.describe('Connection and activity edits', () => {
         }) });
       } else await route.continue();
     });
-    await dialog.getByRole('button', { name: '연결', exact: true }).click();
-    await expect(dialog.getByRole('alert')).toContainText('Synthetic save unavailable');
-    for (const [label, value] of fields) await expect(dialog.getByRole(label.endsWith('포트') ? 'spinbutton' : 'textbox', { name: label, exact: true })).toHaveValue(value);
-    await expect(dialog.getByLabel('비밀번호', { exact: true })).toHaveValue('synthetic-retry-secret');
+    await setup.getByRole('button', { name: '연결하고 확인', exact: true }).click();
+    await expect(setup.getByRole('alert')).toContainText('Synthetic save unavailable');
+    for (const [label, value] of fields) await expect(setup.getByRole(label.endsWith('포트') ? 'spinbutton' : 'textbox', { name: label, exact: true })).toHaveValue(value);
+    await expect(setup.getByLabel('비밀번호', { exact: true })).toHaveValue('synthetic-retry-secret');
     await expect(implicitTLS).toHaveAttribute('aria-checked', 'true');
-    await expect(dialog.getByRole('button', { name: '연결', exact: true })).toBeEnabled();
+    await expect(setup.getByRole('button', { name: '연결하고 확인', exact: true })).toBeEnabled();
     expect(attempts).toBe(1);
     expect((await storedState(page)).connections.some(item => item.config.kind === 'mail' && item.config.username === 'owner@example.test')).toBe(false);
 
     await page.unroute('**/api/commands');
-    await dialog.getByRole('button', { name: '연결', exact: true }).click();
-    await expect(dialog).toHaveCount(0);
+    await setup.getByRole('button', { name: '연결하고 확인', exact: true }).click();
+    await expect(setup).toHaveCount(0);
     const saved = (await storedState(page)).connections.find(item => item.config.kind === 'mail' && item.config.username === 'owner@example.test');
     expect(saved).toBeDefined();
     connections.push(saved!.id);
@@ -106,12 +106,12 @@ test.describe('Connection and activity edits', () => {
     const connectionId = String(created.connectionId);
     connections.push(connectionId);
     await page.getByRole('button', { name: 'Disconnected account 편집', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Disconnected account 편집', exact: true });
-    await dialog.getByRole('textbox', { name: '이름', exact: true }).fill('Changed disconnected account');
-    await dialog.getByRole('button', { name: '고급 설정', exact: true }).click();
-    await dialog.getByRole('textbox', { name: 'API 주소', exact: true }).fill('https://github.example.test/api');
-    await dialog.getByRole('button', { name: '저장', exact: true }).click();
-    await expect(dialog).toHaveCount(0);
+    const setup = page.getByRole('region', { name: 'Disconnected account 편집', exact: true });
+    await setup.getByRole('textbox', { name: '이름', exact: true }).fill('Changed disconnected account');
+    await setup.getByRole('button', { name: '고급 설정', exact: true }).click();
+    await setup.getByRole('textbox', { name: 'API 주소', exact: true }).fill('https://github.example.test/api');
+    await setup.getByRole('button', { name: '저장하고 확인', exact: true }).click();
+    await expect(setup).toHaveCount(0);
     expect((await storedState(page)).connections.find(item => item.id === connectionId)).toMatchObject({
       name: 'Changed disconnected account', config: { kind: 'github', baseUrl: 'https://github.example.test/api' },
       hasCredential: false, credentialVersion: null,
@@ -124,16 +124,92 @@ test.describe('Connection and activity edits', () => {
     ghosts.push(ghostId);
     await page.goto(`${readRunState('activities').baseUrl}/#/settings?tab=activities`);
     await page.getByRole('button', { name: '활동 만들기', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '활동 만들기', exact: true });
-    await dialog.getByRole('combobox', { name: 'Ghost', exact: true }).click();
-    await page.getByRole('option', { name: 'Capability Ghost', exact: true }).click();
-    const tools = dialog.getByRole('group', { name: '활동 도구', exact: true });
-    await expect(tools.getByRole('button')).toHaveCount(4);
+    const editor = page.getByRole('form', { name: '활동 만들기', exact: true });
+    await editor.getByRole('combobox', { name: 'Ghost', exact: true }).selectOption(ghostId);
+    const toolSummary = editor.locator('summary').filter({ hasText: '도구 1개 · 파일 읽기' });
+    const tools = editor.getByRole('group', { name: '활동 도구', exact: true });
+    await expect(tools).toBeHidden();
+    await toolSummary.click();
+    await expect(tools.getByRole('checkbox')).toHaveCount(4);
     for (const name of ['파일 읽기', '문서 읽기', '브라우저 열기', '금고 목록']) {
-      await expect(tools.getByRole('button', { name, exact: true })).toBeVisible();
+      await expect(tools.getByRole('checkbox', { name, exact: true })).toBeVisible();
     }
-    await expect(dialog.getByText('브라우저와 Mac 파일·명령 도구는 각자의 승인 기준을 따릅니다', { exact: false })).toBeVisible();
-    await dialog.getByRole('button', { name: '취소', exact: true }).click();
+    const search = tools.getByRole('searchbox', { name: '활동 도구 검색', exact: true });
+    await search.fill('없는 도구');
+    await expect(tools.getByRole('status')).toHaveText('검색에 맞는 도구가 없습니다.');
+    await search.fill('금고');
+    await search.press('Enter');
+    await expect(tools.getByRole('checkbox')).toHaveCount(1);
+    await tools.getByRole('checkbox', { name: '금고 목록', exact: true }).check();
+    await expect(toolSummary).toHaveCount(0);
+    await editor.locator('summary').filter({ hasText: '도구 2개 · 파일 읽기, 금고 목록' }).click();
+    await expect(tools).toBeHidden();
+    await expect(editor.getByRole('combobox', { name: '이 활동의 PR 댓글·메일 회신', exact: true })).toBeVisible();
+    await editor.getByRole('button', { name: '취소', exact: true }).click();
+  });
+
+  test('browses the Mac working folder without leaving the activity rule', async ({ page }) => {
+    const ghostId = String((await send(page, { type: 'ghost.create', name: 'Folder capability Ghost', persona: '',
+      tools: ['read'], hostExecution: true })).ghostId);
+    ghosts.push(ghostId);
+    await page.goto(`${readRunState('activities').baseUrl}/#/settings?tab=activities`);
+    await page.getByRole('button', { name: '활동 만들기', exact: true }).click();
+    const editor = page.getByRole('form', { name: '활동 만들기', exact: true });
+    await editor.getByRole('combobox', { name: 'Ghost', exact: true }).selectOption(ghostId);
+    await editor.getByRole('textbox', { name: '이름', exact: true }).fill('폴더를 고르는 활동');
+    await editor.getByRole('combobox', { name: '실행 환경', exact: true }).selectOption('host');
+    await editor.getByRole('button', { name: /^작업 폴더:/ }).click();
+    const folder = editor.getByRole('group', { name: '작업 폴더', exact: true });
+    await expect(folder.getByRole('list', { name: '하위 폴더' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await folder.getByRole('button', { name: '이 폴더 선택', exact: true }).click();
+    await expect(editor.getByRole('button', { name: /^작업 폴더: \// })).toBeFocused();
+    await expect(editor.getByRole('textbox', { name: '이름', exact: true })).toHaveValue('폴더를 고르는 활동');
+    await editor.getByRole('button', { name: /^작업 폴더:/ }).click();
+    await folder.getByRole('button', { name: '폴더 선택 취소', exact: true }).click();
+    await expect(folder).toHaveCount(0);
+    await expect(editor).toBeVisible();
+    await editor.getByRole('button', { name: '취소', exact: true }).click();
+  });
+
+  test('creates and edits a scheduled conversation wake in the timeline', async ({ page }) => {
+    const original = '반복 작업 타임라인 확인';
+    const revised = '반복 작업 타임라인 수정';
+    const starts = '2099-01-01T09:30';
+    const startAt = await page.evaluate(value => new Date(value).getTime(), starts);
+    try {
+      await page.goto(`${readRunState('activities').baseUrl}/#/settings?tab=schedules`);
+      await page.getByRole('button', { name: '반복 작업 예약', exact: true }).click();
+      const create = page.getByRole('form', { name: '반복 작업 예약', exact: true });
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await create.getByRole('combobox', { name: '실행 방식', exact: true }).selectOption('every');
+      await create.getByLabel('시작 시각', { exact: true }).fill(starts);
+      const minutes = create.getByRole('spinbutton', { name: '반복 간격 (분)', exact: true });
+      await minutes.fill('0');
+      const prompt = create.getByRole('textbox', { name: '실행할 내용', exact: true });
+      await prompt.fill(original);
+      await create.getByRole('button', { name: '예약', exact: true }).click();
+      await expect(create.getByRole('alert')).toContainText('1분 이상');
+      await expect(prompt).toHaveValue(original);
+      await expect(create.getByLabel('시작 시각', { exact: true })).toHaveValue(starts);
+      await minutes.fill('35');
+      await prompt.press('Control+Enter');
+      await expect(create).toHaveCount(0);
+      const row = page.getByRole('article').filter({ hasText: original });
+      await expect(row).toContainText('35분마다');
+      await row.getByRole('button', { name: '반복 작업 편집', exact: true }).click();
+      const edit = page.getByRole('form', { name: '반복 작업 편집', exact: true });
+      await expect(edit.getByLabel('시작 시각', { exact: true })).toHaveValue(starts);
+      await edit.getByRole('textbox', { name: '실행할 내용', exact: true }).fill(revised);
+      await edit.getByRole('button', { name: '저장', exact: true }).click();
+      await expect(edit).toHaveCount(0);
+      await expect(page.getByRole('article').filter({ hasText: revised })).toContainText('35분마다');
+      expect((await storedState(page)).schedules.find(schedule => schedule.prompt === revised)?.spec)
+        .toEqual({ kind: 'every', seconds: 2100, startAt });
+    } finally {
+      const saved = (await storedState(page)).schedules.find(schedule => schedule.prompt === original || schedule.prompt === revised);
+      if (saved) await send(page, { type: 'schedule.delete', scheduleId: saved.id });
+    }
   });
 
   test('retains real skipped source history after deleting its activity and reloading', async ({ page }) => {
@@ -240,11 +316,11 @@ test.describe('Connection and activity edits', () => {
     const before = (await storedState(page)).activities.find(item => item.id === activityId)!;
     await page.goto(`${readRunState('activities').baseUrl}/#/settings?tab=activities`);
     await page.getByRole('button', { name: 'Precise activity 편집', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '활동 편집', exact: true });
-    await expect(dialog.getByRole('combobox', { name: 'Ghost', exact: true })).toBeDisabled();
-    await dialog.getByRole('textbox', { name: '이름', exact: true }).fill('Renamed precise schedule');
-    await dialog.getByRole('button', { name: '저장', exact: true }).click();
-    await expect(dialog).toHaveCount(0);
+    const editor = page.getByRole('form', { name: '활동 편집', exact: true });
+    await expect(editor.getByRole('combobox', { name: 'Ghost', exact: true })).toBeDisabled();
+    await editor.getByRole('textbox', { name: '이름', exact: true }).fill('Renamed precise schedule');
+    await editor.getByRole('button', { name: '저장', exact: true }).click();
+    await expect(editor).toHaveCount(0);
     const saved = (await storedState(page)).activities.find(item => item.id === activityId)!;
     expect(saved).toMatchObject({ name: 'Renamed precise schedule', ghostId, source: config.source, policy, nextAt: before.nextAt });
   });
@@ -283,10 +359,10 @@ test.describe('Connection and activity edits', () => {
       expect(JSON.parse(before.cursor!).seen).toHaveProperty('1');
       await page.goto(`${readRunState('activities').baseUrl}/#/settings?tab=activities`);
       await page.getByRole('button', { name: 'Precise activity 편집', exact: true }).click();
-      const dialog = page.getByRole('dialog', { name: '활동 편집', exact: true });
-      await dialog.getByRole('textbox', { name: '이름', exact: true }).fill('Renamed source');
-      await dialog.getByRole('button', { name: '저장', exact: true }).click();
-      await expect(dialog).toHaveCount(0);
+      const editor = page.getByRole('form', { name: '활동 편집', exact: true });
+      await editor.getByRole('textbox', { name: '이름', exact: true }).fill('Renamed source');
+      await editor.getByRole('button', { name: '저장', exact: true }).click();
+      await expect(editor).toHaveCount(0);
       const saved = (await storedState(page)).activities.find(item => item.id === activityId)!;
       expect(saved).toMatchObject({ name: 'Renamed source', source: config.source, policy,
         cursor: before.cursor, lastCheckedAt: before.lastCheckedAt, nextAt: before.nextAt, paused: true });

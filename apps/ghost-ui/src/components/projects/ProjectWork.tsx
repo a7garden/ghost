@@ -1,3 +1,4 @@
+import type { MouseEventHandler } from 'react';
 import { BriefcaseBusiness } from 'lucide-react';
 import type { Scope, State, Work } from '@ghost/contract';
 import { Button } from '../../ui';
@@ -10,7 +11,7 @@ import { uiTerms } from '../../uiText';
  * What this project has in flight: what waits on the owner first, then live Work, then what finished.
  * Each lane carries its stage on the right, so how far along reads without opening it.
  */
-export function ProjectWork({ state, scope, now, navigate, onHandoff }: { state: State; scope: Scope; now: number; navigate(path: string): void; onHandoff?(): void }) {
+export function ProjectWork({ state, scope, now, navigate, onHandoff }: { state: State; scope: Scope; now: number; navigate(path: string): void; onHandoff?: MouseEventHandler<HTMLButtonElement> }) {
   const { works, live, settled, pending } = projectWork(state, scope.id);
   const waiting = new Set(pending.map(decision => decision.workId));
   const lane = (work: Work) => <WorkLane key={work.id} work={work} ghostName={state.ghosts.find(ghost => ghost.id === work.ghostId)?.name ?? 'Ghost'}

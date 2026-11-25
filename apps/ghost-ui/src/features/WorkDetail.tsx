@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import { ChevronRight, Pencil, Play, Square } from 'lucide-react';
-import { Button, Page, InlineError, Input, SkeletonChat, SkeletonText, Textarea, FormField } from '../ui'
+import { Button, Page, InlineError, SkeletonChat, SkeletonText } from '../ui';
 import type { CodingRun, Effect, Message, State, Verdict, Work, WorkDetail as WorkDetailData } from '@ghost/contract';
 import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { LifecycleTrack, StateGlyph, glyphLabel, workGlyph, type GlyphState } from '../components/agent';
 import { DotAvatar } from '../components/DotAvatar';
-import { Modal } from '../components/Modal';
 import { GhostRunLabel, LiveReply, Transcript, endsInGhostRun } from '../components/TranscriptMessage';
 import { ArtifactPreview } from '../components/ArtifactPreview';
 import { InlineText, MessageBody } from '../components/MessageBody';
@@ -23,6 +22,8 @@ import { executionLabel } from './activity-config';
 import { readVerdict, workReason } from './workText';
 import { ProjectChips } from '../components/composer/ProjectMentions';
 import { CancelWorkDialog } from './WorkViews';
+import { fromLocalInput, toLocalInput } from './Schedules';
+import { WorkCriteriaField, WorkDeadlineField, workWriteError } from './WorkBrief';
 import { embeddedSessionPath } from './CodingSessionModel';
 
 const effectGlyph: Record<Effect['state'], GlyphState> = { pending: 'running', done: 'done', unknown: 'blocked', denied: 'cancelled' };
@@ -32,7 +33,13 @@ const codingRunLabel: Record<CodingRun['state'], string> = { preparing: '준비 
 const verdictText: Record<Verdict['outcome'], string> = { pass: '통과', revise: '수정 지시', fail: '미달' };
 
 /** 맡긴 일 detail: where it stands, what waits on the owner, the brief and result, and how it got there. */
-export function WorkDetail({ state, workId, navigate }: { state: State; workId: string; navigate(path: string): void }) {
+type WorkDetailProps = { state: State; workId: string; navigate(path: string): void };
+
+export function WorkDetail(props: WorkDetailProps) {
+  return <WorkDetailPage key={props.workId} {...props}/>;
+}
+
+function WorkDetailPage({ state, workId, navigate }: WorkDetailProps) {
   const { store, client } = useHost();
   const now = useNow();
   const [detail, setDetail] = useState<WorkDetailData | null>(null);
@@ -41,7 +48,12 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
   /** The last read failed for another reason than not-found: the previous detail stays on screen. */
   const [loadError, setLoadError] = useState('');
   const [reloading, setReloading] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Work | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const editFormId = useId();
+  const editForm = useRef<HTMLFormElement>(null);
+  const editTrigger = useRef<HTMLButtonElement>(null);
   const [cancellingWorkId, setCancellingWorkId] = useState<string | null>(null);
   const ghostName = (id: string) => state.ghosts.find(ghost => ghost.id === id)?.name ?? 'Ghost';
   const { connection, offlineSince } = useHostState(store);
@@ -110,11 +122,66 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
   const revising = live && work.verdict?.outcome === 'revise';
   const verdict = work.verdict ? readVerdict(work.verdict, decisions) : null;
 
-  return <Page className="work-detail">
+  const openEditor = () => { setSaveError(''); setDraft(work); };
+  const closeEditor = () => {
+    setDraft(null);
+    requestAnimationFrame(() => editTrigger.current?.focus());
+  };
+  const initialDeadline = draft?.deadlineAt != null ? toLocalInput(draft.deadlineAt) : '';
+  const saveEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!draft || saving || !live) return;
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const text = (name: string) => String(data.get(name) ?? '').trim();
+    const title = text('title'), brief = text('brief'), criteria = text('criteria'), deadline = text('deadline');
+    if (!title || !brief) {
+      setSaveError(!title ? '제목을 적어 주세요.' : '할 일을 적어 주세요.');
+      (form.elements.namedItem(title ? 'brief' : 'title') as HTMLElement | null)?.focus();
+      return;
+    }
+    const deadlineAt = fromLocalInput(deadline);
+    if (deadline && deadlineAt === null) { setSaveError('기한을 확인해 주세요.'); return; }
+    // Only send fields the owner changed. Keep the live record's checks and reviewer when updating its criteria.
+    const change = {
+      ...(title !== draft.title.trim() ? { title } : {}),
+      ...(brief !== draft.brief.trim() ? { brief } : {}),
+      ...(criteria !== draft.acceptance.criteria.trim() ? { acceptance: { ...work.acceptance, criteria } } : {}),
+      ...(deadline !== initialDeadline ? { deadlineAt } : {}),
+    };
+    if (!Object.keys(change).length) { closeEditor(); return; }
+    setSaving(true); setSaveError('');
+    try {
+      await client.send({ type: 'work.update', workId, ...change });
+      if (form.isConnected) { await reload(); closeEditor(); }
+    } catch (reason) {
+      setSaveError(workWriteError(reason, '맡긴 일을 저장하지 못했습니다.'));
+    } finally { setSaving(false); }
+  };
+  const editKeys = (event: KeyboardEvent<HTMLDivElement>) => {
+    const { target } = event;
+    const form = editForm.current;
+    if (!form || saving || event.defaultPrevented || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+      || !(target instanceof HTMLElement) || !(form.contains(target) || ('form' in target && target.form === form))) return;
+    if (event.key === 'Escape') { event.preventDefault(); closeEditor(); }
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); form.requestSubmit(); }
+    else if (event.key === 'Enter' && target instanceof HTMLInputElement && target.name === 'title') {
+      event.preventDefault();
+      (form.elements.namedItem('deadline') as HTMLElement | null)?.focus();
+    }
+  };
+
+  return <Page className="work-detail" onKeyDown={editKeys}>
     <WorkHeader work={work} ancestors={ancestors} glyph={glyph} pending={pending.length} criteria={judging ? '' : work.acceptance.criteria.trim()} ghostName={ghostName(work.ghostId)} now={now}
       link={live && link.state !== 'connected' && !link.quiet ? link.label : undefined} navigate={navigate} onPending={showPending}
-      onEdit={live ? () => setEditing(true) : undefined} onCancel={live ? () => setCancellingWorkId(work.id) : undefined}
-      onResume={resumable ? () => run(() => client.send({ type: 'work.resume', workId: work.id })) : undefined}/>
+      onEdit={live && !draft ? openEditor : undefined} editTrigger={editTrigger} onCancel={live && !draft ? () => setCancellingWorkId(work.id) : undefined}
+      onResume={resumable && !draft ? () => run(() => client.send({ type: 'work.resume', workId: work.id })) : undefined}
+      editor={draft ? {
+        title: <input form={editFormId} className="work-brief-field work-brief-field--title" name="title" aria-label="제목" autoFocus
+          defaultValue={draft.title} required maxLength={256} readOnly={saving} enterKeyHint="next"/>,
+        deadline: <WorkDeadlineField form={editFormId} initial={initialDeadline} busy={saving}/>,
+        criteria: <WorkCriteriaField form={editFormId} initial={draft.acceptance.criteria} busy={saving}/>,
+      } : undefined}/>
     {loadAlert}
     {error && <InlineError>{error}</InlineError>}
 
@@ -136,13 +203,24 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
         <section className="work-section" aria-labelledby="work-brief">
           <h2 id="work-brief" className="section-title">할 일</h2>
           <ProjectChips scopes={brief.scopes}/>
-          <div className="work-brief"><MessageBody text={brief.text}/></div>
+          {draft
+            ? <form ref={editForm} id={editFormId} className="work-brief-edit" aria-label="맡긴 일 수정" aria-busy={saving || undefined} onSubmit={saveEdit}>
+              <textarea className="work-brief-field work-brief-field--body" name="brief" aria-label="할 일" defaultValue={draft.brief}
+                required maxLength={32768} rows={4} readOnly={saving}/>
+              {!live && <InlineError>이미 끝난 일은 수정할 수 없습니다.</InlineError>}
+              {saveError && <InlineError>{saveError}</InlineError>}
+              <div className="work-brief-actions">
+                <Button type="button" variant="ghost" disabled={saving} onClick={closeEditor}>취소</Button>
+                <Button type="submit" disabled={saving || !live}>{saving ? '저장 중…' : '저장'}</Button>
+              </div>
+            </form>
+            : <div className="work-brief"><MessageBody text={brief.text}/></div>}
           {/* Only the Mac is worth naming: there the Ghost acts with the owner's own access. */}
           {work.execution?.kind === 'host' && <div className="work-criteria"><span>실행 환경</span><p>{executionLabel.host} · {work.execution.cwd}</p></div>}
           {work.activityId && <Button variant="ghost" size="sm" onClick={() => navigate('/settings?tab=activities')}>자동 활동 열기</Button>}
         </section>
 
-        <WorkConversation work={work} ghostName={ghostName(work.ghostId)} onEdit={live ? () => setEditing(true) : undefined}/>
+        <WorkConversation work={work} ghostName={ghostName(work.ghostId)} onEdit={live && !draft ? openEditor : undefined}/>
       </div>
 
       <aside className="work-aside">
@@ -175,7 +253,6 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
         </AsideSection>
       </aside>
     </div>
-    {editing && <EditWorkModal work={work} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void reload(); }}/>}
     {cancellingWorkId === work.id && <CancelWorkDialog work={work} onCancel={async () => { await client.send({ type: 'work.cancel', workId: work.id }); void reload(); }} onClose={() => setCancellingWorkId(null)}/>}
   </Page>;
 }
@@ -186,7 +263,7 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
  * then 완료 기준 and the owner's moves. It is the parent's direct child (a sibling of the header) so the
  * reason line can hang right beneath the bar on every size.
  */
-export function WorkHeader({ work, ancestors, glyph, pending, criteria, ghostName, now, link, navigate, onPending, onEdit, onCancel, onResume }: {
+export function WorkHeader({ work, ancestors, glyph, pending, criteria, ghostName, now, link, navigate, onPending, onEdit, editTrigger, onCancel, onResume, editor }: {
   work: Work; ancestors: Work[]; glyph: GlyphState; pending: number;
   /** 완료 기준 to unfold; empty when a result card below already shows it. */
   criteria: string;
@@ -194,17 +271,21 @@ export function WorkHeader({ work, ancestors, glyph, pending, criteria, ghostNam
   /** The host link's label (재연결 중…, 연결 끊김) while what this page shows may be behind the host. */
   link?: string;
   navigate(path: string): void; onPending(): void; onEdit?(): void; onCancel?(): void; onResume?(): void;
+  editTrigger?: Ref<HTMLButtonElement>;
+  /** The author's blanks replace the title, date, and criteria in the header's own slots. */
+  editor?: { title: ReactNode; deadline: ReactNode; criteria: ReactNode };
 }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const live = !TERMINAL_WORK_STATES.includes(work.state);
   const overdue = live && work.deadlineAt !== null && work.deadlineAt < now;
   const verbs = Boolean(onEdit || onCancel || onResume);
+  const showCriteria = !editor && criteria;
   const reason = workReason(work);
   const at = live ? work.createdAt : work.endedAt ?? work.updatedAt;
   // Escape folds the open criteria back onto its toggle.
   const closeOnEscape = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Escape' || !open || !event.currentTarget.contains(event.target as Node)) return;
+    if (editor || event.key !== 'Escape' || !open || !event.currentTarget.contains(event.target as Node)) return;
     event.currentTarget.querySelector<HTMLButtonElement>('[aria-expanded="true"]')?.focus();
     setOpen(false);
   };
@@ -216,7 +297,9 @@ export function WorkHeader({ work, ancestors, glyph, pending, criteria, ghostNam
           <ChevronRight size={12} aria-hidden="true"/>
         </span>)}
       </nav>}
-      <h1 className="work-head__title">{work.title}</h1>
+      {editor
+        ? <><h1 className="sr-only">{work.title}</h1>{editor.title}</>
+        : <h1 className="work-head__title">{work.title}</h1>}
       {/* A settled Work has no next step to point at: its state word says how it ended. */}
       {live && <LifecycleTrack state={work.state} needsOwner={pending > 0} stageOnly className="work-head__track"/>}
     </header>
@@ -226,26 +309,27 @@ export function WorkHeader({ work, ancestors, glyph, pending, criteria, ghostNam
         {pending > 0 && <button type="button" className="work-bar__pending" onClick={() => { setOpen(false); onPending(); }}>
           <StateGlyph state="attention" label/><span className="tabular">{pending}</span>
         </button>}
-        {live && work.deadlineAt && <span className="work-bar__due" data-overdue={overdue || undefined}>{overdue ? '기한 지남' : '기한'} {absoluteTime(work.deadlineAt)}</span>}
+        {editor ? editor.deadline : live && work.deadlineAt && <span className="work-bar__due" data-overdue={overdue || undefined}>{overdue ? '기한 지남' : '기한'} {absoluteTime(work.deadlineAt)}</span>}
       </div>
       {link && <p className="work-bar__link" role="status">{link} · 마지막 기록 {relativeTime(work.updatedAt, now)}</p>}
       <div className="work-bar__who">
         <span className="work-head__who"><DotAvatar profileId={work.ghostId} tone={toneFor(work.ghostId)} size={16}/>{ghostName}</span>
         <span title={absoluteTime(at)}>{relativeTime(at, now)} {live ? '맡김' : '끝남'}</span>
       </div>
-      {(criteria || verbs) && <div className="work-bar__actions">
-        {criteria && <button type="button" className="work-bar__toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>
+      {(showCriteria || verbs) && <div className="work-bar__actions">
+        {showCriteria && <button type="button" className="work-bar__toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>
           <span aria-hidden="true" className="fold-mark"/>완료 기준
         </button>}
         {verbs && <span className="work-bar__verbs">
-          {onEdit && <Button variant="outline" onClick={onEdit}><Pencil/>수정</Button>}
+          {onEdit && <Button ref={editTrigger} variant="outline" onClick={onEdit}><Pencil/>수정</Button>}
           {onCancel && <Button variant="outline" onClick={onCancel}><Square/>취소</Button>}
           {onResume && <Button onClick={onResume}><Play/>재개</Button>}
         </span>}
       </div>}
-      {open && criteria && <div id={panelId} className="work-bar__panel" role="region" aria-label="완료 기준">
-        <div className="work-criteria"><MessageBody text={criteria}/></div>
-      </div>}
+      {editor ? <div className="work-bar__criteria-edit">{editor.criteria}</div>
+        : open && showCriteria && <div id={panelId} className="work-bar__panel" role="region" aria-label="완료 기준">
+          <div className="work-criteria"><MessageBody text={criteria}/></div>
+        </div>}
     </div>
     {reason && <p className="work-head__reason" data-state={work.state}><InlineText text={reason}/></p>}
   </>;
@@ -339,43 +423,4 @@ function WorkTranscript({ conversationId, ghostId, ghostName, onEdit }: { conver
           {onEdit && <button type="button" className="link-quiet" onClick={onEdit}>수정</button>}
         </div>}
   </div>;
-}
-
-function EditWorkModal({ work, onClose, onSaved }: { work: Work; onClose(): void; onSaved(): void }) {
-  const { client } = useHost();
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const currentBrief = { text: work.brief, scopes: work.scopeReferences ?? [] };
-  const submit = (data: FormData) => {
-    setBusy(true); setError('');
-    void (async () => {
-      try {
-        const title = String(data.get('title')).trim();
-        const brief = String(data.get('brief')).trim();
-        const deadline = String(data.get('deadline'));
-        await client.send({
-          type: 'work.update', workId: work.id,
-          ...(title && title !== work.title ? { title } : {}),
-          ...(brief && brief !== currentBrief.text ? { brief } : {}),
-          ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : { deadlineAt: null }),
-        });
-        onSaved();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : '맡긴 일을 저장하지 못했습니다.');
-        setBusy(false);
-      }
-    })();
-  };
-  const deadlineValue = work.deadlineAt ? new Date(work.deadlineAt - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16) : '';
-  return <Modal title="맡긴 일 수정" onClose={() => { if (!busy) onClose(); }}>
-    <form className="grid gap-4" onSubmit={e => { e.preventDefault(); submit(new FormData(e.currentTarget)); }}>
-      <FormField label="제목">{control => <Input {...control} name="title" defaultValue={work.title} maxLength={256}/>}</FormField>
-      <ProjectChips scopes={currentBrief.scopes}/>
-      <FormField label="할 일">{control => <Textarea {...control} name="brief" defaultValue={currentBrief.text} rows={6} maxLength={32768}/>}</FormField>
-      <FormField label="기한">{control => <Input {...control} type="datetime-local" name="deadline" defaultValue={deadlineValue}/>}</FormField>
-      <p className="m-0 text-caption text-ink-2">저장하면 작업 대화에 변경 사항이 전달됩니다.</p>
-      {error && <InlineError>{error}</InlineError>}
-      <Button type="submit" className="justify-self-end" disabled={busy}>{busy ? '저장 중…' : '저장'}</Button>
-    </form>
-  </Modal>;
 }

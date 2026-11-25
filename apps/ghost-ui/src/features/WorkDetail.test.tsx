@@ -60,10 +60,11 @@ const work = (patch: Partial<Work> = {}): Work => ({
   revision: 1, revisionsUsed: 0, deadlineAt: null, scopeId: null, attachments: [], slot: null, retry: null, budgetMinutes: 90, budgetUsedMs: 0, budgetSince: null, budgetExtended: false, hold: null, result: null, verdict: null, reason: null,
   createdAt: NOW - 3_600_000, startedAt: NOW - 3_600_000, endedAt: null, updatedAt: NOW, ...patch,
 });
-const header = (target: Work, patch: { pending?: number; criteria?: string; link?: string } = {}) => renderToStaticMarkup(createElement(WorkHeader, {
+const header = (target: Work, patch: { pending?: number; criteria?: string; link?: string; editor?: Parameters<typeof WorkHeader>[0]['editor'] } = {}) => renderToStaticMarkup(createElement(WorkHeader, {
   work: target, ancestors: [], glyph: workGlyph(target.state, (patch.pending ?? 0) > 0), pending: patch.pending ?? 0, criteria: patch.criteria ?? target.acceptance.criteria,
   ghostName: '리서치', now: NOW, link: patch.link, navigate: () => undefined, onPending: () => undefined,
   onEdit: () => undefined, onCancel: () => undefined,
+  editor: patch.editor,
 }));
 
 describe('WorkHeader', () => {
@@ -84,6 +85,19 @@ describe('WorkHeader', () => {
     expect(header(work())).toMatch(/aria-expanded="false"[^>]*>.*완료 기준<\/button>/);
     expect(header(work())).not.toContain('세 문단 요약');
     expect(header(work(), { criteria: '' })).not.toContain('완료 기준');
+  });
+
+  it('keeps authoring controls in the same header slots as the title, deadline and criteria', () => {
+    const markup = header(work({ deadlineAt: NOW + 60_000 }), { editor: {
+      title: createElement('input', { 'aria-label': '제목' }),
+      deadline: createElement('input', { 'aria-label': '기한', type: 'datetime-local' }),
+      criteria: createElement('textarea', { 'aria-label': '완료 기준' }),
+    } });
+    expect(markup).toMatch(/class="work-head">.*<input aria-label="제목"/);
+    expect(markup).toMatch(/class="work-bar__state">.*<input aria-label="기한"/);
+    expect(markup).toContain('class="work-bar__criteria-edit"><textarea aria-label="완료 기준"');
+    expect(markup).not.toContain('work-bar__toggle');
+    expect(markup).not.toContain('work-bar__due');
   });
 
   it('drops the lifecycle and deadline once the Work has settled, and says when it ended', () => {

@@ -1,0 +1,107 @@
+@layer components {
+  .work-dispatch {
+    display: grid;
+    min-width: 0;
+    max-width: var(--ghost-layout-document-max);
+    gap: 12px;
+    padding: 18px clamp(14px, 3vw, 28px) 14px;
+    border: solid var(--ghost-line);
+    border-width: 1px 0;
+    background: var(--ghost-surface);
+  }
+  .work-dispatch__draft { display: grid; min-width: 0; gap: 12px; margin: 0; padding: 0; border: 0; }
+  .work-dispatch__address { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--ghost-ink2); font-size: var(--text-ui); }
+  .work-dispatch__recipient {
+    position: relative;
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+    padding-inline: 8px;
+    border-radius: var(--radius-pill);
+    color: var(--ghost-ink);
+    background: var(--ghost-hover);
+  }
+  .work-dispatch__recipient > svg { position: absolute; inset-inline-end: 8px; pointer-events: none; }
+  .work-dispatch__recipient .dot-avatar { flex: none; pointer-events: none; }
+  .work-dispatch__recipient select {
+    appearance: none;
+    min-width: 0;
+    min-height: 34px;
+    padding: 0 18px 0 0;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    font: 600 var(--text-ui)/1.3 var(--font-sans);
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  .work-dispatch__recipient:has(> select:focus-visible) { outline: 2px solid var(--ghost-signal-ink); outline-offset: 2px; }
+  /* Native select focus is drawn on the entire token, including its portrait. */
+  .work-dispatch__recipient > select:focus-visible { outline: none !important; }
+  .work-dispatch__instruction { position: relative; min-width: 0; }
+  .work-dispatch__instruction .composer-suggest { top: calc(100% + 4px); bottom: auto; }
+  .work-brief-field {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    padding: 4px 0;
+    border: 0;
+    border-bottom: 1px solid var(--ghost-line-strong);
+    border-radius: 0;
+    color: var(--ghost-ink);
+    background: transparent;
+    font: inherit;
+  }
+  .work-brief-field:focus-visible { outline: 2px solid var(--ghost-signal-ink); outline-offset: 2px; }
+  .work-brief-field::placeholder { color: var(--ghost-ink3); }
+  .work-brief-field--title { font: 650 var(--text-headingLg)/1.22 var(--font-sans); letter-spacing: -.028em; }
+  .work-brief-field--body { min-height: 5.1em; font-size: var(--text-body); line-height: 1.7; }
+  textarea.work-brief-field { max-height: 20rem; field-sizing: content; resize: vertical; }
+  .work-brief-criteria {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    gap: 8px;
+    color: var(--ghost-ink2);
+    font-size: var(--text-ui);
+  }
+  .work-brief-criteria > span, .work-brief-deadline label > span { font-size: var(--text-caption); font-weight: 600; }
+  .work-brief-criteria textarea { line-height: 1.6; }
+  .work-brief-deadline, .work-brief-deadline label, .work-dispatch__routing, .work-brief-actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .work-brief-deadline label { flex-wrap: nowrap; color: var(--ghost-ink2); }
+  .work-brief-deadline label > span { flex: none; }
+  .work-brief-deadline input { width: auto; max-width: 100%; font-size: var(--text-ui); }
+  .work-dispatch__routing { justify-content: space-between; }
+  .work-brief-actions { justify-content: flex-end; }
+  .work-dispatch__extras { display: grid; gap: 2px; }
+  .work-dispatch__extras details { min-width: 0; }
+  .work-dispatch__extras summary {
+    width: fit-content;
+    padding-block: 5px;
+    border-radius: var(--radius-chip);
+    color: var(--ghost-ink2);
+    font-size: var(--text-caption);
+    cursor: pointer;
+  }
+  .work-dispatch__extras summary span { margin-inline-start: 8px; color: var(--ghost-ink); }
+  .work-dispatch__extras summary:focus-visible { outline: 2px solid var(--ghost-signal-ink); outline-offset: 2px; }
+  .work-dispatch__extras details[open] > :not(summary) { margin-block: 6px 12px; }
+  .work-dispatch__options, .work-dispatch__folder, .work-brief-edit { display: grid; min-width: 0; gap: 10px; }
+  .work-dispatch__environment { display: flex; min-width: 0; align-items: baseline; gap: 10px; }
+  .work-dispatch__environment > span { flex: none; }
+  .work-dispatch__environment select { width: auto; }
+  .work-dispatch__hint { margin: 0; color: var(--ghost-ink2); font-size: var(--text-caption); }
+  .work-bar__criteria-edit { flex-basis: 100%; min-width: 0; }
+  .work-brief-edit { padding-inline-start: 12px; border-inline-start: 2px solid var(--ghost-line-strong); }
+  .work-brief-edit textarea { min-height: 6.8em; }
+
+  @media (max-width: 55.999rem) {
+    .work-brief-field--title { font-size: var(--text-heading); }
+  }
+  @media (pointer: coarse) {
+    .work-dispatch__extras summary { min-height: 44px; align-content: center; }
+    .work-brief-actions button, .work-brief-deadline button, .work-dispatch__routing > button { min-height: 44px; }
+  }
+}
