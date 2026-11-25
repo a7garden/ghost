@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Bell, BellOff, ChevronRight, LogOut } from 'lucide-react';
-import type { Device, Ghost, NotificationKind } from '@ghost/contract';
-import { Button, InlineError, Input, SettingsGroup, SettingsRow } from '../ui';
+import type { Device, Ghost, NotificationKind, QuietHours } from '@ghost/contract';
+import { Button, InlineError, Input, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { useHost } from '../host/context';
@@ -45,6 +45,8 @@ export function ThisDevice({ device, ghosts }: { device: Device; ghosts: Ghost[]
     finally { setBusy(false); }
   };
   const muted = ghosts.filter(ghost => alerts.mutedGhostIds.includes(ghost.id));
+  const quiet = alerts.quietHours ?? null;
+  const setQuiet = (next: QuietHours | null) => { setError(''); void writer.toggle({ quietHours: next }); };
   return <section className="this-device" aria-label="이 기기">
     <header><span className="text-caption text-ink-3">이 기기</span><h2 className="section-title">{device.name}</h2></header>
     <SettingsGroup title="알림">
@@ -62,6 +64,16 @@ export function ThisDevice({ device, ghosts }: { device: Device; ghosts: Ghost[]
       <button type="button" className="device-ghost-mutes" onClick={() => setPicking(true)}>
         <span>Ghost별 알림</span><span className="device-muted-portraits">{muted.slice(0, 4).map(ghost => <DotAvatar key={ghost.id} profileId={ghost.id} tone={toneFor(ghost.id)} size={24}/>)}{muted.length > 0 && <span>{muted.length} 끔</span>}</span><ChevronRight size={16}/>
       </button>
+      <SettingsRow label="방해금지" htmlFor="device-quiet-hours">
+        <Switch id="device-quiet-hours" checked={quiet !== null} onCheckedChange={on => setQuiet(on ? { start: '22:00', end: '07:00' } : null)}/>
+      </SettingsRow>
+      {quiet && <SettingsRow label="시간">
+        <span className="flex items-center gap-2">
+          <Input type="time" aria-label="방해금지 시작" className="w-[120px]" value={quiet.start} onChange={event => event.target.value && setQuiet({ ...quiet, start: event.target.value })}/>
+          <span aria-hidden="true">–</span>
+          <Input type="time" aria-label="방해금지 끝" className="w-[120px]" value={quiet.end} onChange={event => event.target.value && setQuiet({ ...quiet, end: event.target.value })}/>
+        </span>
+      </SettingsRow>}
     </SettingsGroup>
     {error && <InlineError>{error}</InlineError>}
     <Button variant="ghost" className="self-start text-danger" onClick={() => setDisconnecting(true)}><LogOut size={17}/>연결 해제</Button>

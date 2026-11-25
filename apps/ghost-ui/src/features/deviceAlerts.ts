@@ -1,7 +1,8 @@
-import type { Device, NotificationKind } from '@ghost/contract';
+import type { Device, NotificationKind, QuietHours } from '@ghost/contract';
 export type DeviceAlerts = Device['alerts'];
-export type AlertToggle = { kind: NotificationKind } | { ghostId: string };
+export type AlertToggle = { kind: NotificationKind } | { ghostId: string } | { quietHours: QuietHours | null };
 export function toggleAlert(alerts: DeviceAlerts, toggle: AlertToggle): DeviceAlerts {
+  if ('quietHours' in toggle) return { ...alerts, quietHours: toggle.quietHours };
   if ('kind' in toggle) return { ...alerts, mutedKinds: alerts.mutedKinds.includes(toggle.kind) ? alerts.mutedKinds.filter(kind => kind !== toggle.kind) : [...alerts.mutedKinds, toggle.kind] };
   return { ...alerts, mutedGhostIds: alerts.mutedGhostIds.includes(toggle.ghostId) ? alerts.mutedGhostIds.filter(id => id !== toggle.ghostId) : [...alerts.mutedGhostIds, toggle.ghostId] };
 }

@@ -11,6 +11,14 @@ it('toggles one alert scope without mutating or losing the other scope', () => {
   expect(alerts.mutedGhostIds).toEqual(['g1']);
 });
 
+it('sets and clears quiet hours without touching the mutes', () => {
+  const muted: DeviceAlerts = { mutedKinds: ['decision'], mutedGhostIds: ['g1'] };
+  const quiet = toggleAlert(muted, { quietHours: { start: '22:00', end: '07:00' } });
+  expect(quiet).toEqual({ ...muted, quietHours: { start: '22:00', end: '07:00' } });
+  expect(toggleAlert(quiet, { kind: 'decision' }).quietHours).toEqual({ start: '22:00', end: '07:00' });
+  expect(toggleAlert(quiet, { quietHours: null })).toEqual({ ...muted, quietHours: null });
+});
+
 it('publishes rapid gestures immediately but persists them one at a time', async () => {
   const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
   const save = vi.fn().mockImplementationOnce(() => gates[0].promise).mockImplementationOnce(() => gates[1].promise);

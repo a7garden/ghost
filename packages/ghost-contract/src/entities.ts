@@ -748,10 +748,23 @@ export const Notification = Type.Object({
 });
 export type Notification = Static<typeof Notification>;
 
-/** Per-device push mute preferences; the in-app inbox is unaffected. */
+/**
+ * 방해금지 시간. 이 안에 생긴 알림은 이 기기로 푸시하지 않는다(앱 안의 알림함에는 남는다).
+ * "HH:MM", 24시간제, Host PC 의 현지 시각(근무 시간표와 같다). `start` 가 `end` 보다 늦으면 자정을 넘는다.
+ * `start` 와 `end` 가 같으면 비어 있는 시간이다.
+ */
+export const QuietHours = Type.Object({
+  start: Type.String({ pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }),
+  end: Type.String({ pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }),
+});
+export type QuietHours = Static<typeof QuietHours>;
+
+/** Per-device push preferences: mutes and quiet hours; the in-app inbox is unaffected. */
 export const DeviceAlerts = Type.Object({
   mutedKinds: Type.Array(NotificationKind, { maxItems: 8, uniqueItems: true }),
   mutedGhostIds: Type.Array(Id, { maxItems: 512, uniqueItems: true }),
+  /** Absent or null: no quiet hours. */
+  quietHours: Type.Optional(nullable(QuietHours)),
 });
 export type DeviceAlerts = Static<typeof DeviceAlerts>;
 

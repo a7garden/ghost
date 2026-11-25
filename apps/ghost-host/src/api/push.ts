@@ -2,7 +2,7 @@ import { createSign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { connect, type ClientHttp2Session, type ClientHttp2Stream } from "node:http2";
 import { Buffer } from "node:buffer";
-import type { DeviceAlerts, Notification } from "@ghost/contract";
+import type { DeviceAlerts, Notification, QuietHours } from "@ghost/contract";
 import type { Config } from "../config.ts";
 import type { Core } from "../core/core.ts";
 
@@ -64,9 +64,26 @@ function payload(notification: Notification): string {
   return JSON.stringify(value);
 }
 
-/** A device's mute preferences drop its own pushes only: muted kinds and muted Ghosts; a null ghostId has no Ghost to mute. */
-export function shouldPush(notification: Notification, alerts: DeviceAlerts): boolean {
+const minutesOf = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3, 5));
+
+/** Whether `at` (Host PC local time) falls inside quiet hours; a window crossing midnight wraps. */
+export function inQuietHours(quiet: QuietHours, at: number): boolean {
+  const start = minutesOf(quiet.start);
+  const end = minutesOf(quiet.end);
+  if (start === end) return false;
+  const date = new Date(at);
+  const minute = date.getHours() * 60 + date.getMinutes();
+  return start < end ? minute >= start && minute < end : minute >= start || minute < end;
+}
+
+/**
+ * A device's preferences drop its own pushes only: muted kinds, muted Ghosts (a null ghostId has
+ * no Ghost to mute) and quiet hours. Quiet hours cover both when the notification happened and
+ * when it would be sent, so a backlog sent after a Host restart cannot wake the phone.
+ */
+export function shouldPush(notification: Notification, alerts: DeviceAlerts, now: number = Date.now()): boolean {
   if (alerts.mutedKinds.includes(notification.kind)) return false;
+  if (alerts.quietHours && (inQuietHours(alerts.quietHours, notification.createdAt) || inQuietHours(alerts.quietHours, now))) return false;
   return notification.ghostId === null || !alerts.mutedGhostIds.includes(notification.ghostId);
 }
 

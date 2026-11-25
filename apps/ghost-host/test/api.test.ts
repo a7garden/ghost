@@ -478,6 +478,31 @@ describe("API server", () => {
     expect(shouldPush({ id: "n4", kind: "work_done", ghostId: "g-other", conversationId: null, workId: null, decisionId: null, title: "t", body: "b", createdAt: 1, readAt: null }, alerts)).toBe(true);
     expect(shouldPush({ id: "n5", kind: "decision", ghostId: "g-other", conversationId: null, workId: null, decisionId: null, title: "t", body: "b", createdAt: 1, readAt: null }, { mutedKinds: [], mutedGhostIds: [] })).toBe(true);
   });
+  test("quiet hours drop pushes created or sent inside the window, wrapping midnight", () => {
+    const at = (hour: number, minute = 0) => new Date(2026, 10, 25, hour, minute).getTime();
+    const note = (createdAt: number) => ({ id: "q", kind: "decision" as const, ghostId: null, conversationId: null, workId: null, decisionId: null, title: "t", body: "b", createdAt, readAt: null });
+    const alerts: DeviceAlerts = { mutedKinds: [], mutedGhostIds: [], quietHours: { start: "22:00", end: "07:00" } };
+    expect(shouldPush(note(at(23)), alerts, at(23))).toBe(false);
+    expect(shouldPush(note(at(3)), alerts, at(3))).toBe(false);
+    expect(shouldPush(note(at(7)), alerts, at(7))).toBe(true);
+    expect(shouldPush(note(at(21, 59)), alerts, at(21, 59))).toBe(true);
+    // Created in quiet hours but sent after they end, or created before and sent inside them.
+    expect(shouldPush(note(at(6)), alerts, at(8))).toBe(false);
+    expect(shouldPush(note(at(12)), alerts, at(23))).toBe(false);
+    const daytime: DeviceAlerts = { mutedKinds: [], mutedGhostIds: [], quietHours: { start: "13:00", end: "14:00" } };
+    expect(shouldPush(note(at(13, 30)), daytime, at(13, 30))).toBe(false);
+    expect(shouldPush(note(at(14)), daytime, at(14))).toBe(true);
+    expect(shouldPush(note(at(23)), { ...alerts, quietHours: { start: "08:00", end: "08:00" } }, at(23))).toBe(true);
+    expect(shouldPush(note(at(23)), { ...alerts, quietHours: null }, at(23))).toBe(true);
+  });
+  test("a device stores quiet hours and a malformed window is rejected", async () => {
+    const paired = await pairDevice("Night Phone");
+    const alerts: DeviceAlerts = { mutedKinds: [], mutedGhostIds: [], quietHours: { start: "22:00", end: "07:00" } };
+    expect((await runCommand({ type: "device.alerts_update", alerts }, paired.token)).status).toBe(200);
+    expect(ledger.device(paired.deviceId).alerts).toEqual(alerts);
+    expect((await runCommand({ type: "device.alerts_update", alerts: { mutedKinds: [], mutedGhostIds: [], quietHours: { start: "25:00", end: "07:00" } } }, paired.token)).status).toBe(400);
+    expect(ledger.device(paired.deviceId).alerts).toEqual(alerts);
+  });
   test("owner uploads raw artifacts and reads them without a Work row", async () => {
     const bytes = new TextEncoder().encode("첨부 파일 내용");
     const response = await fetch(`${base}/api/artifacts`, {
