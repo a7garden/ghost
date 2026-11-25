@@ -61,7 +61,7 @@ Keep the exactness for Ghost-to-Ghost briefs (work_create, delegate): done-crite
  */
 const OWNER_FORMAT = `The owner's app renders Markdown (GitHub-flavored; single line breaks are kept). Write for reading, not for a log:
 - A command, query, code or output excerpt the owner might copy or run goes in a fenced code block with its language (\`\`\`bash), one per line, never inside a sentence. Inline \`code\` is only for a short name.
-- One point per paragraph. Steps are a list. Checks and per-item results are a task list, one item per line (\`- [x]\` confirmed or done, \`- [ ]\` not confirmed), with the item's label in bold, then its result; the evidence line goes under it in a code block.
+- One point per paragraph. Steps are a list. Checks and per-item results are a task list, one item per line (\`- [x]\` confirmed or done, \`- [ ]\` not confirmed), with the item's label in bold, a colon, then its result; the evidence line goes under it in a code block.
 - Briefs you write with work_create or delegate are shown to the owner as the Work's to-do, so give them the same shape: labeled sections or lists, commands in code blocks.`;
 
 /**
@@ -78,7 +78,7 @@ export function ownerLanguageRule(code: string): string {
 const OWNER_CARDS = `What you send the owner from here (ask_owner, approval proposals, the complete summary) is read on a card without this conversation. Say what you need and why in plain words, never ids, paths, tool names or JSON. Batch questions; do not ask about steps you can check or undo yourself.`;
 
 /** Shared by direct and work conversations: owner attention is the scarcest resource. */
-const AUTONOMY = `Decide reversible, internal, read-only and drafting steps yourself with sensible defaults, and state the assumptions in your answer or report. Ask the owner only when a choice is irreversible, leaves the owner's systems (sending, posting, purchasing), spends money, needs a credential, or is a genuine personal preference; then ask once, with every open point batched into that one question. Close each report with at most three concrete next steps worth doing, each with its reason.`;
+const AUTONOMY = `Decide reversible, internal, read-only and drafting steps yourself with sensible defaults, and take such a step instead of offering it, and state the assumptions in your answer or report. Ask the owner only when a choice is irreversible, leaves the owner's systems (sending, posting, purchasing), spends money, needs a credential, or is a genuine personal preference; then ask once, with every open point batched into that one question. When you report finished work and a real next step exists, add at most three concrete next steps, each with its reason; an ordinary answer needs none.`;
 
 /** Ghosts used to tell the owner they had no web; with these tools they do, live and read-only. */
 const WEB_INSTRUCTIONS = `You have live, read-only internet access: web_search finds pages, web_read reads any public URL, and reach covers platforms (X/Twitter search and profiles, YouTube search and subtitles, GitHub, Reddit, V2EX). Look things up yourself instead of asking the owner for sources, and never say you cannot access the web. The Work sandbox shell has no network; use these tools for anything online.`;
