@@ -91,3 +91,22 @@ test('a chosen folder names the space when the name is left empty', async ({ pag
   await save.click();
   await expect.poll(() => service.read().spaces.map(space => space.title)).toEqual([tmpdir().split('/').pop()]);
 });
+
+test('folds agents idle for days and lists them on request', async ({ page }) => {
+  const coding = await mockCodingSessions(page);
+  const { service } = await mockWorkbench(page, [{ cwd: tmpdir() }]);
+  const space = service.createSpace({ version: 0, title: '정리', root: null }).spaces[0]!;
+  service.addAgent(space.id, { version: 1, sessionId: sampleSession.id });
+  service.addAgent(space.id, { version: 2, sessionId: 'new-1' });
+  await coding.patch({ state: 'idle', updatedAt: sampleSession.updatedAt + 1 });
+  await openScreen(page, {
+    name: 'workbench fold', route: () => '/coding', waits: () => ['이전 에이전트 1개'],
+    prepare: page => page.clock.setFixedTime(new Date(sampleSession.updatedAt + 4 * 24 * 60 * 60 * 1000)),
+  }, 'light');
+  const agents = page.getByRole('list', { name: '에이전트' });
+  await expect(agents.getByTitle(sampleSession.title, { exact: true })).toHaveCount(0);
+  await agents.getByRole('button', { name: '이전 에이전트 1개' }).click();
+  await expect(agents.getByTitle(sampleSession.title, { exact: true })).toBeVisible();
+  await agents.getByTitle(sampleSession.title, { exact: true }).click();
+  await expect(page.getByRole('region', { name: `에이전트: ${sampleSession.title}`, exact: true })).toHaveAttribute('data-focused', 'true');
+});

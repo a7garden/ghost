@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, Ellipsis, Folder, GitBranch, Plus, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Ellipsis, Folder, GitBranch, Plus, X } from 'lucide-react';
 import type { Agent, CodingSession as Session, Scope, Space, WorkbenchSpaceCreate, WorkbenchState } from '@ghost/contract';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { FolderField } from '../components/FolderPicker';
@@ -13,6 +13,7 @@ import { codingError } from './CodingSessionModel';
 import { directoryName } from './CodingModel';
 import { useWorkbenchAttention, type Attention } from './WorkbenchAttention';
 import { WorkbenchChanges } from './WorkbenchChanges';
+import { foldedAgents } from './workbenchFold';
 import { resolveSessionLink } from './workbenchSessionLink';
 import './Workbench.css';
 import './CodingSession.css';
@@ -100,6 +101,7 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [spacesOpen, setSpacesOpen] = useState(false);
+  const [showOlder, setShowOlder] = useState(false);
   const busy = queued > 0;
   const focus = state?.focus;
   const space = state?.spaces.find(space => space.id === focus?.spaceId);
@@ -107,6 +109,8 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
   const focusedId = focus?.sessionId ?? null;
   const { sessions, attention, observer, listError, setShowPicker, reloadList } = useWorkbenchAttention(state?.agents ?? null, focusedId);
   const agentTitle = (agent: Agent) => sessions.get(agent.sessionId)?.title || '에이전트';
+  const folded = foldedAgents(agents, sessions, attention, focusedId, Date.now());
+  const listed = showOlder ? agents : agents.filter(agent => !folded.has(agent.sessionId));
   const focusedAgent = agents.find(agent => agent.sessionId === focusedId);
 
   useEffect(() => {
@@ -214,7 +218,7 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
           <SpaceMenu space={item} disabled={busy} open={displayDialog}/>
         </div>
         {selected && <ul className="workbench-agents" aria-label="에이전트">
-          {agents.map(agent => {
+          {listed.map(agent => {
             const title = agentTitle(agent);
             return <li key={agent.sessionId} className="workbench-agent-row" data-selected={agent.sessionId === focusedId || undefined}>
               <button type="button" aria-current={agent.sessionId === focusedId ? 'true' : undefined} title={title}
@@ -225,6 +229,8 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
                 onClick={() => showFailure(mutate(`agents/${encodeURIComponent(agent.sessionId)}`, 'DELETE'))}><X aria-hidden="true"/></Button>
             </li>;
           })}
+          {folded.size > 0 && <li><button type="button" className="workbench-agent-add" aria-expanded={showOlder} onClick={() => setShowOlder(value => !value)}>
+            {showOlder ? <ChevronUp size={15} aria-hidden="true"/> : <ChevronDown size={15} aria-hidden="true"/>}{showOlder ? '이전 에이전트 접기' : `이전 에이전트 ${folded.size}개`}</button></li>}
           <li><button type="button" className="workbench-agent-add" disabled={busy} onClick={() => displayDialog({ type: 'agent' })}><Plus size={15} aria-hidden="true"/>에이전트 추가</button></li>
         </ul>}
       </div>;
@@ -293,8 +299,8 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
             onClick={() => setDialog({ type: 'changes' })}><GitBranch aria-hidden="true"/>git 변경</Button>}
         </header>
         {agents.length ? <div className="workbench-agent-stack">
-          {/* Every listed agent stays mounted so a draft and the live stream survive switching. */}
-          {agents.map(agent => <section key={agent.sessionId} className="workbench-agent" aria-label={`에이전트: ${agentTitle(agent)}`}
+          {/* Every unfolded agent stays mounted so a draft and the live stream survive switching. */}
+          {agents.filter(agent => !folded.has(agent.sessionId)).map(agent => <section key={agent.sessionId} className="workbench-agent" aria-label={`에이전트: ${agentTitle(agent)}`}
             data-focused={agent.sessionId === focusedId || undefined} hidden={agent.sessionId !== focusedId}>
             <CodingSession id={agent.sessionId} onUpdate={observer}/>
           </section>)}
