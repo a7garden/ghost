@@ -1,0 +1,19 @@
+# Sanitized copy: only orchestration-related keys retained.
+model = "faux-mini"
+model_reasoning_effort = "high"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[profiles.fast]
+model = "faux-mini"
+model_reasoning_effort = "low"
+cwd = "/tmp"
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3
+default_subagent_model = "faux-mini"
+default_subagent_reasoning_effort = "minimal"
+
+[tui]
+screen_reader_detection_done = true

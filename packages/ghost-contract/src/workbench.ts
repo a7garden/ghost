@@ -1,40 +1,29 @@
 import { Type, type Static } from "typebox";
-import { Id, Timestamp, nullable } from "./entities.ts";
+import { Id, nullable } from "./entities.ts";
 
-const title = Type.String({ minLength: 1, maxLength: 200 });
-const path = Type.String({ minLength: 1, maxLength: 4096 });
 const version = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 const body = { additionalProperties: false } as const;
 
-export type Space = {
-  id: string;
-  title: string;
-  root: string | null;
-  createdAt: Static<typeof Timestamp>;
-  worktree?: { repo: string; branch: string };
-  /** The agent shown when the owner returns to this space. */
-  lastSessionId?: string;
-};
-/** A built-in coding session listed in one space. The session outlives the entry: removing an agent never closes it. */
-export type Agent = { sessionId: string; spaceId: string };
+/**
+ * A built-in coding session listed in the workbench under a project (Scope), or under 프로젝트 없음 when `scopeId` is null.
+ * The session outlives the entry: removing an agent never closes it. A session a Ghost started is not listed here; the UI
+ * finds its project through its Work (`CodingSession.workId` → `Work.scopeId`).
+ */
+export type Agent = { sessionId: string; scopeId: string | null };
 export type WorkbenchState = {
   version: number;
-  spaces: Space[];
   agents: Agent[];
-  focus: { spaceId: string; sessionId: string | null } | null;
+  /** The project on screen (null: 프로젝트 없음) and its focused agent. */
+  focus: { scopeId: string | null; sessionId: string | null } | null;
 };
 
 export const WorkbenchVersion = Type.Object({ version }, body);
-export const WorkbenchSpaceCreate = Type.Object({
-  version, title, root: nullable(path),
-  worktree: Type.Optional(Type.Object({ branch: Type.String({ minLength: 1, maxLength: 200 }) }, body)),
-}, body);
-export type WorkbenchSpaceCreate = Static<typeof WorkbenchSpaceCreate>;
-export const WorkbenchRename = Type.Object({ version, title }, body);
-export type WorkbenchRename = Static<typeof WorkbenchRename>;
-export const WorkbenchAgentCreate = Type.Object({ version, sessionId: Id }, body);
+export const WorkbenchAgentCreate = Type.Object({ version, sessionId: Id, scopeId: nullable(Id) }, body);
 export type WorkbenchAgentCreate = Static<typeof WorkbenchAgentCreate>;
-export const WorkbenchFocus = Type.Object({ version, spaceId: Id, sessionId: Type.Optional(Id) }, body);
+/** Moves an agent to another project, or to 프로젝트 없음. */
+export const WorkbenchAgentMove = Type.Object({ version, scopeId: nullable(Id) }, body);
+export type WorkbenchAgentMove = Static<typeof WorkbenchAgentMove>;
+export const WorkbenchFocus = Type.Object({ version, scopeId: nullable(Id), sessionId: Type.Optional(Id) }, body);
 export type WorkbenchFocus = Static<typeof WorkbenchFocus>;
 
 export type WorkbenchChanges = {
@@ -50,4 +39,5 @@ export type WorkbenchChanges = {
   truncated: boolean;
 };
 
+/** `GET /api/workbench/changes?root=<abs>` lists Git changes of a project folder or an agent's cwd; adding `&path=` returns one file's diff. */
 export type WorkbenchFileDiff = { path: string; staged: string; unstaged: string; truncated: boolean };

@@ -1,97 +1,39 @@
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronUp, Ellipsis, Folder, GitBranch, History, Pencil, Plus, SquareTerminal, Trash2, X } from 'lucide-react';
-import type { Agent, CodingSession as Session, Scope, Space, WorkbenchSpaceCreate, WorkbenchState } from '@ghost/contract';
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { Box, ChevronDown, Folder, GitBranch, PanelLeftOpen, Plus, SquareTerminal, X } from 'lucide-react';
+import type { CodingSession as Session, CodingSessionCreate, Ghost, Scope, Work, WorkbenchState } from '@ghost/contract';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { FolderField } from '../components/FolderPicker';
-import { Modal } from '../components/Modal';
 import { HostError } from '../host/client';
 import { useHost } from '../host/context';
-import { Button, ContextMenu, ContextMenuAction, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, InlineError, Input, Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { Button, InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { shortcut } from '../ui/keys';
+import { AgentLaunch, type Launch } from './AgentLaunch';
 import { CodingSession } from './CodingSession';
-import { StartSession } from './CodingSessionStart';
+import { CodingSessionChanges } from './CodingSessionChanges';
 import { codingError } from './CodingSessionModel';
-import { directoryName } from './CodingModel';
 import { useWorkbenchAttention, type Attention } from './WorkbenchAttention';
 import { WorkbenchChanges } from './WorkbenchChanges';
+import { AgentMenu, AgentState, AttentionMark, InlineName, PaneHead, type PaneActions } from './WorkbenchPane';
+import { AGENT_DRAG, WorkbenchRail, type RailProject } from './WorkbenchRail';
 import { WorkbenchTerminal } from './WorkbenchTerminal';
-import { absoluteTime, relativeTime, useNow } from './time';
-import { foldedAgents } from './workbenchFold';
+import { useNow } from './time';
+import { foldedAgents, STALE_MS } from './workbenchFold';
+import { close, emptyLayout, LAUNCH, loadLayout, prune, resize, saveLayout, show, split, type Layout } from './workbenchLayout';
+import { projectAgents, sessionProject } from './workbenchProjects';
 import { resolveSessionLink } from './workbenchSessionLink';
 import './Workbench.css';
 import './CodingSession.css';
 
 type Dialog =
-  | { type: 'space' | 'changes' | 'agent' | 'start' }
-  | { type: 'rename' | 'delete'; space: Space }
-  | { type: 'renameAgent' | 'deleteAgent'; sessionId: string; title: string };
+  | { type: 'folderChanges'; root: string }
+  | { type: 'agentChanges'; sessionId: string }
+  | { type: 'deleteAgent' | 'closeSession'; sessionId: string; title: string };
 
 const ATTENTION_PRIORITY: Record<Attention, number> = { done: 1, failed: 2, waiting: 3 };
-const stateLabels: Record<Session['state'], string> = {
-  idle: '대기 중', working: '작업 중', waiting: '입력 대기', closed: '닫힘', failed: '실패',
-};
+const RAIL_KEY = 'ghost.workbench.rail';
+const layoutKey = (scopeId: string | null) => scopeId ?? '';
 
-export function AttentionMark({ signal }: { signal?: Attention }) {
-  if (!signal) return null;
-  const label = signal === 'waiting' ? '입력 대기' : signal === 'failed' ? '실패' : '완료';
-  return <span className="workbench-attention" data-signal={signal} role="img" aria-label={label} title={label}/>;
-}
-
-function NameSheet({ title, initial = '', withRoot, onSave, onClose }: {
-  title: string; initial?: string; withRoot?: boolean;
-  onSave(name: string, root: string | null, worktree?: WorkbenchSpaceCreate['worktree']): Promise<unknown>; onClose(): void;
-}) {
-  const [name, setName] = useState(initial);
-  const [root, setRoot] = useState('');
-  const [withWorktree, setWithWorktree] = useState(false);
-  const [branch, setBranch] = useState('');
-  const [pending, setPending] = useState(false);
-  const formed = useRef(false);
-  const [error, setError] = useState('');
-  // A chosen folder names the space when the name is left empty.
-  const label = name.trim() || (withRoot && root ? directoryName(root).slice(0, 200) : '');
-  return <Modal title={title} onClose={() => { if (!formed.current) onClose(); }} className="sm:max-w-[420px]">
-    <form className="workbench-form" onSubmit={event => {
-      event.preventDefault();
-      if (!label || (withWorktree && !branch.trim()) || formed.current) return;
-      formed.current = true;
-      setPending(true); setError('');
-      void onSave(label, root || null, withWorktree ? { branch: branch.trim() } : undefined).then(onClose).catch(reason => setError(codingError(reason, '저장하지 못했습니다.')))
-        .finally(() => { formed.current = false; setPending(false); });
-    }}>
-      <label>이름<Input value={name} required={!root} placeholder={root ? directoryName(root) : undefined} maxLength={200} disabled={pending} onChange={event => setName(event.target.value)}/></label>
-      {withRoot && <>
-        <FolderField label="작업 폴더 (선택)" optional value={root} disabled={pending} onChange={value => {
-          setRoot(value);
-          if (!value) setWithWorktree(false);
-        }}/>
-        <label className="workbench-worktree-toggle"><input type="checkbox" checked={withWorktree} disabled={pending || !root}
-          onChange={event => setWithWorktree(event.target.checked)}/>worktree로 시작</label>
-        {withWorktree && <label>브랜치 이름<Input value={branch} required maxLength={200} disabled={pending} onChange={event => setBranch(event.target.value)}/></label>}
-      </>}
-      {error && <InlineError>{error}</InlineError>}
-      <Button className="justify-self-end" disabled={pending || !label || (withWorktree && !branch.trim())} type="submit">{pending ? '저장 중…' : '저장'}</Button>
-    </form>
-  </Modal>;
-}
-
-function SpaceMenu({ space, disabled, open }: { space: Space; disabled: boolean; open(dialog: Dialog): void }) {
-  const [shown, setShown] = useState(false);
-  return <Popover open={shown} onOpenChange={setShown}>
-    <PopoverTrigger asChild><Button variant="ghost" size="icon" type="button" disabled={disabled} aria-label={`${space.title} 스페이스 메뉴`}><Ellipsis aria-hidden="true"/></Button></PopoverTrigger>
-    <PopoverContent className="workbench-menu" align="end" aria-label="스페이스 메뉴">
-      <button type="button" onClick={() => { setShown(false); open({ type: 'rename', space }); }}>이름 변경</button>
-      <button type="button" data-danger onClick={() => { setShown(false); open({ type: 'delete', space }); }}>스페이스 삭제</button>
-    </PopoverContent>
-  </Popover>;
-}
-
-function AgentState({ session }: { session: Session | undefined }) {
-  const state = session?.state ?? 'idle';
-  return <span className="workbench-state-mark" data-state={state} role="img" aria-label={stateLabels[state]} title={stateLabels[state]}/>;
-}
-
-export function Workbench({ scopes, compact, sessionId, navigate }: {
-  scopes: Scope[]; compact: boolean; sessionId: string | null; navigate(path: string): void;
+export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate }: {
+  scopes: readonly Scope[]; works: readonly Work[]; ghosts: readonly Ghost[]; compact: boolean; sessionId: string | null; navigate(path: string): void;
 }) {
   const { client } = useHost();
   const [state, setState] = useState<WorkbenchState | null>(null);
@@ -103,27 +45,102 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
   const [queued, setQueued] = useState(0);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const [dialog, setDialog] = useState<Dialog | null>(null);
-  const [spacesOpen, setSpacesOpen] = useState(false);
-  const [showOlder, setShowOlder] = useState(false);
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [compactRenaming, setCompactRenaming] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [railHidden, setRailHidden] = useState(() => { try { return localStorage.getItem(RAIL_KEY) === 'hidden'; } catch { return false; } });
+  const [layouts, setLayouts] = useState<Record<string, Layout>>({});
+  const [changeRevisions, setChangeRevisions] = useState<Record<string, number>>({});
+  const [dropHint, setDropHint] = useState<{ index: number; side: 'split' | 'replace' } | null>(null);
+  const panesRef = useRef<HTMLDivElement>(null);
   const busy = queued > 0;
   const now = useNow();
-  const focus = state?.focus;
-  const space = state?.spaces.find(space => space.id === focus?.spaceId);
-  const agents = state?.agents.filter(agent => agent.spaceId === space?.id) ?? [];
-  const focusedId = focus?.sessionId ?? null;
-  const { sessions, attention, observer, listError, setShowPicker, reloadList } = useWorkbenchAttention(state?.agents ?? null, focusedId);
-  const agentTitle = (agent: Agent) => sessions.get(agent.sessionId)?.title || '에이전트';
-  const folded = foldedAgents(agents, sessions, attention, focusedId, Date.now());
-  const listed = showOlder ? agents : agents.filter(agent => !folded.has(agent.sessionId));
+
+  const selected = state?.focus ? state.focus.scopeId : scopes[0]?.id ?? null;
+  const scope = scopes.find(item => item.id === selected);
+  const workMap = useMemo(() => new Map(works.map(work => [work.id, work])), [works]);
+  const ghostMap = useMemo(() => new Map(ghosts.map(ghost => [ghost.id, { id: ghost.id, name: ghost.name }])), [ghosts]);
+
+  const layout = layouts[layoutKey(selected)] ?? emptyLayout;
+  const activeId = layout.panes[layout.active] ?? null;
+  const activeSession = activeId && activeId !== LAUNCH ? activeId : null;
+  const { sessions, attention, observer, listed: sessionsListed, setShowPicker } = useWorkbenchAttention(state?.agents ?? null, activeSession);
+  // The session list feeds Ghost-started agents and the project's earlier sessions.
+  useEffect(() => setShowPicker(true), [setShowPicker]);
+
+  const rows = useMemo(() => (state ? projectAgents(state.agents, sessions, workMap, scopes) : []).filter(row => {
+    if (row.listed) return true;
+    const session = sessions.get(row.sessionId);
+    return Boolean(session && (session.state !== 'closed' || now - session.updatedAt < STALE_MS));
+  }), [state, sessions, workMap, scopes, now]);
+  const projectRows = rows.filter(row => row.scopeId === selected);
+  const folded = foldedAgents(projectRows, sessions, attention, activeSession, Date.now());
   const listedIds = new Set(state?.agents.map(agent => agent.sessionId));
-  const earlier = [...sessions.values()].filter(session => !listedIds.has(session.id)).sort((a, b) => b.updatedAt - a.updatedAt);
-  const focusedAgent = agents.find(agent => agent.sessionId === focusedId);
-  // The shell opens where the agent works, else in the space's folder.
-  const terminalCwd = (focusedAgent && sessions.get(focusedAgent.sessionId)?.cwd) || space?.root || null;
-  const covered = compact && terminalOpen && terminalCwd !== null;
-  const terminalButton = <Button variant={terminalOpen ? 'secondary' : 'ghost'} size={compact ? 'icon' : 'sm'} type="button" disabled={!terminalCwd} aria-pressed={terminalOpen}
-    aria-label="터미널" title="터미널" onClick={() => setTerminalOpen(value => !value)}><SquareTerminal aria-hidden="true"/>{!compact && '터미널'}</Button>;
+  const earlier = [...sessions.values()].filter(session => !session.ghostId && !listedIds.has(session.id)
+    && sessionProject(session, workMap, scopes) === selected).sort((a, b) => b.updatedAt - a.updatedAt);
+  const busyFolders = new Set(projectRows.flatMap(row => {
+    const session = sessions.get(row.sessionId);
+    return session && !session.repo && (session.state === 'working' || session.state === 'waiting') ? [session.cwd] : [];
+  }));
+
+  const signals = new Map<string | null, Attention>();
+  for (const row of rows) {
+    const signal = attention.get(row.sessionId), prior = signals.get(row.scopeId);
+    if (signal && (!prior || ATTENTION_PRIORITY[signal] > ATTENTION_PRIORITY[prior])) signals.set(row.scopeId, signal);
+  }
+  const projects: RailProject[] = scopes.map(item => ({ id: item.id, scope: item, signal: signals.get(item.id) }));
+  if (!scopes.length || selected === null || rows.some(row => row.scopeId === null)) projects.push({ id: null, scope: null, signal: signals.get(null) });
+
+  // Every unfolded agent of the project stays mounted, so a draft and the live stream survive switching panes.
+  const mounted = [...new Set([...projectRows.filter(row => !folded.has(row.sessionId)).map(row => row.sessionId), ...layout.panes])];
+  const shownIds = new Set(compact ? [activeId ?? ''] : layout.panes);
+  const terminalCwd = (activeSession && sessions.get(activeSession)?.cwd) || scope?.paths[0] || null;
+
+  function setLayout(update: (current: Layout) => Layout, scopeId = selected) {
+    setLayouts(all => {
+      const key = layoutKey(scopeId);
+      const current = all[key] ?? emptyLayout;
+      const next = update(current);
+      return next === current ? all : { ...all, [key]: next };
+    });
+  }
+
+  // A project's panes come back as the owner left them; a first visit opens the agent the Host remembers, else a launch pad.
+  useEffect(() => {
+    if (!state) return;
+    const key = layoutKey(selected);
+    if (layouts[key]) return;
+    let restored = loadLayout(selected);
+    const remembered = state.focus?.scopeId === selected ? state.focus.sessionId : null;
+    if (remembered && !restored.panes.includes(remembered)) restored = show(restored, remembered);
+    if (!restored.panes.length) {
+      const first = projectRows.find(row => !folded.has(row.sessionId));
+      restored = show(restored, first?.sessionId ?? LAUNCH);
+    }
+    setLayouts(all => ({ ...all, [key]: restored }));
+  }, [state, selected, layouts, projectRows, folded]);
+
+  useEffect(() => { if (layouts[layoutKey(selected)]) saveLayout(selected, layout); }, [selected, layout, layouts]);
+
+  // Panes of sessions that no longer exist close once the session list has loaded.
+  useEffect(() => {
+    if (!sessionsListed) return;
+    setLayout(current => prune(current, id => sessions.has(id)));
+  }, [sessionsListed, sessions, selected]);
+
+  // The active agent is the Host's focus, so the phone and the Mac return to the same place.
+  const syncFocus = useEffectEvent((id: string) => {
+    const focus = latest.current?.focus;
+    if (!latest.current || (focus?.scopeId === selected && focus.sessionId === id)) return;
+    showFailure(mutate('focus', 'POST', { scopeId: selected, sessionId: id }));
+  });
+  useEffect(() => { if (activeSession && sessions.has(activeSession)) syncFocus(activeSession); }, [activeSession, sessions.size > 0]);
+
+  // A focus that arrives from elsewhere (a link from 맡긴 일, another device) shows in the active pane.
+  const hostFocus = state?.focus?.sessionId ?? null;
+  useEffect(() => {
+    if (hostFocus && layouts[layoutKey(selected)]) setLayout(current => current.panes.includes(hostFocus) ? current : show(current, hostFocus));
+  }, [hostFocus]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -141,12 +158,8 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
     void enqueue(async () => {
       if (signal.aborted) return;
       const session = await client.codingSession(id, signal);
-      while (!signal.aborted && latest.current) {
-        const action = resolveSessionLink(latest.current, session);
-        if (!action) break;
-        await change(action.path, 'POST', action.fields);
-        if (action.opensAgent) break;
-      }
+      const action = latest.current && resolveSessionLink(latest.current, session, sessionProject(session, workMap, scopes));
+      if (action && !signal.aborted) await change(action.path, 'POST', action.fields);
       if (!signal.aborted) setSessionLink({ id, error: '' });
     }).catch(reason => {
       if (signal.aborted) return;
@@ -162,8 +175,23 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
     return () => controller.abort();
   }, [client, loaded, sessionId]);
 
-  // The session list also tells whether earlier sessions are waiting to be opened.
-  useEffect(() => setShowPicker(true), [setShowPicker]);
+  useEffect(() => {
+    if (compact) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'b') return;
+      event.preventDefault();
+      toggleRail();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [compact]);
+
+  function toggleRail() {
+    setRailHidden(hidden => {
+      try { localStorage.setItem(RAIL_KEY, hidden ? 'shown' : 'hidden'); } catch { /* The choice still holds for this visit. */ }
+      return !hidden;
+    });
+  }
 
   function apply(snapshot: WorkbenchState) {
     if (latest.current && latest.current.version > snapshot.version) return;
@@ -199,158 +227,243 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
     void result.catch(reason => setError(codingError(reason, '작업대를 바꾸지 못했습니다.')));
   }
 
-  function select(spaceId: string, agentId?: string) {
-    const current = latest.current?.focus;
-    if (current?.spaceId === spaceId && (!agentId || agentId === current.sessionId)) return;
-    showFailure(mutate('focus', 'POST', { spaceId, sessionId: agentId }));
+  function selectProject(id: string | null) {
+    setProjectsOpen(false);
+    if (latest.current?.focus?.scopeId === id && latest.current.focus !== null) return;
+    showFailure(mutate('focus', 'POST', { scopeId: id }));
   }
 
-  function addAgent(id: string) {
-    if (!space) return Promise.resolve();
-    return mutate(`spaces/${encodeURIComponent(space.id)}/agents`, 'POST', { sessionId: id });
+  function openAgent(id: string, beside = false) {
+    setProjectsOpen(false);
+    setLayout(current => beside ? split(current, id) : show(current, id));
   }
 
-  const spaceSignals = new Map<string, Attention>();
-  if (state && attention.size) {
-    for (const agent of state.agents) {
-      const signal = attention.get(agent.sessionId), prior = spaceSignals.get(agent.spaceId);
-      if (signal && (!prior || ATTENTION_PRIORITY[signal] > ATTENTION_PRIORITY[prior])) spaceSignals.set(agent.spaceId, signal);
+  const replaceLaunch = (id: string) => setLayout(current => {
+    const at = current.panes.indexOf(LAUNCH);
+    if (current.panes.includes(id)) return at < 0 ? { ...current, active: current.panes.indexOf(id) } : close({ ...current, active: current.panes.indexOf(id) }, at);
+    if (at < 0) return show(current, id);
+    const panes = current.panes.slice();
+    panes[at] = id;
+    return { ...current, panes, active: at };
+  });
+
+  async function launch({ prompt, place, choice }: Launch) {
+    const withImages = Boolean(prompt.images?.length);
+    const input: CodingSessionCreate = {
+      ...(place.folder ? place.worktree ? { repo: place.folder } : { cwd: place.folder } : {}),
+      ...(choice.model && { model: choice.model }), ...(choice.thinking && { thinking: choice.thinking }),
+      ...(!withImages && { prompt: prompt.text }),
+    };
+    const session = await client.createCodingSession(input);
+    observer(session);
+    const result = withImages ? await client.promptCodingSession(session.id, prompt) : { disposition: 'started' as const };
+    await mutate('agents', 'POST', { sessionId: session.id, scopeId: selected });
+    replaceLaunch(session.id);
+    return result;
+  }
+
+  function resume(session: Session) {
+    showFailure(mutate('agents', 'POST', { sessionId: session.id, scopeId: selected }).then(() => replaceLaunch(session.id)));
+  }
+
+  async function renameAgent(id: string, title: string) {
+    try { observer(await client.patchCodingSession(id, { title })); }
+    catch (reason) { setError(codingError(reason, '이름을 바꾸지 못했습니다.')); }
+  }
+
+  function dropPanes(id: string) {
+    for (const key of Object.keys(layouts)) setLayout(current => {
+      let next = current;
+      for (let at = next.panes.indexOf(id); at >= 0; at = next.panes.indexOf(id)) next = close(next, at);
+      return next;
+    }, key || null);
+  }
+
+  function removeAgent(id: string) {
+    showFailure(mutate(`agents/${encodeURIComponent(id)}`, 'DELETE').then(() => dropPanes(id)));
+  }
+
+  function pinAgent(id: string) {
+    const row = rows.find(candidate => candidate.sessionId === id);
+    showFailure(mutate('agents', 'POST', { sessionId: id, scopeId: row?.scopeId ?? selected }));
+  }
+
+  function moveAgent(id: string, scopeId: string | null) {
+    const listed = state?.agents.some(agent => agent.sessionId === id);
+    const result = listed ? mutate(`agents/${encodeURIComponent(id)}`, 'PATCH', { scopeId }) : mutate('agents', 'POST', { sessionId: id, scopeId });
+    showFailure(result.then(() => dropPanes(id)));
+  }
+
+  async function createProject(name: string, folder: string | null) {
+    try {
+      const { scopeId } = await client.send<{ scopeId: string }>({ type: 'scope.create', name, ghostId: null, paths: folder ? [folder] : [], vaultPath: null, state: 'active', attachments: [], limits: {} });
+      await mutate('focus', 'POST', { scopeId });
+    } catch (reason) {
+      setError(codingError(reason, '프로젝트를 만들지 못했습니다.'));
+      throw reason;
     }
   }
-  const displayDialog = (next: Dialog) => { setDialog(next); setSpacesOpen(false); };
-  const dismiss = () => setDialog(null);
-  const makeSpace = <Button variant="ghost" size="icon" type="button" disabled={!state || busy} aria-label="새 스페이스" title="새 스페이스" onClick={() => displayDialog({ type: 'space' })}><Plus aria-hidden="true"/></Button>;
-  const spaceList = <nav className="workbench-spaces" aria-label="스페이스">
-    {state?.spaces.map(item => {
-      const selected = item.id === space?.id;
-      return <div key={item.id}>
-        <div className="workbench-space-row" data-selected={selected || undefined}>
-          <button type="button" aria-current={selected ? 'true' : undefined} title={item.root ?? item.title} onClick={() => { select(item.id); setSpacesOpen(false); }}>
-            <Folder size={15} aria-hidden="true"/><span>{item.title}</span><AttentionMark signal={spaceSignals.get(item.id)}/>
-          </button>
-          <SpaceMenu space={item} disabled={busy} open={displayDialog}/>
-        </div>
-        {selected && <ul className="workbench-agents" aria-label="에이전트">
-          {listed.map(agent => {
-            const title = agentTitle(agent);
-            const updatedAt = sessions.get(agent.sessionId)?.updatedAt;
-            const removeAgent = () => showFailure(mutate(`agents/${encodeURIComponent(agent.sessionId)}`, 'DELETE'));
-            return <li key={agent.sessionId}><ContextMenu>
-              <ContextMenuTrigger asChild touchAction="inline"><div className="workbench-agent-row" data-selected={agent.sessionId === focusedId || undefined}>
-              <button type="button" aria-current={agent.sessionId === focusedId ? 'true' : undefined} title={title}
-                onClick={() => { select(item.id, agent.sessionId); setSpacesOpen(false); }}>
-                <AgentState session={sessions.get(agent.sessionId)}/><span className="workbench-agent-title">{title}</span>{updatedAt !== undefined && <time className="workbench-agent-time tabular" dateTime={new Date(updatedAt).toISOString()} title={absoluteTime(updatedAt)}>{relativeTime(updatedAt, now)}</time>}<AttentionMark signal={attention.get(agent.sessionId)}/>
-              </button>
-              <ContextMenuAction/>
-              <Button variant="ghost" size="icon" type="button" disabled={busy} aria-label={`${title} 닫기`} title="닫기"
-                onClick={removeAgent}><X aria-hidden="true"/></Button>
-              </div></ContextMenuTrigger>
-              <ContextMenuContent aria-label="에이전트 메뉴">
-                <ContextMenuItem icon={<Pencil/>} onSelect={() => setDialog({ type: 'renameAgent', sessionId: agent.sessionId, title })}>이름 바꾸기</ContextMenuItem>
-                <ContextMenuItem icon={<Trash2/>} onSelect={() => setDialog({ type: 'deleteAgent', sessionId: agent.sessionId, title })}>삭제</ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu></li>;
-          })}
-          {folded.size > 0 && <li><button type="button" className="workbench-agent-add" aria-expanded={showOlder} onClick={() => setShowOlder(value => !value)}>
-            {showOlder ? <ChevronUp size={15} aria-hidden="true"/> : <ChevronDown size={15} aria-hidden="true"/>}{showOlder ? '이전 에이전트 접기' : `이전 에이전트 ${folded.size}개`}</button></li>}
-          <li><button type="button" className="workbench-agent-add" disabled={busy} onClick={() => displayDialog({ type: 'start' })}><Plus size={15} aria-hidden="true"/>새 에이전트</button></li>
-          {earlier.length > 0 && <li><button type="button" className="workbench-agent-add" disabled={busy} onClick={() => displayDialog({ type: 'agent' })}><History size={15} aria-hidden="true"/>이전 세션 열기</button></li>}
-        </ul>}
-      </div>;
-    })}
-  </nav>;
-  const sideLinks = <nav className="workbench-links" aria-label="코딩 메뉴">
-    <a href="#/coding/orchestration" onClick={event => { event.preventDefault(); navigate('/coding/orchestration'); }}>오케스트레이션</a>
-  </nav>;
 
-  let sheet: ReactNode;
-  if (dialog?.type === 'space') {
-    sheet = <NameSheet key="space" title="새 스페이스" withRoot onClose={dismiss}
-      onSave={(title, root, worktree) => mutate('spaces', 'POST', { title, root, worktree })}/>;
-  } else if (dialog?.type === 'changes' && space) {
-    sheet = <WorkbenchChanges key={space.id} spaceId={space.id} onClose={dismiss}/>;
-  } else if (dialog?.type === 'rename') {
-    const target = dialog.space;
-    sheet = <NameSheet key={target.id} title="이름 변경" initial={target.title} onClose={dismiss}
-      onSave={title => mutate(`spaces/${encodeURIComponent(target.id)}`, 'PATCH', { title })}/>;
-  } else if (dialog?.type === 'delete') {
-    const target = dialog.space;
-    sheet = <ConfirmDialog title="스페이스 삭제" onClose={dismiss} confirmLabel="삭제" onConfirm={() => mutate(`spaces/${encodeURIComponent(target.id)}`, 'DELETE')}>
-      <p>‘{target.title}’과 그 에이전트 목록이 사라집니다. 코딩 세션은 남습니다.{target.worktree && ' worktree와 브랜치도 남습니다.'}</p>
-    </ConfirmDialog>;
-  } else if (dialog?.type === 'renameAgent') {
-    const target = dialog;
-    sheet = <NameSheet key={target.sessionId} title="이름 바꾸기" initial={target.title} onClose={dismiss}
-      onSave={title => client.patchCodingSession(target.sessionId, { title })}/>;
-  } else if (dialog?.type === 'deleteAgent') {
-    const target = dialog;
-    sheet = <ConfirmDialog title="에이전트 삭제" onClose={dismiss} confirmLabel="삭제"
-      onConfirm={() => mutate(`agents/${encodeURIComponent(target.sessionId)}`, 'DELETE')}>
-      <p>‘{target.title}’을 목록에서 삭제합니다. 코딩 세션 기록은 남고 「이전 세션 열기」에서 다시 열 수 있습니다.</p>
-    </ConfirmDialog>;
-  } else if (dialog?.type === 'agent') {
-    sheet = <Modal title="이전 세션 열기" onClose={dismiss}><div className="workbench-picker">
-      {earlier.map(session => <button type="button" key={session.id} title={session.repo ?? session.cwd} onClick={() => { dismiss(); showFailure(addAgent(session.id)); }}>{session.title}</button>)}
-      {earlier.length === 0 && !listError && <p className="workbench-empty">열 수 있는 이전 세션이 없습니다.</p>}
-      {listError && <InlineError onRetry={reloadList} retryLabel="다시 불러오기">{listError}</InlineError>}
-    </div></Modal>;
-  } else if (dialog?.type === 'start') {
-    const roots = [...new Set([space?.root, ...scopes.flatMap(scope => scope.paths)].filter((path): path is string => Boolean(path)))];
-    sheet = <StartSession directories={roots} sandboxFirst={!space?.root} onClose={dismiss} onCreated={session => {
-      dismiss();
-      showFailure(addAgent(session.id));
-    }}/>;
+  function startResize(index: number, event: ReactPointerEvent<HTMLDivElement>) {
+    const width = panesRef.current?.getBoundingClientRect().width;
+    if (!width) return;
+    const handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+    let last = event.clientX;
+    const move = (next: PointerEvent) => { const delta = (next.clientX - last) / width; last = next.clientX; setLayout(current => resize(current, index, delta)); };
+    const end = () => { handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', end); handle.removeEventListener('pointercancel', end); };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
   }
 
-  return <div className="workbench" data-compact={compact || undefined}>
+  function dragTarget(event: DragEvent<HTMLElement>) {
+    const pane = (event.target as Element).closest<HTMLElement>('[data-pane-index]');
+    if (!pane) return null;
+    const box = pane.getBoundingClientRect();
+    const side: 'split' | 'replace' = event.clientX > box.left + box.width * 0.6 ? 'split' : 'replace';
+    return { index: Number(pane.dataset.paneIndex), side };
+  }
+
+  const changesFor = (id: string) => setDialog({ type: 'agentChanges', sessionId: id });
+  const terminalToggle = (id: string | null) => <Button variant="ghost" size="icon" type="button" aria-label="터미널" title="터미널"
+    aria-pressed={terminalOpen && activeId === id} disabled={!((id && id !== LAUNCH && sessions.get(id)?.cwd) || scope?.paths[0])}
+    onClick={() => { if (id) setLayout(current => ({ ...current, active: Math.max(0, current.panes.indexOf(id)) })); setTerminalOpen(open => !(open && activeId === id)); }}><SquareTerminal aria-hidden="true"/></Button>;
+
+  let sheet = null;
+  if (dialog?.type === 'folderChanges') sheet = <WorkbenchChanges key={dialog.root} root={dialog.root} onClose={() => setDialog(null)}/>;
+  else if (dialog?.type === 'agentChanges') sheet = <CodingSessionChanges id={dialog.sessionId} revision={changeRevisions[dialog.sessionId] ?? 0} onClose={() => setDialog(null)}/>;
+  else if (dialog?.type === 'deleteAgent') {
+    const target = dialog;
+    sheet = <ConfirmDialog title="에이전트 삭제" onClose={() => setDialog(null)} confirmLabel="삭제" onConfirm={() => mutate(`agents/${encodeURIComponent(target.sessionId)}`, 'DELETE').then(() => dropPanes(target.sessionId))}>
+      <p>‘{target.title}’을 목록에서 삭제합니다. 세션 기록은 남고 새 에이전트 화면의 「이어서 하기」에서 다시 열 수 있습니다.</p>
+    </ConfirmDialog>;
+  } else if (dialog?.type === 'closeSession') {
+    const target = dialog;
+    sheet = <ConfirmDialog title="세션 닫기" confirmLabel="세션 닫기" onClose={() => setDialog(null)}
+      onConfirm={async () => observer(await client.closeCodingSession(target.sessionId))}>
+      <p>‘{target.title}’에 새 지시를 보낼 수 없게 됩니다. 작업 트리와 브랜치는 그대로 남습니다.</p>
+    </ConfirmDialog>;
+  }
+
+  const rail = <WorkbenchRail projects={projects} selected={selected} rows={projectRows} folded={folded} shownIds={shownIds} activeId={activeId}
+    launching={layout.panes.includes(LAUNCH)} sessions={sessions} attention={attention} ghosts={ghostMap} now={now} busy={busy || !state} canSplit={!compact}
+    selectProject={selectProject} openAgent={openAgent} newAgent={beside => { setProjectsOpen(false); setLayout(current => beside ? split(current, LAUNCH) : show(current, LAUNCH)); }}
+    renameAgent={renameAgent} removeAgent={id => setDialog({ type: 'deleteAgent', sessionId: id, title: sessions.get(id)?.title ?? '에이전트' })} pinAgent={pinAgent}
+    createProject={createProject} openProjectSettings={id => navigate(`/scopes/${encodeURIComponent(id)}?view=settings`)}
+    onCollapse={compact ? undefined : toggleRail}
+    footer={<nav className="workbench-links" aria-label="코딩 메뉴">
+      {scope?.paths[0] && <button type="button" onClick={() => { setProjectsOpen(false); setDialog({ type: 'folderChanges', root: scope.paths[0]! }); }}><GitBranch size={15} aria-hidden="true"/>git 변경</button>}
+      <a href="#/coding/orchestration" onClick={event => { event.preventDefault(); navigate('/coding/orchestration'); }}>오케스트레이션</a>
+      <a href="#/coding/orchestration?import=1" onClick={event => { event.preventDefault(); navigate('/coding/orchestration?import=1'); }}>하네스 가져오기</a>
+    </nav>}/>;
+
+  const paneBody = (id: string) => id === LAUNCH
+    ? <AgentLaunch folders={scope?.paths ?? []} busyFolders={busyFolders} earlier={earlier} disabled={!state} onLaunch={launch} onResume={resume}/>
+    : <CodingSession id={id} onUpdate={observer} changesRevision={value => setChangeRevisions(all => all[id] === value ? all : { ...all, [id]: value })}/>;
+
+  const agentActions = (id: string): PaneActions => {
+    const session = sessions.get(id);
+    const row = rows.find(candidate => candidate.sessionId === id);
+    return {
+      rename: title => renameAgent(id, title),
+      changes: () => changesFor(id),
+      closeSession: session && session.state !== 'closed' ? () => setDialog({ type: 'closeSession', sessionId: id, title: session.title }) : undefined,
+      remove: row?.listed ? () => setDialog({ type: 'deleteAgent', sessionId: id, title: session?.title ?? '에이전트' }) : undefined,
+      pin: row && !row.listed ? () => pinAgent(id) : undefined,
+      move: scopeId => moveAgent(id, scopeId),
+      openWork: session?.workId ? () => navigate(`/work/${encodeURIComponent(session.workId!)}`) : undefined,
+    };
+  };
+  const scopeOf = (id: string) => rows.find(candidate => candidate.sessionId === id)?.scopeId ?? selected;
+
+  const paneHead = (id: string, index: number) => {
+    const closePane = layout.panes.length > 1 || id === LAUNCH && projectRows.length > 0 ? () => setLayout(current => close(current, index)) : undefined;
+    if (id === LAUNCH) return <header className="workbench-pane__head">
+      <Plus size={15} aria-hidden="true"/><h2 className="workbench-name">새 에이전트</h2><span className="workbench-pane__spacer"/>
+      {!compact && terminalToggle(id)}
+      {closePane && <Button variant="ghost" size="icon" type="button" aria-label="패널 닫기" title="패널 닫기" onClick={closePane}><X aria-hidden="true"/></Button>}
+    </header>;
+    const session = sessions.get(id);
+    const ghost = session?.ghostId ? ghostMap.get(session.ghostId) ?? { id: session.ghostId, name: 'Ghost' } : undefined;
+    return <PaneHead session={session} ghost={ghost} attention={attention.get(id)} projects={scopes} currentScopeId={scopeOf(id)}
+      onClosePane={closePane} actions={agentActions(id)}>{terminalToggle(id)}</PaneHead>;
+  };
+
+  const activeTitle = activeId === LAUNCH ? '새 에이전트' : activeSession ? sessions.get(activeSession)?.title ?? '에이전트' : scope?.name ?? '프로젝트 없음';
+
+  return <div className="workbench" data-compact={compact || undefined} data-rail={!compact && railHidden ? 'hidden' : undefined}>
     <h1 className="sr-only">코딩 작업대</h1>
     {compact ? <div className="workbench-compact-head">
-      <Popover open={spacesOpen} onOpenChange={setSpacesOpen}>
-        <PopoverTrigger asChild><Button variant="ghost" className="justify-start" type="button" aria-label={space ? `스페이스: ${space.title}${focusedAgent ? `, ${agentTitle(focusedAgent)}` : ''}` : '스페이스'}>
-          {focusedAgent ? <AgentState session={sessions.get(focusedAgent.sessionId)}/> : <Folder aria-hidden="true"/>}
-          <span className="workbench-agent-title">{focusedAgent ? agentTitle(focusedAgent) : space?.title ?? '스페이스'}</span>
-          {focusedAgent && <small>{space?.title}</small>}<AttentionMark signal={focusedAgent ? attention.get(focusedAgent.sessionId) : space ? spaceSignals.get(space.id) : undefined}/><ChevronDown aria-hidden="true"/></Button></PopoverTrigger>
-        <PopoverContent className="workbench-space-popover" align="start" aria-label="스페이스 목록">{spaceList}
-          <button type="button" className="workbench-agent-add" disabled={!state || busy} onClick={() => displayDialog({ type: 'space' })}><Plus size={15} aria-hidden="true"/>새 스페이스</button>
-          {sideLinks}</PopoverContent>
-      </Popover>
-      {!space && makeSpace}
-      {space && terminalButton}
-      {space?.root && <Button variant="ghost" size="icon" type="button" disabled={busy} aria-label="git 변경" title="git 변경" onClick={() => setDialog({ type: 'changes' })}><GitBranch aria-hidden="true"/></Button>}
-      {space && <Button variant="ghost" size="icon" type="button" disabled={busy} aria-label="새 에이전트" title="새 에이전트" onClick={() => displayDialog({ type: 'start' })}><Plus aria-hidden="true"/></Button>}
-    </div> : <aside className="workbench-rail" aria-label="작업대 탐색">
-      <div className="workbench-rail-head"><h2>스페이스</h2>{makeSpace}</div>
-      {spaceList}{sideLinks}
-    </aside>}
+      {compactRenaming && activeSession ? <InlineName className="workbench-compact-name" value={sessions.get(activeSession)?.title ?? '에이전트'} label="에이전트 이름" editing
+        onEditing={value => { if (!value) setCompactRenaming(false); }} onSave={title => renameAgent(activeSession, title)}/> : <Popover open={projectsOpen} onOpenChange={setProjectsOpen}>
+        <PopoverTrigger asChild><Button variant="ghost" className="justify-start" type="button" aria-label={`${scope?.name ?? '프로젝트 없음'}: ${activeTitle}`}>
+          {activeSession ? <AgentState state={sessions.get(activeSession)?.state}/> : scope ? <Folder aria-hidden="true"/> : <Box aria-hidden="true"/>}
+          <span className="workbench-agent-title">{activeTitle}</span><small>{scope?.name ?? '프로젝트 없음'}</small>
+          <AttentionMark signal={signals.get(selected) ?? [...signals.values()][0]}/><ChevronDown aria-hidden="true"/></Button></PopoverTrigger>
+        <PopoverContent className="workbench-space-popover" align="start" aria-label="프로젝트 목록">{rail}</PopoverContent>
+      </Popover>}
+      {terminalToggle(activeId)}
+      <Button variant="ghost" size="icon" type="button" aria-label="작업 변경" title="작업 변경" disabled={!activeSession && !scope?.paths[0]}
+        onClick={() => activeSession ? changesFor(activeSession) : scope?.paths[0] && setDialog({ type: 'folderChanges', root: scope.paths[0] })}><GitBranch aria-hidden="true"/></Button>
+      {activeSession ? <AgentMenu projects={scopes} currentScopeId={scopeOf(activeSession)} actions={agentActions(activeSession)} onRename={() => setCompactRenaming(true)}/>
+        : <Button variant="ghost" size="icon" type="button" aria-label="새 에이전트" title="새 에이전트" disabled={!state} onClick={() => setLayout(current => show(current, LAUNCH))}><Plus aria-hidden="true"/></Button>}
+    </div> : railHidden ? <aside className="workbench-strip" aria-label="작업대 탐색">
+      <Button variant="ghost" size="icon" type="button" aria-label="목록 펼치기" title={`목록 펼치기 · ${shortcut('B')}`} onClick={toggleRail}><PanelLeftOpen aria-hidden="true"/></Button>
+      {projectRows.filter(row => !folded.has(row.sessionId)).map(row => {
+        const session = sessions.get(row.sessionId);
+        return <button key={row.sessionId} type="button" className="workbench-strip__agent" aria-current={row.sessionId === activeId ? 'true' : undefined}
+          aria-label={session?.title ?? '에이전트'} title={session?.title} onClick={event => openAgent(row.sessionId, event.metaKey || event.ctrlKey)}>
+          <AgentState state={session?.state}/><AttentionMark signal={attention.get(row.sessionId)}/></button>;
+      })}
+      <Button variant="ghost" size="icon" type="button" aria-label="새 에이전트" title="새 에이전트" disabled={!state} onClick={() => setLayout(current => show(current, LAUNCH))}><Plus aria-hidden="true"/></Button>
+    </aside> : <aside className="workbench-rail" aria-label="작업대 탐색">{rail}</aside>}
     <div className="workbench-main">
       {error && <div className="workbench-error"><InlineError onRetry={!state ? () => reload(value => value + 1) : undefined} retryLabel="다시 불러오기">{error}</InlineError></div>}
       {loading && !state && <p className="workbench-empty" role="status">작업대를 불러오는 중…</p>}
       {loaded && sessionId !== null && (sessionLink?.id !== sessionId
         ? <p className="workbench-error" role="status">에이전트를 여는 중…</p>
         : sessionLink.error && <div className="workbench-error"><InlineError>{sessionLink.error}</InlineError></div>)}
-      {space ? <>
-        {!compact && <header className="workbench-head">
-          {focusedAgent && <AgentState session={sessions.get(focusedAgent.sessionId)}/>}
-          <h2 title={focusedAgent ? agentTitle(focusedAgent) : space.title}>{focusedAgent ? agentTitle(focusedAgent) : space.title}</h2>
-          {focusedAgent && <AttentionMark signal={attention.get(focusedAgent.sessionId)}/>}
-          <span className="ml-auto"/>{terminalButton}
-          {space.root && <Button className="shrink-0" variant="ghost" size="sm" type="button" disabled={busy}
-            onClick={() => setDialog({ type: 'changes' })}><GitBranch aria-hidden="true"/>git 변경</Button>}
-        </header>}
-        {agents.length ? <div className="workbench-agent-stack" data-covered={covered || undefined}>
-          {/* Every unfolded agent stays mounted so a draft and the live stream survive switching. */}
-          {agents.filter(agent => !folded.has(agent.sessionId)).map(agent => <section key={agent.sessionId} className="workbench-agent" aria-label={`에이전트: ${agentTitle(agent)}`}
-            data-focused={agent.sessionId === focusedId || undefined} hidden={agent.sessionId !== focusedId}>
-            <CodingSession id={agent.sessionId} onUpdate={observer}/>
-          </section>)}
-        </div> : !covered && <div className="workbench-empty">
-          <Button variant="add" type="button" disabled={busy} onClick={() => setDialog({ type: 'start' })}>새 에이전트</Button>
-          {earlier.length > 0 && <Button variant="ghost" type="button" disabled={busy} onClick={() => setDialog({ type: 'agent' })}>이전 세션 열기</Button>}
-        </div>}
-        {terminalOpen && terminalCwd !== null && <WorkbenchTerminal key={terminalCwd} cwd={terminalCwd} onHide={() => setTerminalOpen(false)}/>}
-      </> : state && <div className="workbench-empty">
-        <Button variant="add" type="button" disabled={busy} onClick={() => displayDialog({ type: 'space' })}>스페이스 만들기</Button>
+      {state && <div ref={panesRef} className="workbench-panes" data-covered={(compact && terminalOpen && terminalCwd !== null) || undefined}
+        onDragOver={event => {
+          if (compact || !event.dataTransfer.types.includes(AGENT_DRAG)) return;
+          event.preventDefault();
+          const target = dragTarget(event);
+          setDropHint(hint => hint?.index === target?.index && hint?.side === target?.side ? hint : target);
+        }}
+        onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropHint(null); }}
+        onDrop={event => {
+          const id = event.dataTransfer.getData(AGENT_DRAG);
+          const target = dragTarget(event);
+          setDropHint(null);
+          if (!id || !target) return;
+          event.preventDefault();
+          setLayout(current => (target.side === 'split' ? split : show)({ ...current, active: target.index }, id));
+        }}>
+        {[...mounted, ...(layout.panes.includes(LAUNCH) && !mounted.includes(LAUNCH) ? [LAUNCH] : [])].map(id => {
+          const index = layout.panes.indexOf(id);
+          const visible = compact ? index === layout.active : index >= 0;
+          const style = { order: index * 2, flexGrow: layout.sizes[index] ?? 1 } as CSSProperties;
+          return <section key={id} className="workbench-pane" data-pane-index={visible ? index : undefined} hidden={!visible} style={style}
+            data-active={(!compact && layout.panes.length > 1 && index === layout.active) || undefined} data-drop={dropHint?.index === index ? dropHint.side : undefined}
+            aria-label={id === LAUNCH ? '새 에이전트' : `에이전트: ${sessions.get(id)?.title ?? '에이전트'}`}
+            onPointerDownCapture={() => { if (index >= 0 && index !== layout.active) setLayout(current => ({ ...current, active: index })); }}
+            onFocusCapture={() => { if (index >= 0 && index !== layout.active) setLayout(current => ({ ...current, active: index })); }}>
+            {!compact && paneHead(id, index)}
+            {paneBody(id)}
+          </section>;
+        })}
+        {!compact && layout.panes.slice(0, -1).map((_, index) => <div key={`border-${index}`} className="workbench-pane-border" role="separator" aria-orientation="vertical"
+          aria-label="패널 너비" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((layout.sizes[index] ?? 0) * 100)} tabIndex={0}
+          style={{ order: index * 2 + 1 }} onPointerDown={event => startResize(index, event)}
+          onKeyDown={event => {
+            const step = event.key === 'ArrowLeft' ? -0.05 : event.key === 'ArrowRight' ? 0.05 : 0;
+            if (!step) return;
+            event.preventDefault();
+            setLayout(current => resize(current, index, step));
+          }}/>)}
       </div>}
+      {terminalOpen && terminalCwd !== null && <WorkbenchTerminal key={terminalCwd} cwd={terminalCwd} onHide={() => setTerminalOpen(false)}/>}
     </div>
     {sheet}
   </div>;

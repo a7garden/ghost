@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Download, Plus, SlidersHorizontal } from 'lucide-react';
 import {
   ORCHESTRATION_MAX_CONCURRENCY, ORCHESTRATION_MAX_DEPTH, OrchestrationConfig as ConfigSchema, SESSION_MODEL_ROLE, orchestrationIssues, validate,
-  type CodingSession, type OrchestrationConfig, type OrchestrationImportPreview, type OrchestrationView,
+  type CodingSession, type OrchestrationConfig, type OrchestrationImportPreview, type OrchestrationImportSource,
+  type OrchestrationImportSourceInfo, type OrchestrationView,
 } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { Button, InlineError, SkeletonRows } from '../ui';
 import { OrchestrationGraph } from './OrchestrationGraph';
 import { OrchestrationInspector } from './OrchestrationInspector';
 import { addNode, connectAgents, issueText, moveNode, removeNode, renameNode, type NodeKey } from './OrchestrationModel';
+import { mergeImport, selectableItems, type ImportSelection } from './OrchestrationImport';
 import { useOrchestrationActivity } from './OrchestrationActivity';
 import './Orchestration.css';
 
@@ -18,15 +20,18 @@ export function Orchestration() {
   const { client } = useHost();
   const [stored, setStored] = useState<OrchestrationView | null>(null);
   const [draft, setDraft] = useState<OrchestrationConfig | null>(null);
-  const [preview, setPreview] = useState<OrchestrationImportPreview | null>(null);
   const [selected, setSelected] = useState<NodeKey | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [importing, setImporting] = useState(false);
   const [reload, setReload] = useState(0);
   const [saved, setSaved] = useState(false);
+  const [sources, setSources] = useState<OrchestrationImportSourceInfo[] | null>(null);
+  const [source, setSource] = useState<OrchestrationImportSource | null>(null);
+  const [preview, setPreview] = useState<OrchestrationImportPreview | null>(null);
+  const [selection, setSelection] = useState<ImportSelection | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState('');
   const inspector = useRef<HTMLDivElement>(null);
-  const priorSelection = useRef<NodeKey | null>(null);
   const { sessions, activity } = useOrchestrationActivity(client);
   useEffect(() => {
     const abort = new AbortController();
@@ -39,12 +44,12 @@ export function Orchestration() {
     return () => abort.abort();
   }, [client, reload]);
 
-  const config = preview?.config ?? draft;
+  const config = draft;
   const issues = config && stored ? orchestrationIssues(config, stored) : [];
   const structural = config ? orchestrationIssues(config) : [];
   const valid = config ? validate(ConfigSchema, config) : false;
   const dirty = draft !== stored?.config;
-  const editable = !preview && !saving;
+  const editable = !saving;
 
   function select(node: NodeKey, showInspector = false) {
     setSelected(node);
@@ -64,16 +69,48 @@ export function Orchestration() {
     } catch { setError('설정을 저장하지 못했습니다. 화면의 변경은 남아 있습니다.'); }
     finally { setSaving(false); }
   }
-  async function importOmp() {
-    setImporting(true); setError('');
+  function closeImport() {
+    setSources(null); setSource(null); setPreview(null); setSelection(null); setImportError('');
+  }
+  async function loadPreview(next: OrchestrationImportSource) {
+    setImporting(true); setImportError(''); setSource(next); setPreview(null); setSelection(null);
     try {
-      const result = await client.previewOrchestrationImport();
-      priorSelection.current = selected;
+      const result = await client.previewOrchestrationImport(next);
       setPreview(result);
-      setSelected(result.config.agents[0] ? { kind: 'agents', name: result.config.agents[0].name } : { kind: 'roles', name: SESSION_MODEL_ROLE });
-    } catch { setError('이 Mac의 omp 설정을 미리 볼 수 없습니다.'); }
+      setSelection({ ...selectableItems(result.config), limits: true });
+    } catch { setImportError('가져올 설정을 미리 볼 수 없습니다.'); }
     finally { setImporting(false); }
   }
+  async function openImport() {
+    setImporting(true); setImportError('');
+    try {
+      const listing = await client.orchestrationImportSources();
+      const present = listing.sources.filter(entry => entry.available);
+      if (!present.length) { setImportError('이 Mac에서 가져올 하네스를 찾지 못했습니다.'); return; }
+      setSources(listing.sources);
+      await loadPreview(present[0]!.source);
+    } catch { setImportError('하네스 목록을 불러오지 못했습니다.'); }
+    finally { setImporting(false); }
+  }
+  function applyImport() {
+    if (!draft || !preview || !selection) return;
+    change(mergeImport(draft, preview.config, selection));
+    closeImport();
+  }
+
+  // /coding/orchestration?import=1 opens the panel once; the flag drops in place so Back does not reopen it.
+  const asked = useRef(false);
+  useEffect(() => {
+    if (asked.current) return;
+    asked.current = true;
+    if (!new URLSearchParams(location.hash.split('?')[1] ?? '').has('import')) return;
+    const next = location.hash.replace(/([?&])import=1(&|$)/, (_, lead: string, tail: string) => tail ? lead : '').replace(/[?&]$/, '');
+    history.replaceState(history.state, '', `#${next}`);
+    void openImport();
+  }, [client]);
+
+  const toggle = (list: string[], name: string) => list.includes(name) ? list.filter(item => item !== name) : [...list, name];
+  const available = sources?.filter(entry => entry.available) ?? [];
 
   return <section className="orchestration" aria-label="오케스트레이션">
     <header className="orchestration-heading">
@@ -93,25 +130,72 @@ export function Orchestration() {
           <Button variant="add" size="sm" disabled={!editable || Object.keys(config.modelRoles).length >= 128} onClick={() => {
             const result = addNode(config, 'roles', stored.models[0]); change(result.config); select(result.node, true);
           }}>모델 역할</Button>
-          <Button variant="ghost" size="sm" disabled={!editable || importing} onClick={() => void importOmp()}><Download size={15}/>omp 가져오기</Button>
+          <Button variant="ghost" size="sm" disabled={!editable || importing} onClick={() => void openImport()}><Download size={15}/>하네스 가져오기</Button>
         </div>
         <div className="orchestration-actions orchestration-save">
-          <span role="status">{saved && !dirty && !preview ? '저장됨' : ''}</span>
-          {!preview && dirty && <Button variant="ghost" size="sm" disabled={saving} onClick={() => { change(stored.config); setSelected(null); }}>변경 취소</Button>}
-          {!preview && <Button size="sm" disabled={saving || !dirty || !valid || structural.length > 0} onClick={() => void save()}>{saving ? '저장 중…' : '저장'}</Button>}
+          <span role="status">{saved && !dirty ? '저장됨' : ''}</span>
+          {dirty && <Button variant="ghost" size="sm" disabled={saving} onClick={() => { change(stored.config); setSelected(null); }}>변경 취소</Button>}
+          <Button size="sm" disabled={saving || !dirty || !valid || structural.length > 0} onClick={() => void save()}>{saving ? '저장 중…' : '저장'}</Button>
         </div>
       </div>
-      {preview && <section className="orchestration-preview" aria-label="omp 가져오기 미리보기">
-        <div><strong>omp 가져오기 미리보기</strong><span> · 에이전트 {config.agents.length}개 · 모델 역할 {Object.keys(config.modelRoles).length}개</span></div>
-        <div className="orchestration-actions">
-          <Button size="sm" variant="outline" onClick={() => { setPreview(null); setSelected(priorSelection.current); }}>미리보기 닫기</Button>
-          <Button size="sm" onClick={() => { change(preview.config); setPreview(null); }}>편집에 반영</Button>
+      {sources && <section className="orchestration-import" aria-label="하네스 가져오기">
+        <div className="orchestration-import-head">
+          <strong>하네스 가져오기</strong>
+          <Button variant="ghost" size="sm" disabled={importing} onClick={closeImport}>닫기</Button>
         </div>
-        {(preview.unmappable.length > 0 || preview.issues.length > 0) && <details>
-          <summary>가져오기 확인 사항 ({preview.unmappable.length + preview.issues.length})</summary>
-          {preview.unmappable.length > 0 && <><h3>가져오지 못한 항목</h3><ul>{preview.unmappable.map((field, i) => <li key={i}><code>{field}</code></li>)}</ul></>}
-          {preview.issues.length > 0 && <ul>{preview.issues.map((issue, i) => <li key={i}><code>{issue.name}</code> · {issueText(issue)}</li>)}</ul>}
-        </details>}
+        <div className="orchestration-import-sources" role="radiogroup" aria-label="가져오기 소스">
+          {available.map(entry => <label key={entry.source} className="orchestration-check">
+            <input type="radio" name="orchestration-import-source" checked={source === entry.source} disabled={importing}
+              onChange={() => void loadPreview(entry.source)}/>{entry.label} · 에이전트 {entry.agents}개
+          </label>)}
+        </div>
+        {importing && <p className="orchestration-import-status" role="status">불러오는 중…</p>}
+        {importError && <InlineError>{importError}</InlineError>}
+        {preview && selection && <>
+          <div className="orchestration-import-groups">
+            {preview.config.agents.length > 0 && <fieldset>
+              <legend>에이전트</legend>
+              {preview.config.agents.map(agent => <label key={agent.name} className="orchestration-check">
+                <input type="checkbox" checked={selection.agents.includes(agent.name)} aria-label={`에이전트 ${agent.name}`}
+                  onChange={() => setSelection({ ...selection, agents: toggle(selection.agents, agent.name) })}/>
+                <span className="orchestration-import-item"><strong>{agent.name}</strong><small>{agent.description}</small></span>
+              </label>)}
+            </fieldset>}
+            {selectableItems(preview.config).roles.length > 0 && <fieldset>
+              <legend>모델 역할</legend>
+              {Object.entries(preview.config.modelRoles).filter(([name]) => name !== SESSION_MODEL_ROLE).map(([name, model]) => <label key={name} className="orchestration-check">
+                <input type="checkbox" checked={selection.roles.includes(name)} aria-label={`모델 역할 ${name}`}
+                  onChange={() => setSelection({ ...selection, roles: toggle(selection.roles, name) })}/>
+                <span className="orchestration-import-item"><strong>{name}</strong>
+                  <small>{model.provider === null ? '현재 세션을 따름' : `${model.provider}/${model.model}`}</small></span>
+              </label>)}
+            </fieldset>}
+            {selectableItems(preview.config).fallbacks.length > 0 && <fieldset>
+              <legend>대체 모델</legend>
+              {Object.entries(preview.config.fallbackChains).map(([role, chain]) => <label key={role} className="orchestration-check">
+                <input type="checkbox" checked={selection.fallbacks.includes(role)} aria-label={`대체 모델 ${role}`}
+                  onChange={() => setSelection({ ...selection, fallbacks: toggle(selection.fallbacks, role) })}/>
+                <span className="orchestration-import-item"><strong>{role}</strong>
+                  <small>{chain.map(entry => 'role' in entry ? `@${entry.role}` : `${entry.provider}/${entry.model}`).join(' → ')}</small></span>
+              </label>)}
+            </fieldset>}
+            <fieldset>
+              <legend>한도</legend>
+              <label className="orchestration-check">
+                <input type="checkbox" checked={selection.limits} aria-label="실행 한도" onChange={() => setSelection({ ...selection, limits: !selection.limits })}/>
+                <span className="orchestration-import-item"><strong>동시 실행 {preview.config.limits.maxConcurrency} · 위임 깊이 {preview.config.limits.maxDepth}</strong></span>
+              </label>
+            </fieldset>
+          </div>
+          {(preview.unmappable.length > 0 || preview.issues.length > 0) && <details className="orchestration-import-notes">
+            <summary>가져오기 확인 사항 ({preview.unmappable.length + preview.issues.length})</summary>
+            {preview.unmappable.length > 0 && <><h3>가져오지 못한 항목</h3><ul>{preview.unmappable.map((field, i) => <li key={i}><code>{field}</code></li>)}</ul></>}
+            {preview.issues.length > 0 && <ul>{preview.issues.map((issue, i) => <li key={i}><code>{issue.name}</code> · {issueText(issue)}</li>)}</ul>}
+          </details>}
+          <div className="orchestration-actions">
+            <Button size="sm" disabled={importing} onClick={applyImport}>편집에 반영</Button>
+          </div>
+        </>}
       </section>}
       <div className="orchestration-layout">
         <div className="orchestration-diagram">
@@ -126,8 +210,8 @@ export function Orchestration() {
             <label>위임 깊이<input type="number" min={1} max={ORCHESTRATION_MAX_DEPTH} value={config.limits.maxDepth || ''} disabled={!editable}
               onChange={event => change({ ...config, limits: { ...config.limits, maxDepth: Number(event.target.value) } })}/></label>
           </div>
-          {!preview && <SessionPolicy sessions={sessions} globalEnabled={stored.config.enabled}/>}
-          {dirty && !preview && (!valid || structural[0]) && <p className="orchestration-invalid" role="status">{structural[0] ? `${structural[0].name}: ${issueText(structural[0])}` : '비어 있거나 범위를 벗어난 설정을 확인하세요.'}</p>}
+          <SessionPolicy sessions={sessions} globalEnabled={stored.config.enabled}/>
+          {dirty && (!valid || structural[0]) && <p className="orchestration-invalid" role="status">{structural[0] ? `${structural[0].name}: ${issueText(structural[0])}` : '비어 있거나 범위를 벗어난 설정을 확인하세요.'}</p>}
         </div>
         <div ref={inspector} className="orchestration-inspector-slot">
           <OrchestrationInspector key={selected ? `${selected.kind}:${selected.name}` : 'empty'} selected={selected} config={config} models={stored.models} issues={issues} preview={!editable}

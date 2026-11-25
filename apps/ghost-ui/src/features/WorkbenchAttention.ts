@@ -80,6 +80,8 @@ export function useWorkbenchAttention(agents: readonly Agent[] | null, focused: 
   }, [agents, active]);
 
   const [listError, setListError] = useState('');
+  // True once the full session list has been read, so a missing session means it is gone rather than not yet seen.
+  const [listed, setListed] = useState(false);
   const [revision, reloadList] = useState(0);
   const hasSessions = Boolean(agents?.length);
   const [showPicker, setShowPicker] = useState(false);
@@ -93,6 +95,7 @@ export function useWorkbenchAttention(agents: readonly Agent[] | null, focused: 
         const rows = await client.codingSessions(controller.signal);
         if (!controller.signal.aborted) {
           observe(rows, readSerial);
+          setListed(true);
           setListError('');
         }
       } catch (reason) {
@@ -104,5 +107,5 @@ export function useWorkbenchAttention(agents: readonly Agent[] | null, focused: 
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
   }, [client, hasSessions, showPicker, revision, visible, observe]);
-  return { sessions, attention, observer, listError, setShowPicker, reloadList: () => reloadList(value => value + 1) };
+  return { sessions, attention, observer, listed, listError, setShowPicker, reloadList: () => reloadList(value => value + 1) };
 }

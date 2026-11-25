@@ -42,7 +42,7 @@ import { createLiveCallEngine } from "./integrations/calls-live.ts";
 import { createLocalCallEngine, type LocalCallEngine } from "./integrations/calls-local.ts";
 import { Terminals } from "./terminal/index.ts";
 import { terminalNotifier } from "./terminal/notify.ts";
-import { Workbench } from "./workbench/service.ts";
+import { ownerScopeCreator, Workbench } from "./workbench/service.ts";
 
 export interface App {
   core: Core;
@@ -204,7 +204,7 @@ export async function openApp(config: Config): Promise<App> {
       authorizeGhost: (requester, id) => core.coding.authorizeEmbeddedCreate(requester, id),
     }));
     core.setCodingSessions(codingSessions);
-    const workbench = config.coding === false ? null : new Workbench(ledger, codingSessions, config.root);
+    const workbench = config.coding === false ? null : new Workbench(ledger, codingSessions, { createScope: ownerScopeCreator(core) });
     const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, reach: createReach(config), browser, vault, desktop, mail, toss: createToss(), mcp });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
     const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));

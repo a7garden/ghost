@@ -75,7 +75,7 @@ test("an owner session with no folder works in its own empty sandbox; a Ghost st
   const f = fixture();
   try {
     const a = await f.sessions.create({}, owner), b = await f.sessions.create({}, owner);
-    expect(a).toMatchObject({ title: "샌드박스", repo: null, branch: null });
+    expect(a).toMatchObject({ title: "샌드박스", repo: null, branch: null, ghostId: null });
     expect(a.cwd.startsWith(join(realpathSync(f.dir), "sandboxes"))).toBe(true);
     expect(readdirSync(a.cwd)).toEqual([]);
     expect(b.cwd).not.toBe(a.cwd);
@@ -85,6 +85,11 @@ test("an owner session with no folder works in its own empty sandbox; a Ghost st
     const named = await f.sessions.create({ title: "내 이름" }, owner);
     await f.sessions.prompt(named.id, { text: "다른 이름이 되면 안 됨" });
     expect(f.sessions.get(named.id)?.title).toBe("내 이름");
+    // A session opened on a folder is also named by its first instruction instead of keeping the folder name.
+    const folder = await f.sessions.create({ cwd: f.repo }, owner);
+    expect(folder).toMatchObject({ title: "project", ghostId: null });
+    await f.sessions.prompt(folder.id, { text: "버튼 정렬을 바로잡아 주세요" });
+    expect(f.sessions.get(folder.id)?.title).toBe("버튼 정렬을 바로잡아 주세요");
     await expect(f.sessions.create({}, { kind: "ghost", ghostId: "g", workId: "w", callId: "c" })).rejects.toMatchObject({ code: "invalid" });
   } finally { await f.close(); }
 });
@@ -279,6 +284,7 @@ test("restart does not resend a working Ghost turn and stores interruption evide
   const f = fixture();
   try {
     const session = await f.sessions.create({ repo: f.repo }, ghost);
+    expect(session.ghostId).toBe("test-ghost");
     f.faux.setResponses([async (_context, options) => {
       const { promise, reject } = Promise.withResolvers<never>();
       options!.signal!.addEventListener("abort", () => reject(options!.signal!.reason), { once: true });
@@ -287,10 +293,15 @@ test("restart does not resend a working Ghost turn and stores interruption evide
     await f.sessions.prompt(session.id, { text: "This must never replay" });
     await until(() => f.faux.state.callCount === 1);
     await f.sessions.shutdown();
+    // A record stored before ghostId existed regains it from its requester on load.
+    const stored = f.ledger.codingSessions()[0]!;
+    delete (stored.session as Omit<CodingSession, "ghostId"> & { ghostId?: string | null }).ghostId;
+    f.ledger.putCodingSession(stored);
     const restarted = f.create();
     try {
       const reports: CodingSettled[] = [];
       restarted.onSettled(report => reports.push(report));
+      expect(restarted.get(session.id)?.ghostId).toBe("test-ghost");
       expect(restarted.get(session.id)?.state).toBe("failed");
       expect(restarted.items(session.id).filter(item => item.kind === "notice")).toMatchObject([{ text: expect.stringContaining("턴이 중단되었습니다") }]);
       expect(reports.map(report => [report.turn, report.outcome])).toEqual([[1, "interrupted"]]);

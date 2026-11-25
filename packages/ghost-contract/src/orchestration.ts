@@ -57,6 +57,10 @@ export type OrchestrationView = {
   models: { provider: string; model: string; name: string; thinking: NonNullable<OrchestrationModelRef["thinking"]>[] }[];
 };
 export type OrchestrationImportPreview = { config: OrchestrationConfig; unmappable: string[]; issues: OrchestrationIssue[] };
+export const OrchestrationImportSource = Type.Union([Type.Literal("omp"), Type.Literal("claude"), Type.Literal("codex")]);
+export type OrchestrationImportSource = Static<typeof OrchestrationImportSource>;
+export type OrchestrationImportSourceInfo = { source: OrchestrationImportSource; label: string; available: boolean; agents: number };
+export type OrchestrationImportSources = { sources: OrchestrationImportSourceInfo[] };
 
 /** Structural problems prevent saving; availability is advisory and may change without a config edit. */
 export function orchestrationIssues(config: OrchestrationConfig, inventory?: Omit<OrchestrationView, "config">): OrchestrationIssue[] {

@@ -39,6 +39,11 @@ function promptTitle(text: string): string | null {
   return line.length > 40 ? `${line.slice(0, 39).trimEnd()}…` : line;
 }
 
+/** The names a session gets at create when the owner gives no title: the sandbox placeholder, or the folder it works in. */
+function defaultTitles(session: Pick<CodingSession, "cwd" | "repo">): string[] {
+  return [SANDBOX_TITLE, (basename(session.repo ?? session.cwd) || session.cwd).slice(0, 200)];
+}
+
 interface CodingSessionOptions extends CodingModelSource {
   root: string;
   ledger: Ledger;
@@ -93,6 +98,11 @@ export class CodingSessions implements CodingSessionsPort {
     this.piExtensions = new PiExtensions(this.root, options.ledger);
     for (const record of options.ledger.codingSessions()) {
       this.piConfig.preserveLegacySession(record.session);
+      // Sessions stored before ghostId existed carry it from their requester.
+      if ((record.session as CodingSession & { ghostId?: string | null }).ghostId === undefined) {
+        record.session = { ...record.session, ghostId: record.requester.kind === "ghost" ? record.requester.ghostId : null };
+        this.options.ledger.putCodingSession(record);
+      }
       if (busy(record.session)) {
         const at = Date.now();
         const turns = record.pending.length ? record.pending : [record.session.turn];
@@ -150,6 +160,7 @@ export class CodingSessions implements CodingSessionsPort {
     const session: CodingSession = {
       ...workspace, id, title: (input.title?.trim() || (sandbox ? SANDBOX_TITLE : basename(workspace.repo ?? workspace.cwd) || workspace.cwd)).slice(0, 200),
       model: { provider: model.provider, model: model.id }, thinking, workId: requester.kind === "ghost" ? requester.workId : null,
+      ghostId: requester.kind === "ghost" ? requester.ghostId : null,
       state: "idle", turn: 0, pendingDialog: null, usage: { input: 0, output: 0, cost: 0 }, createdAt: at, updatedAt: at,
     };
     const record: CodingSessionRecord = { session, requester, active: null, pending: [], reports: [], interrupted: [] };
@@ -226,9 +237,10 @@ export class CodingSessions implements CodingSessionsPort {
       const agent = await this.parentAgent(handle);
       this.writable(handle);
       authorize?.();
-      // A sandbox session starts with a placeholder name; its first instruction names it.
-      const named = handle.record.session.title === SANDBOX_TITLE && handle.record.session.turn === 0 ? promptTitle(input.text) : null;
-      if (named) this.save(handle, { title: named });
+      // A session still carrying a default name is named by its first instruction; an explicit title is kept.
+      // The name rides on the start's own save, so no idle event slips out between admission and work.
+      const named = handle.record.session.turn === 0 && defaultTitles(handle.record.session).includes(handle.record.session.title) ? promptTitle(input.text) : null;
+      if (named) handle.record.session = { ...handle.record.session, title: named };
       handle.record.pending.push(turn);
       this.start(handle, agent, { ...prompt, turn });
       return { disposition: "started" };

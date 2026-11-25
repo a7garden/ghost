@@ -23,12 +23,10 @@ function checked(result: GitRead) {
   return result;
 }
 
-export async function spaceChanges(root: string | null, path: string | null): Promise<WorkbenchChanges | WorkbenchFileDiff> {
-  if (!root) throw invalid("스페이스에 Git 작업 폴더가 없습니다.");
+export async function folderChanges(root: string, path: string | null): Promise<WorkbenchChanges | WorkbenchFileDiff> {
   const top = await readGit(root, ["rev-parse", "--show-toplevel"], 8192);
-  if (top.code !== 0 || top.truncated || !top.value) throw invalid("스페이스의 작업 폴더가 Git 저장소가 아닙니다.");
+  if (top.code !== 0 || top.truncated || !top.value) throw invalid("지정한 폴더가 Git 저장소가 아닙니다.");
   const repo = top.value.replace(/\n$/, "");
-  // Status and diff can run repository-configured clean/process filters even without an external diff driver.
   const filters = await readGit(repo, ["config", "--null", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|process|required)$"], 8192);
   if ((filters.code !== 0 && filters.code !== 1) || filters.truncated) throw invalid("Git 필터 설정을 읽지 못했습니다.");
   const keys = new Set(records(filters.value));

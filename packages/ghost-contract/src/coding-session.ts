@@ -81,6 +81,8 @@ export const CodingSession = Type.Object({
   thinking: CodingThinking,
   /** The 맡긴 일 this session works for, when a Ghost started it. */
   workId: nullable(Id),
+  /** The Ghost that started this session through `code_run`; null for the owner's own session. */
+  ghostId: nullable(Id),
   /** How many prompts have been sent: a Ghost's report names the turn it answers. */
   turn: Type.Integer({ minimum: 0 }),
   pendingDialog: nullable(CodingDialog),

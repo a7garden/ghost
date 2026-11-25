@@ -1,44 +1,12 @@
-import { closeSync, constants, fstatSync, openSync, readdirSync, readSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { parseDocument } from "yaml";
 import {
-  ORCHESTRATION_MAX_CONCURRENCY, ORCHESTRATION_MAX_DEPTH, ORCHESTRATION_NAME_PATTERN,
-  ORCHESTRATION_READ_TOOLS, ORCHESTRATION_TOOLS, SESSION_MODEL_ROLE, orchestrationIssues,
+  ORCHESTRATION_MAX_CONCURRENCY, ORCHESTRATION_MAX_DEPTH, ORCHESTRATION_READ_TOOLS, ORCHESTRATION_TOOLS, SESSION_MODEL_ROLE, orchestrationIssues,
   type OrchestrationFallback, type OrchestrationImportPreview, type OrchestrationModelRef, type OrchestrationView,
 } from "@ghost/contract";
 import { invalid } from "../core/errors.ts";
 import { defaultOrchestration } from "./config.ts";
-
-const NAME = new RegExp(ORCHESTRATION_NAME_PATTERN);
-const asMap = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-const keys = (value: Record<string, unknown>, except: string[], prefix: string) => Object.keys(value).filter(key => !except.includes(key)).map(key => prefix + key);
-
-function yaml(raw: string, source: string): Record<string, unknown> {
-  try {
-    const doc = parseDocument(raw, { schema: "core", uniqueKeys: true });
-    if (doc.errors.length || doc.warnings.length) throw new Error();
-    const value: unknown = doc.toJS({ maxAliasCount: 0 });
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
-    return asMap(value);
-  } catch { throw invalid(`omp YAML cannot be read: ${source}`); }
-}
-
-function readRegular(path: string, maxBytes: number): string {
-  const fd = openSync(realpathSync(path), constants.O_RDONLY | constants.O_NONBLOCK);
-  try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.size > maxBytes) throw new Error();
-    const data = Buffer.allocUnsafe(stat.size);
-    let offset = 0;
-    while (offset < data.length) {
-      const count = readSync(fd, data, offset, data.length - offset, offset);
-      if (!count) break;
-      offset += count;
-    }
-    return data.toString("utf8", 0, offset);
-  } finally { closeSync(fd); }
-}
+import { NAME, asMap, homePath, isRegularFile, listFiles, parseYaml, readRegular, unknownKeys } from "./harness.ts";
 
 function modelRef(value: unknown, path: string, unmappable: string[]): OrchestrationModelRef | null {
   const parts = typeof value === "string" ? /^([^/:*\s]{1,120})\/([^:*\s]{1,240})(?::([a-z-]+))?$/.exec(value) : null;
@@ -50,15 +18,15 @@ function modelRef(value: unknown, path: string, unmappable: string[]): Orchestra
 }
 
 /** Read only config.yml and registered agent definitions; many owner definitions are symlinks. */
-export function previewOmp(inventory: Omit<OrchestrationView, "config">, directory = join(homedir(), ".omp", "agent")): OrchestrationImportPreview {
+export function previewOmp(inventory: Omit<OrchestrationView, "config">, directory = homePath(".omp", "agent")): OrchestrationImportPreview {
   let raw: string;
   try { raw = readRegular(join(directory, "config.yml"), 512_000); }
   catch { throw invalid("omp config.yml cannot be read"); }
-  const source = yaml(raw, "config.yml");
+  const source = parseYaml(raw, "config.yml");
   const config = defaultOrchestration();
-  const unmappable = keys(source, ["modelRoles", "retry", "task"], "");
+  const unmappable = unknownKeys(source, ["modelRoles", "retry", "task"], "");
   const roles = asMap(source.modelRoles), retry = asMap(source.retry), task = asMap(source.task);
-  unmappable.push(...keys(retry, ["fallbackChains"], "retry."), ...keys(task, ["maxConcurrency", "maxRecursionDepth", "agentModelOverrides"], "task."));
+  unmappable.push(...unknownKeys(retry, ["fallbackChains"], "retry."), ...unknownKeys(task, ["maxConcurrency", "maxRecursionDepth", "agentModelOverrides"], "task."));
   if (source.modelRoles !== undefined && source.modelRoles !== roles) unmappable.push("modelRoles");
   for (const [role, value] of Object.entries(roles)) {
     const path = `modelRoles.${role}`;
@@ -105,7 +73,7 @@ export function previewOmp(inventory: Omit<OrchestrationView, "config">, directo
       const contents = readRegular(join(directory, path), 48_000);
       const match = /^(?:\uFEFF)?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)([\s\S]*)$/.exec(contents);
       if (!match) throw new Error();
-      const fields = yaml(match[1]!, path);
+      const fields = parseYaml(match[1]!, path);
       const { name, description, model, readOnly, tools } = fields;
       const instructions = match[2]!.trim();
       if (typeof name !== "string" || !NAME.test(name) || imported.has(name) || typeof description !== "string" || description.length > 400 || instructions.length > 40_000) throw new Error();
@@ -121,7 +89,7 @@ export function previewOmp(inventory: Omit<OrchestrationView, "config">, directo
       if (existing >= 0) config.agents[existing] = agent;
       else config.agents.push(agent);
       imported.add(name);
-      unmappable.push(...keys(fields, ["name", "description", "model", "readOnly", "tools"], `${path}.`));
+      unmappable.push(...unknownKeys(fields, ["name", "description", "model", "readOnly", "tools"], `${path}.`));
     } catch { unmappable.push(path); }
   }
   const overrides = asMap(task.agentModelOverrides);
@@ -132,4 +100,9 @@ export function previewOmp(inventory: Omit<OrchestrationView, "config">, directo
     else agent.modelRole = roleFor(value, path, agent.modelRole);
   }
   return { config, unmappable, issues: orchestrationIssues(config, inventory) };
+}
+
+/** Presence for the source picker; probes file roots without reading definitions. */
+export function ompSource(directory = homePath(".omp", "agent")): { available: boolean; agents: number } {
+  return { available: isRegularFile(join(directory, "config.yml")), agents: listFiles(join(directory, "agents"), ".md").length };
 }

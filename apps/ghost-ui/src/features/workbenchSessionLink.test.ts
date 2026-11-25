@@ -2,27 +2,25 @@ import { expect, it } from 'vitest';
 import type { WorkbenchState } from '@ghost/contract';
 import { resolveSessionLink } from './workbenchSessionLink';
 
-const session = { id: 'coding-abc', repo: '/source/sample', cwd: '/worktrees/branch' };
+const session = { id: 'coding-abc', ghostId: null };
 const state: WorkbenchState = {
   version: 1,
-  spaces: [{ id: 'one', title: 'First', root: null, createdAt: 0 }, { id: 'two', title: 'Second', root: null, createdAt: 0 }],
-  agents: [{ sessionId: 'other', spaceId: 'one' }, { sessionId: session.id, spaceId: 'two' }],
-  focus: { spaceId: 'one', sessionId: 'other' },
+  agents: [{ sessionId: 'other', scopeId: 'one' }, { sessionId: session.id, scopeId: 'two' }],
+  focus: { scopeId: 'one', sessionId: 'other' },
 };
 
-it('focuses the agent across spaces instead of adding a second entry', () => {
-  const fields = { spaceId: 'two', sessionId: session.id };
-  expect(resolveSessionLink(state, session)).toEqual({ path: 'focus', fields, opensAgent: true });
-  expect(resolveSessionLink({ ...state, focus: fields }, session)).toBeNull();
+it('focuses a listed agent in its own project instead of listing it twice', () => {
+  const fields = { scopeId: 'two', sessionId: session.id };
+  expect(resolveSessionLink(state, session, 'one')).toEqual({ path: 'focus', fields });
+  expect(resolveSessionLink({ ...state, focus: fields }, session, 'two')).toBeNull();
 });
 
-it('adds the session to the focused space when it is not listed yet', () => {
-  expect(resolveSessionLink({ ...state, agents: state.agents.slice(0, 1) }, session)).toEqual({
-    path: 'spaces/one/agents', fields: { sessionId: session.id }, opensAgent: true,
-  });
+it('lists an owner session under the project that holds its folder', () => {
+  expect(resolveSessionLink({ ...state, agents: state.agents.slice(0, 1) }, session, 'two'))
+    .toEqual({ path: 'agents', fields: { sessionId: session.id, scopeId: 'two' } });
 });
 
-it('opens a space named after the repository when the workbench is empty', () => {
-  expect(resolveSessionLink({ ...state, spaces: [], agents: [], focus: null }, session))
-    .toEqual({ path: 'spaces', fields: { title: 'sample', root: '/source/sample' } });
+it('opens a Ghost session in its Work’s project without listing it', () => {
+  expect(resolveSessionLink({ ...state, agents: [] }, { id: 'g', ghostId: 'ghost-1' }, 'two'))
+    .toEqual({ path: 'focus', fields: { scopeId: 'two', sessionId: 'g' } });
 });

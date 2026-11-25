@@ -8,7 +8,7 @@ import { codingError } from './CodingSessionModel';
 import { DiffText } from './DiffText';
 import { changeStatus } from './codingChangesDisplay';
 
-export function WorkbenchChanges({ spaceId, onClose }: { spaceId: string; onClose(): void }) {
+export function WorkbenchChanges({ root, onClose }: { root: string; onClose(): void }) {
   const { client } = useHost();
   const [changes, setChanges] = useState<Changes | null>(null);
   const [error, setError] = useState('');
@@ -18,7 +18,7 @@ export function WorkbenchChanges({ spaceId, onClose }: { spaceId: string; onClos
   const path = changes?.files.find(entry => entry.path === selected)?.path;
   useEffect(() => {
     const request = new AbortController();
-    void client.workbenchChanges(spaceId, request.signal).then(next => {
+    void client.workbenchChanges(root, request.signal).then(next => {
       if (request.signal.aborted) return;
       setChanges(next);
       setError('');
@@ -27,17 +27,17 @@ export function WorkbenchChanges({ spaceId, onClose }: { spaceId: string; onClos
       if (!request.signal.aborted) setError(codingError(reason, 'Git 변경을 불러오지 못했습니다.'));
     });
     return () => request.abort();
-  }, [client, spaceId, revision]);
+  }, [client, root, revision]);
   useEffect(() => {
     if (!path) return;
     const request = new AbortController();
-    void client.workbenchFileDiff(spaceId, path, request.signal).then(diff => {
+    void client.workbenchFileDiff(root, path, request.signal).then(diff => {
       if (!request.signal.aborted) setFile({ path, diff });
     }, reason => {
       if (!request.signal.aborted) setFile({ path, error: codingError(reason, '파일 차이를 불러오지 못했습니다.') });
     });
     return () => request.abort();
-  }, [client, spaceId, path, revision]);
+  }, [client, root, path, revision]);
 
   const detail = file?.path === path ? file : undefined;
   return <Modal title="git 변경" drawer className="embedded-changes-sheet" onClose={onClose}>

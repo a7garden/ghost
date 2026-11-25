@@ -42,7 +42,7 @@ class Sessions implements CodingSessionsPort {
     const session: CodingSession = {
       id, title: "Isolated session", state: input.prompt ? "working" : "idle", cwd: `/tmp/wt/${id}`,
       repo: input.repo ?? null, branch: `ghost/${input.branch ?? "fix"}`, base: "abc", model: { provider: "test", model: "test" }, thinking: "off",
-      workId: requester.kind === "ghost" ? requester.workId : null, turn: input.prompt ? 1 : 0, pendingDialog: null,
+      workId: requester.kind === "ghost" ? requester.workId : null, ghostId: requester.kind === "ghost" ? requester.ghostId : null, turn: input.prompt ? 1 : 0, pendingDialog: null,
       usage: { input: 0, output: 0, cost: 0 }, createdAt: now, updatedAt: now,
     };
     this.sessions.set(id, session);

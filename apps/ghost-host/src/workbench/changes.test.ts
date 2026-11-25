@@ -2,12 +2,12 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { CodingSession, Scope } from "@ghost/contract";
 import { Ledger } from "../ledger/ledger.ts";
 import { serveWorkbench } from "./http.ts";
 import { Workbench } from "./service.ts";
 
 const owners = { kind: "device", deviceId: "test", name: "전화" } as const;
-const spacesPath = "/api/workbench/spaces";
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 
@@ -29,49 +29,56 @@ function fixture(withGit: boolean) {
     git(repo, "add", "--", "tracked.txt");
     git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "commit", "-m", "initial");
   }
-  const workbench = new Workbench(ledger, null, stateRoot);
+  const session = (id: string, cwd: string): CodingSession => ({
+    id, title: id, cwd, repo: null, branch: null, base: null, workId: null, ghostId: null, turn: 0,
+    model: { provider: "test", model: "test" }, state: "idle", thinking: "off", pendingDialog: null,
+    usage: { input: 0, output: 0, cost: 0 }, createdAt: 0, updatedAt: 0,
+  });
+  const known = new Map([["one", session("one", repo)]]);
+  const sessions = { get: (id: string) => known.get(id) ?? null, list: () => [...known.values()] };
+  const workbench = new Workbench(ledger, sessions);
+  const changesPath = (folder: string, file?: string) => `/api/workbench/changes?${new URLSearchParams({ root: folder, ...(file ? { path: file } : {}) })}`;
   const request = (path: string, method = "GET", body?: object) => serveWorkbench(workbench, owners, new Request(`http://localhost${path}`, {
     method, body: body ? JSON.stringify(body) : undefined,
   }), path.split("?")[0]!);
-  return { repo, workbench, request };
+  return { root, repo, ledger, session, sessions, known, workbench, changesPath, request };
 }
 
-test("creates an isolated space checkout and leaves its branch and files on disk after deletion", async () => {
-  const { repo, workbench, request } = fixture(true);
-  writeFileSync(join(repo, "tracked.txt"), "uncommitted change in original\n");
-  const post = (version: number) => request(spacesPath, "POST", { title: "Topic", root: repo, version, worktree: { branch: "workbench/topic" } });
-  await post(0);
-  const state = workbench.read(), space = state.spaces[0]!;
-  expect(space.worktree).toEqual({ repo, branch: "workbench/topic" });
-  const checkout = space.root!;
-  expect(checkout).not.toBe(repo);
-  expect(git(checkout, "branch", "--show-current")).toBe("workbench/topic");
-  expect(readFileSync(join(checkout, "tracked.txt"), "utf8")).toBe("original\n");
+function makeScope(ledger: Ledger, id: string, paths: string[]): Scope {
+  const scope: Scope = { id, name: id, ghostId: null, paths, vaultPath: null, state: "active", attachments: [], limits: {}, createdAt: 1, updatedAt: 1 };
+  ledger.tx(() => ledger.putScope(scope));
+  return scope;
+}
 
-  await expect(post(state.version)).rejects.toMatchObject({ code: "invalid" });
-  expect(workbench.read()).toEqual(state);
-  writeFileSync(join(checkout, "tracked.txt"), "kept after deletion\n");
-  await request(`${spacesPath}/${space.id}`, "DELETE", { version: state.version });
-  expect(workbench.read().spaces).toEqual([]);
-  expect(git(repo, "rev-parse", "refs/heads/workbench/topic")).toBe(git(repo, "rev-parse", "HEAD"));
-  expect(readFileSync(join(checkout, "tracked.txt"), "utf8")).toBe("kept after deletion\n");
+test("changes reads only a project folder or a coding session's working folder", async () => {
+  const { root, repo, ledger, session, known, request, changesPath } = fixture(true);
+  makeScope(ledger, "scope-src", [repo]);
+  mkdirSync(join(repo, "sub"));
+  await expect(request(changesPath(repo))).resolves.toEqual({ branch: "main", files: [], truncated: false });
+  await expect(request(changesPath(join(repo, "sub")))).resolves.toEqual({ branch: "main", files: [], truncated: false });
+  // A coding session's own working folder is readable even when no project covers it.
+  const plain = join(root, "plain");
+  mkdirSync(plain);
+  git(plain, "init", "-b", "main");
+  known.set("plain", session("plain", plain));
+  await expect(request(changesPath(plain))).resolves.toEqual({ branch: "main", files: [], truncated: false });
+  await expect(request("/api/workbench/changes")).rejects.toMatchObject({ code: "invalid" });
+  await expect(request(changesPath("relative/path"))).rejects.toMatchObject({ code: "invalid" });
+  await expect(request(changesPath(join(root, "elsewhere")))).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining("코딩 세션 작업 폴더") });
+  await expect(serveWorkbench(new Workbench(ledger, null), owners, new Request(`http://localhost${changesPath(repo)}`), "/api/workbench/changes")).resolves.toMatchObject({ branch: "main" });
 });
 
-test("rejects worktree creation and Git changes for a non-Git directory", async () => {
-  const { repo, workbench, request } = fixture(false);
-  await expect(request(spacesPath, "POST", { title: "Folder", root: repo, version: 0, worktree: { branch: "topic" } }))
-    .rejects.toMatchObject({ code: "invalid", message: expect.stringContaining("Git 저장소") });
-  expect(workbench.read().version).toBe(0);
-  const space = workbench.createSpace({ title: "Folder", root: repo, version: 0 }).spaces[0]!;
-  await expect(request(`${spacesPath}/${space.id}/changes`))
-    .rejects.toMatchObject({ code: "invalid", message: expect.stringContaining("Git 저장소가 아닙니다") });
+test("rejects changes for a non-Git directory", async () => {
+  const { repo, ledger, request, changesPath } = fixture(false);
+  makeScope(ledger, "scope-plain", [repo]);
+  await expect(request(changesPath(repo))).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining("Git 저장소가 아닙니다") });
 });
 
-test("space changes exposes bounded index and working-tree diffs only for literal changed paths", async () => {
-  const { repo, workbench, request } = fixture(true);
-  const space = workbench.createSpace({ title: "Source", root: repo, version: 0 }).spaces[0]!;
-  const path = `${spacesPath}/${space.id}/changes`;
-  const get = (file: string) => request(`${path}?${new URLSearchParams({ path: file })}`);
+test("changes exposes bounded index and working-tree diffs only for literal changed paths", async () => {
+  const { repo, ledger, workbench, request, changesPath } = fixture(true);
+  makeScope(ledger, "scope-src", [repo]);
+  const path = changesPath(repo);
+  const get = (file: string) => request(changesPath(repo, file));
   await expect(request(path)).resolves.toEqual({ branch: "main", files: [], truncated: false });
 
   writeFileSync(join(repo, "tracked.txt"), "original\nstaged\n");
@@ -101,14 +108,14 @@ test("space changes exposes bounded index and working-tree diffs only for litera
 });
 
 test("reads changes without running the checkout's content filters", async () => {
-  const { repo, workbench, request } = fixture(true);
+  const { repo, ledger, request, changesPath } = fixture(true);
   writeFileSync(join(repo, ".gitattributes"), "tracked.txt filter=fixture\n");
   git(repo, "config", "filter.fixture.clean", "/usr/bin/false");
   git(repo, "config", "filter.fixture.process", "/usr/bin/false");
   git(repo, "config", "filter.fixture.required", "true");
   writeFileSync(join(repo, "tracked.txt"), "original\nchanged without filter\n");
-  const space = workbench.createSpace({ title: "Source", root: repo, version: 0 }).spaces[0]!;
-  const path = `${spacesPath}/${space.id}/changes`;
-  await expect(request(path)).resolves.toMatchObject({ files: expect.arrayContaining([expect.objectContaining({ path: "tracked.txt" })]) });
-  await expect(request(`${path}?path=tracked.txt`)).resolves.toMatchObject({ unstaged: expect.stringContaining("+changed without filter") });
+  makeScope(ledger, "scope-src", [repo]);
+  await expect(request(changesPath(repo))).resolves.toMatchObject({ files: expect.arrayContaining([expect.objectContaining({ path: "tracked.txt" })]) });
+  await expect(request(changesPath(repo, "tracked.txt"))).resolves.toMatchObject({ unstaged: expect.stringContaining("+changed without filter") });
 });
+

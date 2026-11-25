@@ -160,20 +160,18 @@ Feature-level compositions:
   opening it shows each call's output on a thread. Live tools tick in at the end; the
   composer edge carries a travelling signal while the Ghost responds: a comet on the edge,
   a soft glow behind it and a faint steady ring.
-- **Coding inbox**: blocked agents come first, then active work and unread completions.
-  The same inline approval sits above the session composer. Consecutive tools and thinking
-  fold in place; a reply ends that group, so later actions never move above the reply.
-  Repeated identical operations share a count, and failures remain visible in the summary.
-  The space tree remains an alternate view.
-  On phones, the session title and state share the back bar; the view switch stays
-  directly above the content. A selected diff has one file
-  toolbar, and a blocking request replaces the disabled chat composer.
-  Terminals are optional, owner-only and on demand: the owner opens one themselves,
-  an agent never opens one, and they are not persisted across a Host restart. The workbench
-  is spaces → agents, and each agent is a built-in GUI Pi coding session. The native
-  workbench only creates a worktree when
-  **worktree로 시작** is checked; **git 변경** reads the focused space without staging
-  or editing files. Direct writes and approval bypass stay visible even when options are folded.
+- **Coding workbench** (2026-11-26): projects → agents. The rail lists projects (Scope); the one on
+  screen unfolds its agents — the owner's and those its Ghosts started (with the Ghost's face) — each
+  a state shape, a title, a waiting question in amber and a time. Wide screens split up to three
+  panes (⌘-click, 「옆에 열기」, or drag a row onto a pane's right side) with draggable borders; the
+  active pane carries a top line and is the Host focus. The app sidebar (⌘\\) and the project rail
+  (⌘B) fold; the folded rail keeps a strip of agent state marks. A new agent starts from a launch
+  pane, not a modal: the instruction is the form, with folder, worktree and model as chips in the
+  composer and earlier sessions under 「이어서 하기」. A pane head is one row (state, name edited in
+  place, branch, terminal, 변경, menu, close); the model chip sits beside send. Phones show one
+  agent and one head row. Consecutive tools and thinking fold in place; a reply ends that group.
+  Terminals are optional, owner-only and on demand, never opened by an agent and not persisted
+  across a Host restart. Changes views read without staging or editing files.
 - **Collaboration**: a `delegate` result reads as a 위임 event line (Ghost · title), and a
   child's report as 위임 결과. Thread cards list every Ghost working under the thread with
   its live state; a waiting Work reads 응답 대기, whether it waits on delegated Work, a question

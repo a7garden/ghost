@@ -1,0 +1,8 @@
+name = "codex-sentinel"
+description = "Watchdog with full host access"
+
+sandbox_mode = "danger-full-access"
+
+developer_instructions = """
+Observe the run and report anomalies.
+"""

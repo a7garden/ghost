@@ -1,16 +1,18 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentTools, getSystemMessageText } from "@earendil-works/pi-ai";
-import { orchestrationIssues, type OrchestrationView } from "@ghost/contract";
+import { ORCHESTRATION_READ_TOOLS, ORCHESTRATION_TOOLS, SESSION_MODEL_ROLE, orchestrationIssues, type OrchestrationView } from "@ghost/contract";
 import { startServer } from "../src/api/server.ts";
 import { CodingSessions } from "../src/coding/index.ts";
 import { loadConfig } from "../src/config.ts";
 import { Core } from "../src/core/core.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { defaultOrchestration, OrchestrationStore, orchestrationStore } from "../src/orchestration/config.ts";
+import { claudeSource, previewClaude } from "../src/orchestration/import-claude.ts";
+import { codexSource, previewCodex } from "../src/orchestration/import-codex.ts";
 import { previewOmp } from "../src/orchestration/import-omp.ts";
 import { createCodingTools } from "../src/tools/coding.ts";
 import { FakeEngine, MemoryArtifacts, MemorySecrets, noSandbox } from "./support.ts";
@@ -232,4 +234,93 @@ test("omp preview maps the sanitized owner config, including role overrides and 
   expect(unmappable).toContain("task.agentModelOverrides.sonic");
   expect(issues).toContainEqual({ kind: "role", name: "worker_sol", code: "credential", ref: "openai-codex/gpt-6.2-sol" });
   expect(orchestrationIssues(config)).toEqual([]);
+});
+
+test("claude preview maps front-matter subagents, granting writes only for listed write tools", () => {
+  const agents = fileURLToPath(new URL("./fixtures/orchestration-claude/agents", import.meta.url));
+  const inventory: Omit<OrchestrationView, "config"> = {
+    providersWithCredentials: ["faux"],
+    models: [{ provider: "faux", model: "claude-3-7-sonnet", name: "claude-3-7-sonnet", thinking: ["low", "high"] }],
+  };
+  expect(claudeSource(agents)).toEqual({ available: true, agents: 5 });
+  const { config, unmappable, issues } = previewClaude(inventory, agents);
+  expect(config.agents.find(agent => agent.name === "docs-reader")).toMatchObject({
+    readOnly: true, tools: ["read", "grep", "find"], modelRole: SESSION_MODEL_ROLE,
+  });
+  expect(config.agents.find(agent => agent.name === "implementer")).toMatchObject({
+    readOnly: false, tools: ["read", "edit", "write", "bash"], modelRole: SESSION_MODEL_ROLE,
+  });
+  expect(config.agents.find(agent => agent.name === "nightly")?.tools).toEqual([...ORCHESTRATION_READ_TOOLS]);
+  expect(config.agents.find(agent => agent.name === "auditor")?.modelRole).toBe("claude-3-7-sonnet");
+  expect(config.modelRoles["claude-3-7-sonnet"]).toEqual({ provider: "faux", model: "claude-3-7-sonnet", thinking: null });
+  expect(unmappable).toContain("agents/docs-reader.md.model (sonnet)");
+  expect(unmappable).toContain("agents/implementer.md.tools (WebSearch)");
+  expect(unmappable).toContain("agents/nightly.md.tools (기본 권한)");
+  expect(unmappable).toContain("agents/nightly.md.when");
+  expect(unmappable).toContain("agents/broken.md");
+  expect(issues).toEqual([]);
+  expect(orchestrationIssues(config)).toEqual([]);
+});
+
+test("codex preview maps config.toml, subagent sandbox grants and prompts", () => {
+  const directory = fileURLToPath(new URL("./fixtures/orchestration-codex", import.meta.url));
+  const inventory: Omit<OrchestrationView, "config"> = {
+    providersWithCredentials: ["faux"],
+    models: [{ provider: "faux", model: "faux-mini", name: "faux-mini", thinking: ["off", "low", "medium", "high"] }],
+  };
+  expect(codexSource(directory)).toEqual({ available: true, agents: 5 });
+  const { config, unmappable, issues } = previewCodex(inventory, directory);
+  expect(config.limits.maxConcurrency).toBe(3);
+  expect(config.modelRoles["faux-mini"]).toEqual({ provider: "faux", model: "faux-mini", thinking: "high" });
+  const explorer = config.agents.find(agent => agent.name === "codex-explorer");
+  expect(explorer).toMatchObject({ readOnly: true, tools: [...ORCHESTRATION_READ_TOOLS], modelRole: "faux-mini", instructions: expect.stringContaining("Explore the repository") });
+  expect(config.agents.find(agent => agent.name === "codex-committer")).toMatchObject({
+    readOnly: false, tools: [...ORCHESTRATION_TOOLS], modelRole: SESSION_MODEL_ROLE,
+  });
+  expect(config.agents.find(agent => agent.name === "codex-sentinel")?.readOnly).toBe(false);
+  expect(config.agents.find(agent => agent.name === "notes")).toMatchObject({
+    description: "Gather session notes", readOnly: true, modelRole: SESSION_MODEL_ROLE,
+  });
+  expect(unmappable).toContain("approval_policy");
+  expect(unmappable).toContain("sandbox_mode");
+  expect(unmappable).toContain("tui");
+  expect(unmappable).toContain("profiles.fast.cwd");
+  expect(unmappable).toContain("profiles.fast.model.reasoning (low)");
+  expect(unmappable).toContain("agents.default_subagent_model.reasoning (minimal)");
+  expect(unmappable).toContain("agents/explorer.toml.model.reasoning (medium)");
+  expect(unmappable).toContain("agents/committer.toml.model (faux-missing)");
+  expect(unmappable).toContain("agents/sentinel.toml.sandbox_mode (danger-full-access)");
+  expect(unmappable).toContain("agents/shadow.toml");
+  expect(unmappable).toContain("AGENTS.md");
+  expect(issues).toEqual([]);
+  expect(orchestrationIssues(config)).toEqual([]);
+});
+
+test("import routes list present sources and preview the chosen harness for the owner only", async () => {
+  const f = fixture();
+  const server = startServer({ core: f.core, config: { ...loadConfig({}, f.root), host: "127.0.0.1", port: 0 }, ownerToken: "orchestration-import-test", documents: null, skills: null });
+  const base = `http://127.0.0.1:${server.port}/api/orchestration/import`;
+  const auth = { authorization: "Bearer orchestration-import-test", "content-type": "application/json" };
+  const home = mkdtempSync(join(tmpdir(), "ghost-import-home-"));
+  mkdirSync(join(home, ".claude", "agents"), { recursive: true });
+  writeFileSync(join(home, ".claude", "agents", "greeter.md"), "---\nname: greeter\ndescription: Say hi\n---\n\nGreet the owner.\n");
+  const prior = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    expect((await fetch(base)).status).toBe(401);
+    const listing = await (await fetch(base, { headers: auth })).json() as { sources: { source: string; label: string; available: boolean; agents: number }[] };
+    expect(listing.sources.map(source => source.source)).toEqual(["omp", "claude", "codex"]);
+    expect(listing.sources.find(source => source.source === "claude")).toMatchObject({ available: true, agents: 1 });
+    expect(listing.sources.find(source => source.source === "omp")?.available).toBe(false);
+    expect(listing.sources.find(source => source.source === "codex")?.available).toBe(false);
+    expect((await fetch(base, { method: "POST", headers: auth, body: JSON.stringify({ source: "bogus" }) })).status).toBe(400);
+    expect((await fetch(base, { method: "POST", body: JSON.stringify({ source: "claude" }) })).status).toBe(401);
+    const preview = await (await fetch(base, { method: "POST", headers: auth, body: JSON.stringify({ source: "claude" }) })).json() as { config: { agents: { name: string }[] }; unmappable: string[] };
+    expect(preview.config.agents.map(agent => agent.name)).toContain("greeter");
+    expect(preview.config.agents).toHaveLength(4); // default scout/worker/reviewer plus greeter
+  } finally {
+    process.env.HOME = prior;
+    rmSync(home, { recursive: true, force: true });
+    await server.stop(); await f.close();
+  }
 });

@@ -325,7 +325,7 @@ function Shell() {
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
             {orchestrationOpen && <Orchestration/>}
-            {section === 'coding' && !orchestrationOpen && <Workbench scopes={state.scopes} compact={compact}
+            {section === 'coding' && !orchestrationOpen && <Workbench scopes={state.scopes} works={state.works} ghosts={state.ghosts} compact={compact}
               sessionId={embeddedSessionId} navigate={navigate}/>}
             {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]

@@ -1,6 +1,4 @@
-import {
-  Id, parse, WorkbenchAgentCreate, WorkbenchFocus, WorkbenchRename, WorkbenchSpaceCreate, WorkbenchVersion, type Principal,
-} from "@ghost/contract";
+import { Id, parse, WorkbenchAgentCreate, WorkbenchAgentMove, WorkbenchFocus, WorkbenchVersion, type Principal } from "@ghost/contract";
 import { forbidden, invalid, notFound } from "../core/errors.ts";
 import type { Workbench } from "./service.ts";
 
@@ -9,28 +7,21 @@ export async function serveWorkbench(bench: Workbench, principal: Principal | { 
   if (principal.kind !== "owner" && principal.kind !== "device") throw forbidden("작업대는 소유자만 조작할 수 있습니다.");
   const method = request.method;
   const body = (): Promise<unknown> => request.json().catch(() => { throw invalid("요청 본문이 올바르지 않습니다."); });
-  if (pathname === "/api/workbench/spaces") {
-    if (method === "GET") return bench.read();
-    if (method === "POST") return bench.createSpace(parse(WorkbenchSpaceCreate, await body()));
-  }
+  if (pathname === "/api/workbench" && method === "GET") return bench.read();
+  if (pathname === "/api/workbench/agents" && method === "POST") return bench.addAgent(parse(WorkbenchAgentCreate, await body()));
   if (pathname === "/api/workbench/focus" && method === "POST") return bench.focus(parse(WorkbenchFocus, await body()));
-
-  const route = /^\/api\/workbench\/(spaces|agents)\/([^/]+)(?:\/(agents|changes))?$/.exec(pathname);
-  if (!route) throw notFound("작업대 경로를 찾을 수 없습니다.");
-  const [, resource, rawId, action] = route;
-  const id = parse(Id, decodeId(rawId!));
-  if (resource === "spaces" && action === "changes" && method === "GET") {
-    return bench.changes(id, new URL(request.url).searchParams.get("path"));
+  if (pathname === "/api/workbench/changes" && method === "GET") {
+    const params = new URL(request.url).searchParams;
+    const root = params.get("root");
+    if (root === null) throw invalid("조회할 폴더를 지정하세요.");
+    return bench.changes(root, params.get("path"));
   }
-  if (!action && method === "DELETE") {
-    const { version } = parse(WorkbenchVersion, await body());
-    return resource === "spaces" ? bench.deleteSpace(id, version) : bench.removeAgent(id, version);
+  const route = /^\/api\/workbench\/agents\/([^/]+)$/.exec(pathname);
+  if (route) {
+    const sessionId = parse(Id, decodeId(route[1]!));
+    if (method === "DELETE") return bench.removeAgent(sessionId, parse(WorkbenchVersion, await body()).version);
+    if (method === "PATCH") return bench.moveAgent(sessionId, parse(WorkbenchAgentMove, await body()));
   }
-  if (resource === "spaces" && !action && method === "PATCH") {
-    const { version, title } = parse(WorkbenchRename, await body());
-    return bench.renameSpace(id, version, title);
-  }
-  if (resource === "spaces" && action === "agents" && method === "POST") return bench.addAgent(id, parse(WorkbenchAgentCreate, await body()));
   throw notFound("작업대 경로를 찾을 수 없습니다.");
 }
 

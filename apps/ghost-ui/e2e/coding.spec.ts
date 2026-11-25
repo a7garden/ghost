@@ -37,6 +37,5 @@ test('keeps old coding history readable and opens an embedded run in the workben
   await page.getByRole('link', { name: '코딩 세션 열기', exact: true }).click();
   await expect(page).toHaveURL(url => url.hash === `#/coding?session=${sampleSession.id}`);
   const agent = page.getByRole('region', { name: `에이전트: ${sampleSession.title}`, exact: true });
-  await expect(agent).toHaveAttribute('data-focused', 'true');
-  await expect(page.locator('.workbench-head').getByRole('heading', { name: sampleSession.title })).toBeVisible();
+  await expect(agent).toBeVisible();
 });

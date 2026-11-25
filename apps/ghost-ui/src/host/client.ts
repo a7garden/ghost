@@ -18,6 +18,8 @@ import type {
   CodingSessionCreate,
   OrchestrationConfig,
   OrchestrationImportPreview,
+  OrchestrationImportSource,
+  OrchestrationImportSources,
   OrchestrationView,
   ConnectionOAuthView,
   ConnectionOAuthClientInput,
@@ -267,16 +269,16 @@ export class HostClient {
   }
 
   workbench(signal?: AbortSignal): Promise<WorkbenchState> {
-    return this.json('/api/workbench/spaces', { signal });
+    return this.json('/api/workbench', { signal });
   }
 
-  workbenchChanges(id: string, signal?: AbortSignal): Promise<WorkbenchChanges> {
-    return this.json(`/api/workbench/spaces/${encodeURIComponent(id)}/changes`, { signal, cache: 'no-store' });
+  /** Git changes of a project folder or an agent's working folder. */
+  workbenchChanges(root: string, signal?: AbortSignal): Promise<WorkbenchChanges> {
+    return this.json(`/api/workbench/changes?${new URLSearchParams({ root })}`, { signal, cache: 'no-store' });
   }
 
-  workbenchFileDiff(id: string, path: string, signal?: AbortSignal): Promise<WorkbenchFileDiff> {
-    const query = new URLSearchParams({ path });
-    return this.json(`/api/workbench/spaces/${encodeURIComponent(id)}/changes?${query}`, { signal, cache: 'no-store' });
+  workbenchFileDiff(root: string, path: string, signal?: AbortSignal): Promise<WorkbenchFileDiff> {
+    return this.json(`/api/workbench/changes?${new URLSearchParams({ root, path })}`, { signal, cache: 'no-store' });
   }
 
   changeWorkbench(path: string, method: 'POST' | 'PATCH' | 'DELETE', input: { version: number }): Promise<WorkbenchState> {
@@ -293,8 +295,14 @@ export class HostClient {
     return this.json('/api/orchestration/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
   }
 
-  previewOrchestrationImport(): Promise<OrchestrationImportPreview> {
-    return this.json('/api/orchestration/import-omp', { method: 'POST' });
+  orchestrationImportSources(signal?: AbortSignal): Promise<OrchestrationImportSources> {
+    return this.json('/api/orchestration/import', { signal, cache: 'no-store' });
+  }
+
+  previewOrchestrationImport(source: OrchestrationImportSource): Promise<OrchestrationImportPreview> {
+    return this.json('/api/orchestration/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source }),
+    });
   }
 
   orchestrationForSession(id: string, enabled?: boolean, signal?: AbortSignal): Promise<{ enabled: boolean }> {

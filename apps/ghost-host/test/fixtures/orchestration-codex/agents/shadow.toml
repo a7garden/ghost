@@ -1,0 +1,4 @@
+name = "bad name!"
+description = "Invalid name must drop the whole file"
+
+sandbox_mode = "read-only"

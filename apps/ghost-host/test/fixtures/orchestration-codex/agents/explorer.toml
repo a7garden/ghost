@@ -1,0 +1,10 @@
+name = "codex-explorer"
+description = "Read-only repository explorer"
+
+model = "faux-mini"
+model_reasoning_effort = "medium"
+sandbox_mode = "read-only"
+
+developer_instructions = """
+Explore the repository and report the relevant paths. Do not edit files.
+"""

@@ -1,38 +1,58 @@
-import { mkdirSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
-import type { Agent, Space, WorkbenchAgentCreate, WorkbenchFocus, WorkbenchSpaceCreate, WorkbenchState } from "@ghost/contract";
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute, relative } from "node:path";
+import type { Command, Scope, WorkbenchAgentCreate, WorkbenchAgentMove, WorkbenchFocus, WorkbenchState } from "@ghost/contract";
 import type { CodingSessionsPort } from "../coding/ports.ts";
+import type { Core } from "../core/core.ts";
+import { configurationCommand, reviseConfiguration } from "../core/configuration.ts";
 import { conflict, invalid, notFound } from "../core/errors.ts";
 import type { Ledger } from "../ledger/ledger.ts";
-import { createWorktree, repositoryOf } from "../sandbox/worktree.ts";
-import { spaceChanges } from "./changes.ts";
+import { folderChanges } from "./changes.ts";
 
 const KEY = "workbench.state";
-function required<T>(value: T | undefined, message: string): T {
-  if (value === undefined) throw notFound(message);
-  return value;
-}
-function title(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) throw invalid("이름을 입력하세요.");
-  return trimmed;
-}
-function directory(path: string): string {
-  if (!isAbsolute(path) || path.includes("\0") || !statSync(path, { throwIfNoEntry: false })?.isDirectory()) throw invalid("Mac에 있는 폴더의 절대 경로를 입력하세요.");
-  return path;
+/** Memory key for the project-less list, 프로젝트 없음. */
+const NO_PROJECT = "";
+/** Whether `path` is `base` itself or inside it. */
+function inside(base: string, path: string): boolean {
+  const relativePath = relative(base, path);
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
-/** The state before 2.34: tabs held split panes of sessions and terminals. Only session panes survive as agents. */
-type StoredState = Partial<WorkbenchState> & Pick<WorkbenchState, "version" | "spaces"> & {
+/** The stored shape: the published state plus each project's memory of the agent last shown in it, keyed by scope id. */
+type StoredState = WorkbenchState & { remembered?: Record<string, string> };
+
+/** A space of the pre-project workbench: a titled root folder, optionally a worktree cut from a repository. */
+type StoredSpace = { id: string; title: string; root: string | null; createdAt: number; worktree?: { repo: string; branch: string } | null; lastSessionId?: string | null };
+/** The state before projects replaced spaces; one release earlier still, tabs held split panes of sessions and terminals. */
+type SpacesState = {
+  version: number;
+  spaces: StoredSpace[];
+  agents?: { sessionId: string; spaceId: string }[];
+  focus?: { spaceId: string; sessionId?: string | null; paneId?: string | null } | null;
   tabs?: { id: string; spaceId: string }[];
   panes?: { id: string; tabId: string; kind: string; sessionId?: string }[];
-  focus?: { spaceId: string; sessionId?: string | null; paneId?: string | null } | null;
 };
 
-function current(stored: StoredState): WorkbenchState {
+/** Creates a Scope exactly the way the owner's `scope.create` command does, so validation, the configuration revision and the `scope` event all happen. */
+export function ownerScopeCreator(core: Core) {
+  return (input: { name: string; paths: string[] }): string => {
+    const command = { type: "scope.create", ...input } satisfies Command;
+    return core.ledger.tx(() =>
+      reviseConfiguration(core, { kind: "owner" }, command, () => configurationCommand(core, command) as { scopeId: string })).scopeId;
+  };
+}
+
+/** The pre-project state normalized to spaces: tab and pane layouts collapse into one agent per session. */
+function spacesOf(stored: SpacesState): { spaces: StoredSpace[]; agents: { sessionId: string; spaceId: string }[]; focus: { spaceId: string; sessionId: string | null } | null } {
   const { tabs, panes } = stored;
-  if (!tabs || !panes) return { version: stored.version, spaces: stored.spaces, agents: stored.agents ?? [], focus: stored.focus ? { spaceId: stored.focus.spaceId, sessionId: stored.focus.sessionId ?? null } : null };
-  const agents: Agent[] = [];
+  if (!tabs || !panes) {
+    return {
+      spaces: stored.spaces,
+      agents: stored.agents ?? [],
+      focus: stored.focus && stored.spaces.some(space => space.id === stored.focus!.spaceId)
+        ? { spaceId: stored.focus.spaceId, sessionId: stored.focus.sessionId ?? null } : null,
+    };
+  }
+  const agents: { sessionId: string; spaceId: string }[] = [];
   for (const tab of tabs) {
     for (const pane of panes) {
       if (pane.tabId !== tab.id || pane.kind !== "session" || !pane.sessionId) continue;
@@ -42,7 +62,6 @@ function current(stored: StoredState): WorkbenchState {
   const focused = panes.find(pane => pane.id === stored.focus?.paneId);
   const sessionId = focused?.kind === "session" ? focused.sessionId ?? null : null;
   return {
-    version: stored.version,
     spaces: stored.spaces,
     agents,
     focus: stored.focus && stored.spaces.some(space => space.id === stored.focus!.spaceId)
@@ -50,85 +69,40 @@ function current(stored: StoredState): WorkbenchState {
   };
 }
 
+export interface WorkbenchOptions {
+  /** Creates the Scope for a migrated space that no project covers; without it the space maps to 프로젝트 없음. */
+  createScope?: (input: { name: string; paths: string[] }) => string;
+}
+
 export class Workbench {
   constructor(
-    private readonly ledger: Pick<Ledger, "setting" | "putSetting" | "tx">,
-    private readonly sessions: Pick<CodingSessionsPort, "get"> | null,
-    private readonly stateRoot: string,
+    private readonly ledger: Pick<Ledger, "setting" | "putSetting" | "tx" | "scope" | "scopes">,
+    private readonly sessions: Pick<CodingSessionsPort, "get" | "list"> | null,
+    private readonly options: WorkbenchOptions = {},
   ) {}
 
   read(): WorkbenchState {
-    return current(this.ledger.setting<StoredState>(KEY, { version: 0, spaces: [] }));
+    return this.view(this.stored());
   }
 
-  private change(version: number, edit: (state: WorkbenchState) => boolean | void): WorkbenchState {
-    return this.ledger.tx(() => {
-      const state = this.read();
-      if (state.version !== version) throw conflict("다른 곳에서 작업대를 바꿨습니다. 바뀐 배치를 불러왔으니 다시 시도하세요.");
-      if (edit(state) !== false) {
-        state.version++;
-        this.ledger.putSetting(KEY, state);
-      }
-      return state;
-    });
-  }
-
-  createSpace(input: WorkbenchSpaceCreate): WorkbenchState {
+  addAgent(input: WorkbenchAgentCreate): WorkbenchState {
     return this.change(input.version, state => {
-      const space: Space = { id: crypto.randomUUID(), title: title(input.title), root: input.root === null ? null : directory(input.root), createdAt: Date.now() };
-      if (input.worktree) {
-        if (!space.root) throw invalid("worktree를 만들 Git 저장소를 선택하세요.");
-        let repo: string;
-        try { repo = repositoryOf(space.root); } catch { throw invalid("커밋이 있는 Git 저장소를 선택하세요."); }
-        const branch = input.worktree.branch.trim();
-        const parent = join(this.stateRoot, "workbench-worktrees");
-        try {
-          mkdirSync(parent, { recursive: true, mode: 0o700 });
-          space.root = createWorktree(repo, join(parent, space.id), branch);
-        } catch (error) {
-          throw invalid(error instanceof Error ? error.message : "worktree를 만들지 못했습니다.");
-        }
-        space.worktree = { repo, branch };
-      }
-      state.spaces.push(space);
-      this.select(state, space.id);
-    });
-  }
-
-  changes(id: string, path: string | null) {
-    return spaceChanges(this.space(this.read(), id).root, path);
-  }
-
-  renameSpace(id: string, version: number, nextTitle: string): WorkbenchState {
-    return this.change(version, state => {
-      const space = this.space(state, id);
-      const next = title(nextTitle);
-      if (space.title === next) return false;
-      space.title = next;
-    });
-  }
-
-  deleteSpace(id: string, version: number): WorkbenchState {
-    return this.change(version, state => {
-      this.space(state, id);
-      state.spaces = state.spaces.filter(space => space.id !== id);
-      state.agents = state.agents.filter(agent => agent.spaceId !== id);
-      if (state.focus?.spaceId !== id) return;
-      const next = state.spaces[0];
-      if (next) this.select(state, next.id);
-      else state.focus = null;
-    });
-  }
-
-  addAgent(spaceId: string, input: WorkbenchAgentCreate): WorkbenchState {
-    return this.change(input.version, state => {
-      this.space(state, spaceId);
       const session = this.sessions?.get(input.sessionId);
       if (!session) throw notFound("코딩 세션을 찾을 수 없습니다.");
+      this.requireScope(input.scopeId);
       const existing = state.agents.find(agent => agent.sessionId === session.id);
-      if (existing && existing.spaceId !== spaceId) throw invalid("이 에이전트는 다른 스페이스에 있습니다.");
-      if (!existing) state.agents.push({ sessionId: session.id, spaceId });
-      this.select(state, spaceId, session.id);
+      if (existing && existing.scopeId !== input.scopeId) throw invalid("이 에이전트는 다른 프로젝트에 있습니다.");
+      if (!existing) state.agents.push({ sessionId: session.id, scopeId: input.scopeId });
+      this.select(state, input.scopeId, session.id);
+    });
+  }
+
+  moveAgent(sessionId: string, input: WorkbenchAgentMove): WorkbenchState {
+    return this.change(input.version, state => {
+      const agent = this.agent(state, sessionId);
+      this.requireScope(input.scopeId);
+      if (agent.scopeId === input.scopeId) return false;
+      agent.scopeId = input.scopeId;
     });
   }
 
@@ -136,36 +110,128 @@ export class Workbench {
     return this.change(version, state => {
       const agent = this.agent(state, sessionId);
       state.agents = state.agents.filter(candidate => candidate !== agent);
-      const space = this.space(state, agent.spaceId);
-      if (space.lastSessionId === sessionId) delete space.lastSessionId;
-      if (state.focus?.sessionId === sessionId) this.select(state, agent.spaceId);
+      if (state.remembered) for (const scope of Object.keys(state.remembered)) if (state.remembered[scope] === sessionId) delete state.remembered[scope];
+      const focus = state.focus;
+      if (focus && focus.sessionId === sessionId) this.select(state, focus.scopeId);
     });
   }
 
   focus(input: WorkbenchFocus): WorkbenchState {
     return this.change(input.version, state => {
-      const { spaceId, sessionId } = input;
-      this.space(state, spaceId);
-      if (sessionId && this.agent(state, sessionId).spaceId !== spaceId) throw invalid("이 스페이스의 에이전트가 아닙니다.");
-      const focused = sessionId ?? this.remembered(state, spaceId);
-      if (state.focus?.spaceId === spaceId && state.focus.sessionId === focused) return false;
-      this.select(state, spaceId, focused);
+      const { scopeId, sessionId } = input;
+      this.requireScope(scopeId);
+      // Any existing session can be shown, also one a Ghost started and that is not listed as an agent.
+      if (sessionId !== undefined && !this.sessions?.get(sessionId)) throw notFound("코딩 세션을 찾을 수 없습니다.");
+      const shown = sessionId ?? this.remembered(state, scopeId);
+      if (state.focus?.scopeId === scopeId && state.focus.sessionId === shown) return false;
+      this.select(state, scopeId, shown);
     });
   }
 
-  /** The agent last shown in the space, or its first one. */
-  private remembered(state: WorkbenchState, spaceId: string): string | null {
-    const last = this.space(state, spaceId).lastSessionId;
-    if (last && state.agents.some(agent => agent.sessionId === last && agent.spaceId === spaceId)) return last;
-    return state.agents.find(agent => agent.spaceId === spaceId)?.sessionId ?? null;
+  changes(root: string, path: string | null) {
+    return folderChanges(this.allowedRoot(root), path);
   }
 
-  private select(state: WorkbenchState, spaceId: string, sessionId = this.remembered(state, spaceId)): void {
-    const space = this.space(state, spaceId);
-    if (sessionId) space.lastSessionId = sessionId;
-    state.focus = { spaceId, sessionId };
+  /** The stored state, migrating a pre-project blob once on first read. */
+  private stored(): StoredState {
+    const stored = this.ledger.setting<StoredState | null>(KEY, null);
+    if (stored === null || !Array.isArray((stored as unknown as SpacesState).spaces)) return stored ?? { version: 0, agents: [], focus: null };
+    return this.ledger.tx(() => {
+      const again = this.ledger.setting<StoredState | null>(KEY, null);
+      if (again === null || !Array.isArray((again as unknown as SpacesState).spaces)) return again ?? { version: 0, agents: [], focus: null };
+      const next = this.migrated(again as unknown as SpacesState);
+      this.ledger.putSetting(KEY, next);
+      return next;
+    });
   }
 
-  private space(state: WorkbenchState, id: string) { return required(state.spaces.find(space => space.id === id), "스페이스를 찾을 수 없습니다."); }
-  private agent(state: WorkbenchState, sessionId: string) { return required(state.agents.find(agent => agent.sessionId === sessionId), "에이전트를 찾을 수 없습니다."); }
+  /** Maps spaces to projects: the Scope covering the root, a newly created one, or 프로젝트 없음. */
+  private migrated(stored: SpacesState): StoredState {
+    const { spaces, agents, focus } = spacesOf(stored);
+    const scopes = this.ledger.scopes();
+    const mapped = new Map<string, string | null>();
+    for (const space of spaces) mapped.set(space.id, this.scopeFor(space, scopes));
+    const remembered: Record<string, string> = {};
+    for (const space of spaces) if (space.lastSessionId) remembered[mapped.get(space.id) ?? NO_PROJECT] = space.lastSessionId;
+    return {
+      version: stored.version,
+      agents: agents.map(agent => ({ sessionId: agent.sessionId, scopeId: mapped.get(agent.spaceId) ?? null })),
+      focus: focus && { scopeId: mapped.get(focus.spaceId) ?? null, sessionId: focus.sessionId },
+      ...(Object.keys(remembered).length ? { remembered } : {}),
+    };
+  }
+
+  private scopeFor(space: StoredSpace, scopes: Scope[]): string | null {
+    // A worktree's checkout lives inside the Host state root; the project is the repository it was cut from.
+    const root = space.worktree?.repo ?? space.root;
+    if (!root) return null;
+    let real: string;
+    try { real = realpathSync(root); } catch { return null; }
+    const covering = scopes.find(scope => scope.paths.some(path => inside(path, real)));
+    if (covering) return covering.id;
+    if (!statSync(real, { throwIfNoEntry: false })?.isDirectory() || !this.options.createScope) return null;
+    const scopeId = this.options.createScope({ name: space.title.slice(0, 128), paths: [real] });
+    scopes.push(this.ledger.scope(scopeId));
+    return scopeId;
+  }
+
+  /** The published state: an agent or focus whose Scope was deleted reads as 프로젝트 없음. */
+  private view(state: StoredState): WorkbenchState {
+    const live = new Set(this.ledger.scopes().map(scope => scope.id));
+    const alive = (scopeId: string | null): string | null => scopeId !== null && live.has(scopeId) ? scopeId : null;
+    return {
+      version: state.version,
+      agents: state.agents.map(agent => ({ sessionId: agent.sessionId, scopeId: alive(agent.scopeId) })),
+      focus: state.focus && { scopeId: alive(state.focus.scopeId), sessionId: state.focus.sessionId },
+    };
+  }
+
+  private change(version: number, edit: (state: StoredState) => boolean | void): WorkbenchState {
+    return this.ledger.tx(() => {
+      const state = this.stored();
+      if (state.version !== version) throw conflict("다른 곳에서 작업대를 바꿨습니다. 바뀐 배치를 불러왔으니 다시 시도하세요.");
+      if (edit(state) !== false) {
+        state.version++;
+        this.ledger.putSetting(KEY, state);
+      }
+      return this.view(state);
+    });
+  }
+
+  /** The agent last shown in the project, or its first listed one. */
+  private remembered(state: StoredState, scopeId: string | null): string | null {
+    const last = state.remembered?.[scopeId ?? NO_PROJECT];
+    if (last) return last;
+    return state.agents.find(agent => agent.scopeId === scopeId)?.sessionId ?? null;
+  }
+
+  private select(state: StoredState, scopeId: string | null, sessionId = this.remembered(state, scopeId)): void {
+    if (sessionId) (state.remembered ??= {})[scopeId ?? NO_PROJECT] = sessionId;
+    state.focus = { scopeId, sessionId };
+  }
+
+  private agent(state: StoredState, sessionId: string) {
+    const agent = state.agents.find(agent => agent.sessionId === sessionId);
+    if (!agent) throw notFound("에이전트를 찾을 수 없습니다.");
+    return agent;
+  }
+
+  private requireScope(scopeId: string | null): void {
+    if (scopeId === null) return;
+    try { this.ledger.scope(scopeId); } catch { throw notFound("프로젝트를 찾을 수 없습니다."); }
+  }
+
+  /** Only a project's folder or a coding session's working folder may be inspected. */
+  private allowedRoot(root: string): string {
+    if (!root || !isAbsolute(root) || root.includes("\0")) throw invalid("폴더의 절대 경로를 입력하세요.");
+    let resolved = root;
+    try { resolved = realpathSync(root); } catch { /* Not on disk; Git will refuse it next. */ }
+    if (!this.knownRoots().some(base => inside(base, root) || inside(base, resolved))) throw invalid("프로젝트 폴더 또는 코딩 세션 작업 폴더 안의 경로를 지정하세요.");
+    return root;
+  }
+
+  private knownRoots(): string[] {
+    return [...this.ledger.scopes().flatMap(scope => scope.paths),
+      ...(this.sessions?.list() ?? []).flatMap(session => [session.cwd, ...(session.repo ? [session.repo] : [])])];
+  }
 }

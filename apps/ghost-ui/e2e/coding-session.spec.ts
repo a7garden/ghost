@@ -1,16 +1,17 @@
 import { mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { attachmentB64, editTool, loginDiff, mockCodingSessions, partialReply, sampleSession } from './coding-session-mock';
 import { openScreen } from './visual';
 import { mockWorkbench } from './workbench-mock';
 
-async function openSessionPicker(page: Page, creates: { repo?: string; cwd?: string }[]) {
+/** Opens the launch pane of 프로젝트 없음, where sessions outside every project wait under 「이어서 하기」. */
+async function openLaunch(page: Page, creates: unknown[]) {
   const { service } = await mockWorkbench(page, creates);
-  service.createSpace({ title: '세션 테스트', root: null, version: 0 });
+  service.focus({ version: 0, scopeId: null });
   await openScreen(page, { name: 'coding', route: () => '/coding', waits: () => ['새 에이전트'] }, 'light');
-  await page.locator('.workbench-main').getByRole('button', { name: '이전 세션 열기' }).click();
-  return page.getByRole('dialog', { name: '이전 세션 열기' });
+  return page.getByRole('region', { name: '새 에이전트', exact: true });
 }
 
 async function capture(page: Page, name: string) {
@@ -31,11 +32,11 @@ for (const width of [1440, 390]) {
         remotePreviews.push(route.request().url());
         return route.abort();
       });
-      const picker = await openSessionPicker(page, api.creates);
-      await picker.getByRole('button', { name: sampleSession.title, exact: true }).click();
+      const launch = await openLaunch(page, api.creates);
+      await launch.getByRole('region', { name: '이전 세션' }).getByRole('button', { name: new RegExp(sampleSession.title) }).click();
       await expect(page).toHaveURL(/#\/coding$/);
       const agent = page.getByRole('region', { name: `에이전트: ${sampleSession.title}`, exact: true });
-      await expect(agent).toHaveAttribute('data-focused', 'true');
+      await expect(agent).toBeVisible();
       const workspace = agent.getByRole('region', { name: '내장 코딩 세션' });
       const transcript = workspace.getByRole('region', { name: '코딩 기록' });
       const draft = page.getByRole('textbox', { name: '코딩 지시' });
@@ -52,7 +53,7 @@ for (const width of [1440, 390]) {
       await expect(transcript.getByText('read src/routes.ts')).toBeVisible();
       await transcript.getByText('scout', { exact: true }).click();
 
-      await workspace.getByRole('button', { name: '변경', exact: true }).click();
+      await page.getByRole('button', { name: '작업 변경' }).filter({ visible: true }).first().click();
       const changes = page.getByRole('dialog', { name: '작업 변경' });
       await expect(changes.getByRole('list', { name: '변경된 파일' })).toContainText('src/login.ts');
       const reads = api.changesReads;
@@ -127,39 +128,39 @@ for (const width of [1440, 390]) {
   });
 }
 
-test('starts from a known repository, patches title and model, then preserves closed history read-only', async ({ page }) => {
+test('starts from one instruction with folder, worktree and model chips, renames in place, then preserves closed history read-only', async ({ page }) => {
   const api = await mockCodingSessions(page);
-  const { service } = await mockWorkbench(page, api.creates);
-  service.createSpace({ title: '세션 테스트', root: null, version: 0 });
-  await openScreen(page, { name: 'coding', route: () => '/coding', waits: () => ['새 에이전트'] }, 'light');
-  await page.locator('.workbench-main').getByRole('button', { name: '새 에이전트' }).click();
-  const create = page.getByRole('dialog', { name: '새 에이전트' });
-  const repo = create.getByRole('combobox', { name: '작업 폴더' });
-  await expect(repo).toBeVisible();
-  // A space with no folder starts in the sandbox: no worktree choice until a folder is picked.
-  await expect(repo).toHaveValue('sandbox');
-  await expect(create.getByRole('checkbox', { name: '별도 worktree에서 작업' })).toHaveCount(0);
-  await repo.selectOption({ index: 1 });
-  await expect(create.getByRole('checkbox', { name: '별도 worktree에서 작업' })).toBeChecked();
-  const path = await repo.inputValue();
-  expect(path).toMatch(/^\//);
-  await create.getByRole('combobox', { name: '모델', exact: true }).selectOption({ label: 'Atlas · sample' });
-  await create.getByRole('combobox', { name: '생각 수준' }).selectOption('high');
-  await create.getByRole('button', { name: '시작', exact: true }).click();
-  expect(api.creates).toEqual([{ repo: path, model: { provider: 'sample', model: 'atlas' }, thinking: 'high' }]);
-  const workspace = page.getByRole('region', { name: '내장 코딩 세션' });
-  await expect(workspace.getByText('아직 지시가 없습니다.')).toBeVisible();
-  await workspace.getByRole('button', { name: '세션 설정' }).click();
-  await page.getByRole('textbox', { name: '세션 제목' }).fill('테스트 세션');
-  await page.getByRole('button', { name: '저장', exact: true }).click();
-  const head = page.locator('.workbench-head');
-  await expect(head.getByRole('heading', { name: '테스트 세션' })).toBeVisible();
-  await page.getByRole('combobox', { name: '모델', exact: true }).selectOption({ label: 'Sparrow · sample' });
+  await page.route('**/api/folders**', route => route.fulfill({ json: { path: tmpdir(), parent: null, home: tmpdir(), shortcuts: [], truncated: false, entries: [] } }));
+  const launch = await openLaunch(page, api.creates);
+  // Outside a project the agent starts in the sandbox: no worktree choice until a folder is picked.
+  await launch.getByRole('button', { name: '작업 폴더: 샌드박스' }).click();
+  await page.getByRole('dialog', { name: '작업 폴더' }).getByRole('button', { name: '다른 폴더…' }).click();
+  await page.getByRole('button', { name: '이 폴더 선택' }).click();
+  await launch.getByRole('button', { name: '바로 작업' }).click();
+  await launch.getByRole('button', { name: /^모델 기본 모델/ }).click();
+  const models = page.getByRole('dialog', { name: '모델 선택' });
+  await models.getByRole('button', { name: 'Atlas' }).click();
+  await models.getByRole('radio', { name: '높음' }).click();
+  await page.keyboard.press('Escape');
+  await launch.getByRole('textbox', { name: '코딩 지시' }).fill('로그인 흐름 점검');
+  await launch.getByRole('button', { name: '지시 보내기' }).click();
+  await expect.poll(() => api.creates).toEqual([{ repo: tmpdir(), model: { provider: 'sample', model: 'atlas' }, thinking: 'high', prompt: '로그인 흐름 점검' }]);
+  const agent = page.getByRole('region', { name: '에이전트: 새 작업 트리', exact: true });
+  await expect(agent).toBeVisible();
+
+  await agent.getByRole('button', { name: '에이전트 이름: 새 작업 트리' }).click();
+  await agent.getByRole('textbox', { name: '에이전트 이름' }).fill('테스트 세션');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => api.patches.at(-1)).toEqual({ title: '테스트 세션' });
+  const renamed = page.getByRole('region', { name: '에이전트: 테스트 세션', exact: true });
+  await renamed.getByRole('button', { name: /^모델 Atlas/ }).click();
+  await page.getByRole('dialog', { name: '모델 선택' }).getByRole('button', { name: 'Sparrow' }).click();
   await expect.poll(() => api.patches.at(-1)).toEqual({ model: { provider: 'sample', model: 'sparrow' }, thinking: 'off' });
   await page.keyboard.press('Escape');
-  await workspace.getByRole('button', { name: '세션 닫기' }).click();
-  await page.getByRole('dialog', { name: '코딩 세션 닫기' }).getByRole('button', { name: '세션 닫기' }).click();
-  await expect(head.getByRole('img', { name: '닫힘', exact: true })).toBeVisible();
-  await expect(workspace.getByRole('textbox', { name: '코딩 지시' })).toHaveCount(0);
-  await expect(workspace.getByText('기록 없음')).toBeVisible();
+  await renamed.getByRole('button', { name: '에이전트 메뉴' }).click();
+  await page.getByRole('dialog', { name: '에이전트 메뉴' }).getByRole('button', { name: '세션 닫기' }).click();
+  await page.getByRole('dialog', { name: '세션 닫기' }).getByRole('button', { name: '세션 닫기' }).click();
+  await expect(renamed.locator('.workbench-pane__head').getByRole('img', { name: '닫힘', exact: true })).toBeVisible();
+  await expect(renamed.getByRole('textbox', { name: '코딩 지시' })).toHaveCount(0);
+  await expect(renamed.getByText('기록 없음')).toBeVisible();
 });

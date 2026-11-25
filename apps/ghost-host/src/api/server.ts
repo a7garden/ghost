@@ -509,7 +509,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       try { return await serveTerminals(request, url, bound, deps.terminals ?? null, expectedOrigin); }
       catch (caught) { return failure(caught); }
     }
-    if (pathname.startsWith("/api/workbench/")) {
+    if (pathname === "/api/workbench" || pathname.startsWith("/api/workbench/")) {
       if (fetchSite === "cross-site" || (viaEdge && fetchSite === "same-site")) return error("forbidden", "다른 사이트에서는 작업대를 조작할 수 없습니다.", 403);
       if (!deps.workbench) return error("unavailable", "이 Host에서는 작업대를 열 수 없습니다.", 503);
       try { return json(await serveWorkbench(deps.workbench, access.principal, request, pathname)); }
@@ -542,8 +542,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (pathname === "/api/folders" && request.method === "GET") {
       try {
         if (access.principal.kind !== "owner" && access.principal.kind !== "device") throw new CommandError("forbidden", "폴더 목록은 소유자만 볼 수 있습니다.");
-        const spaces = deps.workbench?.read().spaces ?? [];
-        const known = [...core.ledger.scopes().flatMap((scope) => scope.paths), ...spaces.map((space) => space.root).filter((root): root is string => root !== null)];
+        const known = [...core.ledger.scopes().flatMap((scope) => scope.paths),
+          ...(core.codingSessions?.list() ?? []).flatMap((session) => [session.cwd, ...(session.repo ? [session.repo] : [])])];
         return json(listFolders(url.searchParams.get("path"), { stateRoot: config.root, known, hidden: url.searchParams.get("hidden") === "1" }));
       } catch (caught) {
         return failure(caught);

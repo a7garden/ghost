@@ -1,0 +1,9 @@
+name = "codex-committer"
+description = "Applies bounded changes in the workspace"
+
+model = "faux-missing"
+sandbox_mode = "workspace-write"
+
+developer_instructions = """
+Apply the requested change and report the files you touched.
+"""

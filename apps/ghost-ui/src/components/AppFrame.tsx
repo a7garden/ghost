@@ -1,11 +1,12 @@
-import { createContext, useState, type ReactNode } from 'react';
-import { Ellipsis, Home, Inbox, Menu, MessageCircle, PanelsTopLeft, Search, Settings, Bot } from 'lucide-react';
+import { createContext, useEffect, useState, type ReactNode } from 'react';
+import { Ellipsis, Home, Inbox, Menu, MessageCircle, PanelLeft, PanelsTopLeft, Search, Settings, Bot } from 'lucide-react';
 import { CommandPalette, Dialog, DialogContent, DialogTitle, Popover, PopoverContent, PopoverTrigger, TitleBar, type CommandItem } from '../ui';
 import { useCompact } from '../ui/adaptive';
 import { routeLabels } from '../uiText';
 import { shortcut } from '../ui/keys';
 
 export const CompactTitleSlot = createContext<HTMLDivElement | null>(null);
+const SIDEBAR_KEY = 'ghost.sidebar';
 
 /**
  * The window: a quiet sidebar on the page tone, the destination on an inset sheet,
@@ -40,6 +41,20 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, callTray
   const focusedChat = compact && section === 'ghosts';
   const [titleSlot, setTitleSlot] = useState<HTMLDivElement | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(() => { try { return localStorage.getItem(SIDEBAR_KEY) === 'hidden'; } catch { return false; } });
+  const toggleSidebar = () => setSidebarHidden(hidden => {
+    try { localStorage.setItem(SIDEBAR_KEY, hidden ? 'shown' : 'hidden'); } catch { /* The choice still holds for this visit. */ }
+    return !hidden;
+  });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key !== '\\') return;
+      event.preventDefault();
+      toggleSidebar();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const search = <button type="button" className="shell-search" aria-label="명령 검색" title={`명령 검색 · ${shortcut('K')}`} onClick={() => onPaletteOpenChange(true)}>
     <Search aria-hidden="true"/><span className="shell-search__label">검색</span><kbd>{shortcut('K')}</kbd>
   </button>;
@@ -54,12 +69,14 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, callTray
   const settings = !desktop && <button type="button" className="shell-icon-button min-[56rem]:hidden" aria-label={routeLabels.settings} title={routeLabels.settings}
     aria-current={section === 'settings' ? 'page' : undefined} onClick={() => navigate('/settings')}><Settings aria-hidden="true"/></button>;
   const right = <span className="flex items-center gap-2">{duty}{search}{settings}</span>;
-  const left = <>{desktop && <button type="button" className="shell-icon-button min-[56rem]:hidden" aria-label="전체 메뉴" onClick={() => setMenuOpen(true)}><Menu aria-hidden="true"/></button>}{location}</>;
+  const sidebarToggle = <button type="button" className="shell-icon-button max-[56rem]:hidden" aria-label={sidebarHidden ? '사이드바 펼치기' : '사이드바 접기'}
+    aria-expanded={!sidebarHidden} title={`${sidebarHidden ? '사이드바 펼치기' : '사이드바 접기'} · ${shortcut('\\')}`} onClick={toggleSidebar}><PanelLeft aria-hidden="true"/></button>;
+  const left = <>{desktop && <button type="button" className="shell-icon-button min-[56rem]:hidden" aria-label="전체 메뉴" onClick={() => setMenuOpen(true)}><Menu aria-hidden="true"/></button>}{sidebarToggle}{location}</>;
   return <div className="shell" data-fill={fill || undefined}>
     {desktop
       ? <TitleBar aria-label="Ghost" macOSInset={macOSInset} left={left} center={island} right={right}/>
       : <header className="ghost-titlebar shell-header" data-focused-coding={focusedCoding || undefined} data-focused-chat={focusedChat || undefined}>
-        <div className="ghost-titlebar__slot ghost-titlebar__slot--left">{left}{focusedCoding && <div className="compact-title-slot" ref={setTitleSlot}/>}</div>
+        <div className="ghost-titlebar__slot ghost-titlebar__slot--left">{left}</div>
         <div className="ghost-titlebar__slot ghost-titlebar__slot--center">{focusedChat ? <div ref={setTitleSlot} className="chat-title-tools"/> : island}</div>
         <div className="ghost-titlebar__slot ghost-titlebar__slot--right">{focusedCoding || focusedChat
           ? <Popover open={toolsOpen} onOpenChange={setToolsOpen}>
@@ -74,7 +91,7 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, callTray
           </Popover> : right}</div>
       </header>}
     {callTray}
-    <div className="shell-body">
+    <div className="shell-body" data-sidebar={sidebarHidden ? 'hidden' : undefined}>
       <aside className="shell-sidebar" aria-label="작업실 탐색">{sidebar}</aside>
       <main id="main-content" tabIndex={-1} className="shell-sheet" data-fill={fill || undefined}>
         <CompactTitleSlot.Provider value={titleSlot}>{children}</CompactTitleSlot.Provider>

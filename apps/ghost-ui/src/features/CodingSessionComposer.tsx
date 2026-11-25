@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Paperclip, Square } from 'lucide-react';
 import type { CodingPrompt, CodingSession } from '@ghost/contract';
 import { AttachmentTray, type PendingAttachment } from '../components/composer/attachments';
@@ -22,9 +22,14 @@ async function encodeImage({ file, name, type }: LocalImage): Promise<PromptImag
   return { data, mimeType: type, name: name.slice(0, 200) };
 }
 
-export function CodingSessionComposer({ state, disabled, stopping, onPrompt, onAbort }: {
+export function CodingSessionComposer({ state, disabled, stopping, onPrompt, onAbort, placeholder = '코딩 지시를 입력하세요', footer, model }: {
   state: CodingSession['state']; disabled: boolean; stopping: boolean;
   onPrompt(prompt: CodingPrompt): Promise<{ disposition: 'started' | 'queued' }>; onAbort(): void;
+  placeholder?: string;
+  /** Beside the attach button: where a new agent works. */
+  footer?: ReactNode;
+  /** Beside send: the model chip. */
+  model?: ReactNode;
 }) {
   const [draft, setDraft] = useState('');
   const [images, setImages] = useState<LocalImage[]>([]);
@@ -89,7 +94,7 @@ export function CodingSessionComposer({ state, disabled, stopping, onPrompt, onA
     {attachmentError && <InlineError>{attachmentError}</InlineError>}
     {tooLong && <InlineError>지시는 24,000자까지 보낼 수 있습니다.</InlineError>}
     {queued && busy && <p className="embedded-prompt-status" role="status">후속 지시를 예약했습니다.</p>}
-    <Composer label="코딩 지시" placeholder="코딩 지시를 입력하세요" value={draft} onValueChange={setDraft}
+    <Composer label="코딩 지시" placeholder={placeholder} footer={footer} value={draft} onValueChange={setDraft}
       submitLabel={label} onSubmit={text => void send(text, mode)} disabled={disabled} pending={pending} running={state === 'working'}
       canSubmitEmpty={images.length > 0} onFiles={add}
       onKeyDown={event => {
@@ -112,6 +117,7 @@ export function CodingSessionComposer({ state, disabled, stopping, onPrompt, onA
         <Button type="button" variant="ghost" size="icon" disabled={disabled || pending} aria-label="이미지 첨부" onClick={() => attaching.current?.click()}><Paperclip aria-hidden="true"/></Button>
       </>}
       trailing={<>
+        {model}
         {state === 'working' && <Button type="button" className="embedded-queue" variant="ghost" size="sm" disabled={!readyToSend || tooLong || disabled || pending} onClick={() => void send(draft.trim(), 'follow_up')}>후속 지시 예약</Button>}
         {busy && <Button type="button" variant="ghost" size="icon" aria-label="작업 중단" title="작업 중단" disabled={disabled || stopping} onClick={onAbort}><Square aria-hidden="true"/></Button>}
       </>}/>

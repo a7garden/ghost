@@ -14,24 +14,10 @@
   .coding-diff { flex: 1; margin: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 12px 16px; font-size: var(--text-caption); line-height: 1.6; }
   .coding-diff [data-kind='meta'] { color: var(--ghost-ink3); }
   .coding-diff [data-kind='hunk'] { color: var(--ghost-signal-ink); }
-  .embedded-branch {
-    display: flex; align-items: center; gap: 5px; overflow: hidden; white-space: nowrap;
-    color: var(--ghost-ink3); font: var(--text-micro)/1.5 var(--font-mono);
-  }
-  .embedded-branch > svg { flex: none; }
-  .embedded-branch > code { overflow: hidden; text-overflow: ellipsis; }
 
   .embedded-workspace .ghost-conversation__header { padding-block: 0; border-block-end: 1px solid var(--ghost-line); }
   .embedded-workspace .ghost-conversation__header > .ghost-conversation__column { width: 100%; }
   .embedded-workspace__head { display: grid; min-width: 0; gap: 3px; padding: 12px 0 8px; }
-  .embedded-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
-  .embedded-identity h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; font-size: var(--text-heading); font-weight: 650; }
-  .embedded-identity > .state-glyph { flex: none; }
-  .embedded-workspace__actions { display: flex; align-items: center; gap: 4px; min-width: 0; }
-  .embedded-workspace__actions .embedded-branch { min-width: 0; margin-inline-end: auto; }
-  .embedded-workspace__actions:not(:has(.embedded-branch)) { justify-content: flex-end; }
-  .embedded-model { min-width: 0; max-width: min(40%, 218px); flex-shrink: 1; }
-  .embedded-model > span { overflow: hidden; text-overflow: ellipsis; }
   .embedded-workspace__head > [role='alert'] { font-size: var(--text-caption); }
   .embedded-workspace .ghost-conversation__transcript-frame::before { display: none; }
   .embedded-workspace .ghost-conversation__dock:has(> .ghost-conversation__column:empty) { display: none; }
@@ -110,30 +96,16 @@
   .embedded-preview__notice { display: flex; align-items: center; gap: 5px; padding: 6px; font-size: var(--text-caption); }
   .embedded-preview__notice > svg { flex: none; }
 
-  .embedded-settings { display: grid; gap: 6px; min-width: 0; }
-  .embedded-settings > label { font-size: var(--text-caption); color: var(--ghost-ink2); }
-  .embedded-settings > :is(label, button):not(:first-child) { margin-top: 5px; }
-  .embedded-settings > select {
-    min-width: 0; width: 100%; min-height: 34px; padding: 4px 8px; border: 1px solid var(--ghost-line-strong);
-    background: var(--ghost-field); color: var(--ghost-ink); border-radius: var(--radius-control); font-size: var(--text-ui);
-  }
-  .embedded-settings__title { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; gap: 6px; }
-  .embedded-start-sheet form { overflow-y: auto; }
   .embedded-changes__bar { display: flex; justify-content: space-between; align-items: center; color: var(--ghost-ink2); font-size: var(--text-caption); }
   .embedded-changes__files { min-width: 0; max-height: 30dvh; overflow: auto; margin: 0; padding: 0; list-style: none; }
   .embedded-changes__files li { display: grid; grid-template-columns: 1ch minmax(0, 1fr) max-content max-content; align-items: baseline; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--ghost-line); font: var(--text-caption)/1.5 var(--font-mono); }
   .embedded-changes__files code { overflow-wrap: anywhere; }
   .embedded-changes-sheet .coding-diff { padding: 8px 0; border-radius: var(--radius-control); }
-  :is(.embedded-workspace, .embedded-settings, .embedded-changes-sheet) :is(button, a, input, select, summary, pre):focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: -2px; }
+  :is(.embedded-workspace, .embedded-changes-sheet) :is(button, a, input, select, summary, pre):focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: -2px; }
 
   @media (max-width: 56rem) {
-    .embedded-identity { min-height: 36px; gap: 8px; }
-    .embedded-identity h2 { font-size: var(--text-body); }
     .embedded-choice > label { min-height: 44px; }
     .embedded-workspace__head { padding: 0 0 3px; }
-    .embedded-workspace__actions { gap: 0; }
-    .embedded-model { max-width: 40%; }
-    .embedded-settings > select { min-height: 44px; font-size: 16px; }
     .embedded-workspace .ghost-conversation__dock { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
     :root[data-keyboard='open'] .embedded-workspace .ghost-conversation__dock { padding-bottom: 8px; }
   }
