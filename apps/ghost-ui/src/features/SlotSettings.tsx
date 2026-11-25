@@ -84,7 +84,7 @@ function SlotEditor({ name: original, slot, onClose }: { name: string | null; sl
         <Choice label={`대체 모델 ${index + 1}`} value={value} onChange={next => setFallbacks(items => items.map((item, at) => at === index ? next : item))} required options={[{ value: '', label: '선택' }, ...options]}/>
         <div className="infra-actions"><Button type="button" variant="ghost" disabled={index === 0} onClick={() => setFallbacks(items => { const next = [...items]; [next[index - 1], next[index]] = [next[index]!, next[index - 1]!]; return next; })}>위로</Button><Button type="button" variant="ghost" onClick={() => setFallbacks(items => items.filter((_, at) => at !== index))}>삭제</Button></div>
       </div>)}
-      <Button type="button" variant="outline" disabled={fallbacks.length >= 3} onClick={() => setFallbacks(items => [...items, ''])}>대체 모델 추가</Button>
+      <Button type="button" variant="add" size="sm" disabled={fallbacks.length >= 3} onClick={() => setFallbacks(items => [...items, ''])}>대체 모델 추가</Button>
     </fieldset>
     {error && <InlineError>{error}</InlineError>}<EditorActions busy={busy} onCancel={onClose}/>
   </form>;

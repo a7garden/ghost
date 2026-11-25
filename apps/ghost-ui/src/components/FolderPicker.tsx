@@ -79,7 +79,7 @@ export function FolderList({ label, values, onChange, disabled = false, showLabe
       {values.map(path => <li key={path}><Folder aria-hidden="true"/><span title={path}>{path}</span>
         <Button variant="ghost" size="icon" type="button" aria-label={`${path} 제거`} disabled={disabled} onClick={() => onChange(values.filter(entry => entry !== path))}><X aria-hidden="true"/></Button></li>)}
     </ul>
-    <Button variant="ghost" type="button" className="justify-self-start" disabled={disabled} onClick={() => setOpen(true)}><Plus aria-hidden="true"/>폴더 추가</Button>
+    <Button variant="add" size="sm" type="button" className="justify-self-start" disabled={disabled} onClick={() => setOpen(true)}>폴더 추가</Button>
     {open && <FolderPicker title={label} initial={values.at(-1)} onPick={path => { setOpen(false); if (!values.includes(path)) onChange([...values, path]); }} onClose={() => setOpen(false)}/>}
   </div>;
 }

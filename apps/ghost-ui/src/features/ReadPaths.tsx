@@ -10,6 +10,6 @@ export function ReadPaths({ value, onChange }: { value: Paths; onChange(value: P
         <TextField label={`경로 ${index + 1}`} required value={item.path} onChange={path => onChange(value.map((entry, at) => at === index ? { ...entry, path } : entry))} placeholder="/search"/></div>
       <div className="infra-actions"><Button type="button" variant="ghost" onClick={() => onChange(value.filter((_, at) => at !== index))}>경로 삭제</Button></div>
     </div>)}
-    <Button type="button" variant="outline" disabled={value.length >= 128} onClick={() => onChange([...value, { method: 'POST', path: '' }])}>읽기 경로 추가</Button>
+    <Button type="button" variant="add" size="sm" disabled={value.length >= 128} onClick={() => onChange([...value, { method: 'POST', path: '' }])}>읽기 경로 추가</Button>
   </fieldset>;
 }

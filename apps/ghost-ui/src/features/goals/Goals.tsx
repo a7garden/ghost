@@ -61,7 +61,7 @@ function GoalsBody({ state, navigate, scopeId, editing, setEditing }: {
       {labelled && <h2 className="section-title goal-group__title">{group.name}</h2>}
       {group.goals.map(goal => <GoalSection key={goal.id} goal={goal} state={state} grouped={labelled} onEdit={() => setEditing({ goal })}/>)}
     </section>)}
-    {!goals.length && <div className="calm"><p>목표 없음</p><Button variant="outline" size="sm" className="ml-auto" onClick={() => setEditing({ scopeId: scopeId ?? null })}>목표 추가</Button></div>}
+    {!goals.length && <div className="calm"><p>목표 없음</p><Button variant="add" size="sm" className="ml-auto" onClick={() => setEditing({ scopeId: scopeId ?? null })}>목표 추가</Button></div>}
     {closed.length > 0 && <details className="goals-closed"><summary>종료된 목표 <span>{closed.length}</span></summary>
       {closed.map(goal => <details className="goals-closed__goal" key={goal.id}>
         <summary><span>{goal.title}{scopeId === undefined && goal.scopeId !== null && <span className="goal-closed__scope"> · {scopeName(state, goal.scopeId)}</span>}</span>

@@ -17,7 +17,7 @@ export function DocAttachments({ value, onChange, scopeId, label = '붙임' }: {
       </> : <TextField label={`붙임 ${index + 1} 스킬 이름`} value={ref.name} onChange={name => onChange(value.map((item, at) => at === index ? { ...ref, name } : item))} required/>}
       <div className="infra-actions"><Button type="button" variant="ghost" onClick={() => onChange(value.filter((_, at) => at !== index))}>붙임 삭제</Button></div>
     </div>)}</div>
-    <Button type="button" variant="outline" size="sm" disabled={value.length >= 32} onClick={() => onChange([...value, { kind: 'page', scopeId: scopeId ?? state?.scopes.find(scope => scope.vaultPath)?.id ?? '', locator: '' }])}>붙임 추가</Button>
+    <Button type="button" variant="add" size="sm" disabled={value.length >= 32} onClick={() => onChange([...value, { kind: 'page', scopeId: scopeId ?? state?.scopes.find(scope => scope.vaultPath)?.id ?? '', locator: '' }])}>붙임 추가</Button>
   </fieldset>;
 }
 

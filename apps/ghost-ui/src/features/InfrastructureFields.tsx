@@ -26,7 +26,7 @@ export function StringList({ label, values, onChange, max = 32, placeholder }: {
   return <fieldset className="infra-list"><legend>{label}</legend>{values.map((value, index) => <div className="infra-list__row" key={index}>
     <Input aria-label={`${label} ${index + 1}`} value={value} placeholder={placeholder} onChange={event => onChange(values.map((item, at) => at === index ? event.target.value : item))}/>
     <Button type="button" variant="ghost" aria-label={`${label} ${index + 1} 삭제`} onClick={() => onChange(values.filter((_, at) => at !== index))}>삭제</Button>
-  </div>)}<Button type="button" variant="outline" size="sm" aria-controls={id} disabled={values.length >= max} onClick={() => onChange([...values, ''])}>{label} 추가</Button><span id={id} className="sr-only">최대 {max}개</span></fieldset>;
+  </div>)}<Button type="button" variant="add" size="sm" aria-controls={id} disabled={values.length >= max} onClick={() => onChange([...values, ''])}>{label} 추가</Button><span id={id} className="sr-only">최대 {max}개</span></fieldset>;
 }
 
 export function EditorActions({ busy, onCancel, children }: { busy: boolean; onCancel(): void; children?: ReactNode }) {

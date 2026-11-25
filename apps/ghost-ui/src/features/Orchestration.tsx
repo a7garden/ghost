@@ -87,12 +87,12 @@ export function Orchestration() {
     {config && stored && <>
       <div className="orchestration-toolbar">
         <div className="orchestration-actions">
-          <Button variant="outline" size="sm" disabled={!editable || config.agents.length >= 128} onClick={() => {
+          <Button variant="add" size="sm" disabled={!editable || config.agents.length >= 128} onClick={() => {
             const result = addNode(config, 'agents'); change(result.config); select(result.node, true);
-          }}><Plus size={15}/>에이전트</Button>
-          <Button variant="outline" size="sm" disabled={!editable || Object.keys(config.modelRoles).length >= 128} onClick={() => {
+          }}>에이전트</Button>
+          <Button variant="add" size="sm" disabled={!editable || Object.keys(config.modelRoles).length >= 128} onClick={() => {
             const result = addNode(config, 'roles', stored.models[0]); change(result.config); select(result.node, true);
-          }}><Plus size={15}/>모델 역할</Button>
+          }}>모델 역할</Button>
           <Button variant="ghost" size="sm" disabled={!editable || importing} onClick={() => void importOmp()}><Download size={15}/>omp 가져오기</Button>
         </div>
         <div className="orchestration-actions orchestration-save">

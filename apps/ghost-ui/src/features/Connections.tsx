@@ -162,7 +162,7 @@ export function Connections({ navigate }: { navigate(path: string): void }) {
                   <ServiceIcon service={service}/>
                   <span className="service-tile__name">{service.name}</span>
                   {accounts.length > 0 && <span className="service-state"><Check size={14} aria-hidden="true"/>{accounts.length > 1 ? `연결됨 ${accounts.length}` : '연결됨'}</span>}
-                  <Button variant="outline" size="sm" type="button" disabled={!state}
+                  <Button variant="add" size="sm" type="button" disabled={!state}
                     aria-label={`${service.name} ${accounts.length > 0 ? '계정 추가' : '연결'}`}
                     onClick={() => { setError(''); if (service.kind === 'mail') setMail({ seed: service }); else setSelected(service); }}>
                     {accounts.length > 0 ? '계정 추가' : '연결'}

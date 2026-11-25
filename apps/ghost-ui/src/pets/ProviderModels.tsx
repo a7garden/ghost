@@ -96,8 +96,8 @@ export function ProviderModels({ catalog, selected, onChange, automatic = false,
           autoCapitalize="off" autoComplete="off" className="min-w-0 flex-1" disabled={disabled}
           onChange={event => setDraftId(event.target.value)}
           onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); addCustom(); } }}/>
-        <Button className="flex-none" variant="outline" type="button" onClick={addCustom} disabled={disabled || !draftId.trim()}>
-          <Plus size={14}/>추가</Button>
+        <Button className="flex-none" variant="add" type="button" onClick={addCustom} disabled={disabled || !draftId.trim()}>
+          추가</Button>
       </div>
       {error && <div className="mt-2"><InlineError>{error}</InlineError></div>}
     </details>

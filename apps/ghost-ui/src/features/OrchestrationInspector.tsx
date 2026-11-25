@@ -142,6 +142,6 @@ function FallbackEditor({ chain, roles, models, onChange }: {
       const first = models[0];
       setSelected(chain.length);
       onChange([...chain, { provider: first?.provider ?? '', model: first?.model ?? '', thinking: null }]);
-    }}><Plus size={14}/>대체 모델 추가</Button>
+    }}>대체 모델 추가</Button>
   </div>;
 }

@@ -74,7 +74,7 @@ export function ModelSettings() {
       <h2 className="section-title">제공자</h2>
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" type="button" disabled={pending !== '' || !settings} onClick={() => { setError(''); setNotice(''); setImportAuth(true); }}><Download size={15}/>다른 에이전트에서 가져오기</Button>
-        <Button variant="outline" type="button" disabled={pending !== '' || !settings || catalogLoading || !catalog.length} onClick={() => { setError(''); setEditor({}); }}><Plus size={15}/>{catalogLoading ? '목록 불러오는 중…' : '제공자 추가'}</Button>
+        <Button variant="add" type="button" disabled={pending !== '' || !settings || catalogLoading || !catalog.length} onClick={() => { setError(''); setEditor({}); }}>{catalogLoading ? '목록 불러오는 중…' : '제공자 추가'}</Button>
       </div>
     </div>
     {catalogError && <InlineError pending={catalogLoading} onRetry={() => setCatalogAttempt(value => value + 1)} retryLabel="다시 불러오기">{catalogError}</InlineError>}

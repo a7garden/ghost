@@ -296,10 +296,10 @@ export function Workbench({ scopes, compact, sessionId, navigate }: {
             <CodingSession id={agent.sessionId} onUpdate={observer}/>
           </section>)}
         </div> : <div className="workbench-empty">
-          <Button variant="outline" type="button" disabled={busy} onClick={() => setDialog({ type: 'agent' })}><Plus aria-hidden="true"/>에이전트 추가</Button>
+          <Button variant="add" type="button" disabled={busy} onClick={() => setDialog({ type: 'agent' })}>에이전트 추가</Button>
         </div>}
       </> : state && <div className="workbench-empty">
-        <Button variant="outline" type="button" disabled={busy} onClick={() => displayDialog({ type: 'space' })}><Plus aria-hidden="true"/>스페이스 만들기</Button>
+        <Button variant="add" type="button" disabled={busy} onClick={() => displayDialog({ type: 'space' })}>스페이스 만들기</Button>
       </div>}
     </div>
     {sheet}

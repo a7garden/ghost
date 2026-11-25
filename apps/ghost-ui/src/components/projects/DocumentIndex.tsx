@@ -33,7 +33,7 @@ export function DocumentIndex({ pages, total, search, onSearch, loading, error, 
             <X aria-hidden="true"/>
           </button>}
         </span>
-        <Button variant="outline" size="sm" type="button" onClick={onCreate}>새 문서</Button>
+        <Button variant="add" size="sm" type="button" onClick={onCreate}>새 문서</Button>
       </div>
     </div>
     {loading && pages.length === 0 && !error && <SkeletonRows label="문서를 불러오는 중…" rows={3} className="p-3"/>}
