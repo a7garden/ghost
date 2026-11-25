@@ -12,34 +12,17 @@ export type Space = {
   root: string | null;
   createdAt: Static<typeof Timestamp>;
   worktree?: { repo: string; branch: string };
+  /** The agent shown when the owner returns to this space. */
+  lastSessionId?: string;
 };
-export type Layout =
-  | { type: "pane"; paneId: string }
-  | { type: "split"; id: string; direction: "row" | "column"; ratio: number; first: Layout; second: Layout };
-export type Tab = { id: string; spaceId: string; title: string; layout: Layout | null; focusedPaneId: string | null };
-
-export const WorkbenchTerminalSpec = Type.Object({
-  cwd: path,
-  command: Type.Optional(path),
-  args: Type.Optional(Type.Array(Type.String({ maxLength: 4096 }), { maxItems: 128 })),
-}, body);
-export type WorkbenchTerminalSpec = Static<typeof WorkbenchTerminalSpec>;
-export type Pane =
-  | { id: string; tabId: string; kind: "session"; sessionId: string }
-  | { id: string; tabId: string; kind: "terminal"; terminalSpec: WorkbenchTerminalSpec };
+/** A built-in coding session listed in one space. The session outlives the entry: removing an agent never closes it. */
+export type Agent = { sessionId: string; spaceId: string };
 export type WorkbenchState = {
   version: number;
   spaces: Space[];
-  tabs: Tab[];
-  panes: Pane[];
-  focus: { spaceId: string; tabId: string | null; paneId: string | null } | null;
+  agents: Agent[];
+  focus: { spaceId: string; sessionId: string | null } | null;
 };
-
-// A row puts the second pane to the right; a column puts it below.
-export const WorkbenchDirection = Type.Union([Type.Literal("right"), Type.Literal("down")]);
-export type WorkbenchDirection = Static<typeof WorkbenchDirection>;
-export const WORKBENCH_MIN_RATIO = 0.1;
-export const WORKBENCH_MAX_RATIO = 0.9;
 
 export const WorkbenchVersion = Type.Object({ version }, body);
 export const WorkbenchSpaceCreate = Type.Object({
@@ -49,26 +32,10 @@ export const WorkbenchSpaceCreate = Type.Object({
 export type WorkbenchSpaceCreate = Static<typeof WorkbenchSpaceCreate>;
 export const WorkbenchRename = Type.Object({ version, title }, body);
 export type WorkbenchRename = Static<typeof WorkbenchRename>;
-export const WorkbenchPaneCreate = Type.Object({
-  version,
-  targetPaneId: Type.Optional(Id),
-  direction: Type.Optional(WorkbenchDirection),
-  pane: Type.Union([
-    Type.Object({ kind: Type.Literal("session"), sessionId: Id }, body),
-    Type.Object({ kind: Type.Literal("terminal"), terminalSpec: Type.Optional(WorkbenchTerminalSpec) }, body),
-  ]),
-}, body);
-export type WorkbenchPaneCreate = Static<typeof WorkbenchPaneCreate>;
-export const WorkbenchResize = Type.Object({ version, ratio: Type.Number() }, body);
-export type WorkbenchResize = Static<typeof WorkbenchResize>;
-export const WorkbenchMove = Type.Object({ version, targetPaneId: Id }, body);
-export type WorkbenchMove = Static<typeof WorkbenchMove>;
-export const WorkbenchFocus = Type.Object({ version, spaceId: Id, tabId: Type.Optional(Id), paneId: Type.Optional(Id) }, body);
+export const WorkbenchAgentCreate = Type.Object({ version, sessionId: Id }, body);
+export type WorkbenchAgentCreate = Static<typeof WorkbenchAgentCreate>;
+export const WorkbenchFocus = Type.Object({ version, spaceId: Id, sessionId: Type.Optional(Id) }, body);
 export type WorkbenchFocus = Static<typeof WorkbenchFocus>;
-/** Live terminal bindings are never in WorkbenchState. After a Host restart, a command pane requires explicit start. */
-export const WorkbenchTerminalOpen = Type.Object({ restart: Type.Optional(Id), start: Type.Optional(Type.Boolean()) }, body);
-export type WorkbenchTerminalOpen = Static<typeof WorkbenchTerminalOpen>;
-export type WorkbenchTerminalBinding = { id: string | null };
 
 export type WorkbenchChanges = {
   branch: string | null;

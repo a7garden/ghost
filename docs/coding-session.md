@@ -1,6 +1,6 @@
 # 코딩 세션 (Ghost 내장 코딩 에이전트)
 
-소유자 결정 2026-11-23. Ghost는 Pi(`@earendil-works/pi-coding-agent`)를 Host 프로세스에 임베드한다. 소유자는 코딩 작업대에서, Ghost는 도구로 같은 세션을 다룬다. herdr 연동은 2026-11-24에 제거했다. omp·Claude Code·Codex 같은 CLI 에이전트는 소유자가 작업대 터미널에서 직접 실행할 수 있다.
+소유자 결정 2026-11-23. Ghost는 Pi(`@earendil-works/pi-coding-agent`)를 Host 프로세스에 임베드한다. 소유자는 코딩 작업대에서, Ghost는 도구로 같은 세션을 다룬다. herdr 연동은 2026-11-24에 제거했고, CLI 에이전트(omp·Claude Code·Codex)를 작업대 터미널에서 직접 실행하는 경로는 2026-11-25 소유자 결정(터미널 철거)으로 제거했다. `code_run`은 내장 세션(`ghost`)만 쓴다.
 
 ## 구조
 

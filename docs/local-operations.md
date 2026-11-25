@@ -134,6 +134,7 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작�
   - 설치본 확인(Owner API): `/api/herdr`·`/api/coding`은 404, `/api/coding/sessions`·`/api/coding/models`·`/api/terminals/agents`·`/api/workbench/spaces`는 200. 옛 herdr 실행(`omp`, pane `w83:p1`, `settled`)이 맡긴 일 상세 API에 그대로 읽힌다. `/#/coding?view=herdr`는 작업대로 열린다.
   - 검증: Host·UI 단위 테스트와 릴리스 검사 통과, 타입 검사 통과, UI 빌드 통과. e2e(작업대·코딩 세션·Pi 설정·오케스트레이션·딥링크) 통과. 작업대 e2e는 2.29.3 폴더 선택기 이후 이미 깨져 있었고(텍스트 입력 → 선택기), 포커스 변경 중 단축키가 무시되는 경합이 있어 반복 입력으로 고쳤다. 코딩 설정·홈 dock의 기준 이미지를 새로 만들었다. `iphone.spec`의 대화 작성기·설정 이미지 불일치(수백~2천 픽셀)는 이 변경과 무관해 보여 손대지 않았다.
   - 한계: 설치된 Mac 앱 창과 iPhone에서 철거 뒤 코딩 탭을 열지 못했다(서비스된 UI의 헤드리스 브라우저 확인까지). 로컬 `main` 체크아웃은 `origin/main`과 갈라져 있어 갱신하지 않았다(다른 작업자의 미커밋 변경이 같은 파일에 겹친다).
+- 터미널 기능 철거(2026-11-25, 소유자 결정): 작업대는 「스페이스 → 에이전트」(내장 GUI Pi 코딩 세션)만 남긴다. Host 터미널(`apps/ghost-host/src/terminal/`, `/api/terminals/*`, 터미널 websocket·bearer), 터미널 에이전트 감지·`coding:terminal:` 알림, 터미널 busy 업데이트 대기, UI 터미널 패널(xterm·키 막대·`TerminalPane`·`TerminalControls`), omp 시작 옵션(`OmpAgentOptions`·`/api/coding/omp`), `@xterm/*` 의존성을 제거했다. `code_run`은 내장 세션(`ghost`)만 받고, 위 2.x 기록의 터미널·에이전트 시작 항목은 역사 기록으로 남는다.
 
 ### Mac 셸·도구 자동 승인 모드 (운영 정책 변경) — 2026-11-20
 

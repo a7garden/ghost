@@ -29,7 +29,7 @@ function fixture(withGit: boolean) {
     git(repo, "add", "--", "tracked.txt");
     git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "commit", "-m", "initial");
   }
-  const workbench = new Workbench(ledger, null, null, stateRoot);
+  const workbench = new Workbench(ledger, null, stateRoot);
   const request = (path: string, method = "GET", body?: object) => serveWorkbench(workbench, owners, new Request(`http://localhost${path}`, {
     method, body: body ? JSON.stringify(body) : undefined,
   }), path.split("?")[0]!);

@@ -7,12 +7,10 @@ import { mockWorkbench } from './workbench-mock';
 
 async function openSessionPicker(page: Page, creates: { repo?: string; cwd?: string }[]) {
   const { service } = await mockWorkbench(page, creates);
-  const { spaces: [space] } = service.createSpace({ title: '세션 테스트', root: null, version: 0 });
-  service.createTab(space!.id, 1, '코딩 세션');
-  await openScreen(page, { name: 'coding', route: () => '/coding', waits: () => ['새 패널'] }, 'light');
-  await page.getByRole('button', { name: '새 패널' }).click();
-  await page.getByRole('dialog', { name: '새 패널' }).getByRole('button', { name: '코딩 세션', exact: true }).click();
-  return page.getByRole('dialog', { name: '코딩 세션 선택' });
+  service.createSpace({ title: '세션 테스트', root: null, version: 0 });
+  await openScreen(page, { name: 'coding', route: () => '/coding', waits: () => ['에이전트 추가'] }, 'light');
+  await page.locator('.workbench-main').getByRole('button', { name: '에이전트 추가' }).click();
+  return page.getByRole('dialog', { name: '에이전트 추가' });
 }
 
 async function capture(page: Page, name: string) {
@@ -36,9 +34,9 @@ for (const width of [1440, 390]) {
       const picker = await openSessionPicker(page, api.creates);
       await picker.getByRole('button', { name: sampleSession.title, exact: true }).click();
       await expect(page).toHaveURL(/#\/coding$/);
-      const pane = page.getByRole('region', { name: `패널: ${sampleSession.title}`, exact: true });
-      await expect(pane).toHaveAttribute('data-focused', 'true');
-      const workspace = pane.getByRole('region', { name: '내장 코딩 세션' });
+      const agent = page.getByRole('region', { name: `에이전트: ${sampleSession.title}`, exact: true });
+      await expect(agent).toHaveAttribute('data-focused', 'true');
+      const workspace = agent.getByRole('region', { name: '내장 코딩 세션' });
       const transcript = workspace.getByRole('region', { name: '코딩 기록' });
       const draft = page.getByRole('textbox', { name: '코딩 지시' });
       await expect(transcript.getByText(partialReply.text)).toBeVisible();
@@ -132,8 +130,8 @@ for (const width of [1440, 390]) {
 test('starts from a known repository, patches title and model, then preserves closed history read-only', async ({ page }) => {
   const api = await mockCodingSessions(page);
   const picker = await openSessionPicker(page, api.creates);
-  await picker.getByRole('button', { name: '새 세션' }).click();
-  const create = page.getByRole('dialog', { name: '새 코딩 세션' });
+  await picker.getByRole('button', { name: '새 에이전트' }).click();
+  const create = page.getByRole('dialog', { name: '새 에이전트' });
   const repo = create.getByRole('combobox', { name: '작업 폴더' });
   await expect(repo).toBeVisible();
   await expect(create.getByRole('checkbox', { name: '별도 worktree에서 작업' })).toBeChecked();
@@ -141,21 +139,21 @@ test('starts from a known repository, patches title and model, then preserves cl
   expect(path).toMatch(/^\//);
   await create.getByRole('combobox', { name: '모델', exact: true }).selectOption({ label: 'Atlas · sample' });
   await create.getByRole('combobox', { name: '생각 수준' }).selectOption('high');
-  await create.getByRole('button', { name: '세션 열기' }).click();
+  await create.getByRole('button', { name: '시작', exact: true }).click();
   expect(api.creates).toEqual([{ repo: path, model: { provider: 'sample', model: 'atlas' }, thinking: 'high' }]);
   const workspace = page.getByRole('region', { name: '내장 코딩 세션' });
   await expect(workspace.getByText('아직 지시가 없습니다.')).toBeVisible();
   await workspace.getByRole('button', { name: '세션 설정' }).click();
   await page.getByRole('textbox', { name: '세션 제목' }).fill('테스트 세션');
   await page.getByRole('button', { name: '저장', exact: true }).click();
-  const renamed = page.getByRole('region', { name: '패널: 테스트 세션', exact: true });
-  await expect(renamed.getByRole('heading', { name: '테스트 세션' })).toBeVisible();
+  const head = page.locator('.workbench-head');
+  await expect(head.getByRole('heading', { name: '테스트 세션' })).toBeVisible();
   await page.getByRole('combobox', { name: '모델', exact: true }).selectOption({ label: 'Sparrow · sample' });
   await expect.poll(() => api.patches.at(-1)).toEqual({ model: { provider: 'sample', model: 'sparrow' }, thinking: 'off' });
   await page.keyboard.press('Escape');
   await workspace.getByRole('button', { name: '세션 닫기' }).click();
   await page.getByRole('dialog', { name: '코딩 세션 닫기' }).getByRole('button', { name: '세션 닫기' }).click();
-  await expect(renamed.getByRole('img', { name: '닫힘', exact: true })).toBeVisible();
+  await expect(head.getByRole('img', { name: '닫힘', exact: true })).toBeVisible();
   await expect(workspace.getByRole('textbox', { name: '코딩 지시' })).toHaveCount(0);
   await expect(workspace.getByText('기록 없음')).toBeVisible();
 });

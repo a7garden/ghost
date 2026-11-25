@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
-import { Compass, Folder, Home, Inbox, LayoutList, Mail, MessageCircle, Pin, Plus, Settings2, SquareTerminal } from 'lucide-react';
+import { Compass, Folder, Home, Inbox, LayoutList, Mail, MessageCircle, Pin, Plus, Settings2, Bot } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Navigation, NavigationGroup, NavigationItem, ScrollRail } from '../ui'
 import type { Ghost, State } from '@ghost/contract';
 import { ghostLiveWork, ghostPresence, liveWorks, visibleGhosts, type Presence } from '../features/ghostState';
@@ -121,7 +121,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
           {live > 0 && <span className="sidebar-count"><span className="sr-only">진행 중 </span>{live}</span>}
         </NavigationItem>
         <NavigationItem current={section === 'coding'} onClick={() => navigate('/coding')}>
-          <SquareTerminal/><span className="flex-1">{routeLabels.coding}</span>
+          <Bot/><span className="flex-1">{routeLabels.coding}</span>
         </NavigationItem>
         <NavigationItem current={section === 'mail'} onClick={() => navigate('/mail')}>
           <Mail/><span className="flex-1">{routeLabels.mail}</span>

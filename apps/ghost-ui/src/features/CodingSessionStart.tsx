@@ -39,14 +39,14 @@ export function StartSession({ directories, onCreated, onClose }: {
         ...(worktree ? { repo } : { cwd: repo }), ...(model && { model: { provider: model.provider, model: model.model } }), thinking: level,
       }));
     } catch (reason) {
-      setError(codingError(reason, '코딩 세션을 열지 못했습니다.'));
+      setError(codingError(reason, '에이전트를 시작하지 못했습니다.'));
     } finally {
       submitting.current = false;
       setPending(false);
     }
   }
 
-  return <Modal title="새 코딩 세션" onClose={() => { if (!submitting.current) onClose(); }} className="embedded-start-sheet">
+  return <Modal title="새 에이전트" onClose={() => { if (!submitting.current) onClose(); }} className="embedded-start-sheet">
     <form className="embedded-settings" onSubmit={event => { event.preventDefault(); void start(); }}>
       <label htmlFor={`${fields}-repo`}>작업 폴더</label>
       {directories.length > 0 && <select id={`${fields}-repo`} value={directory} disabled={pending} onChange={event => selectDirectory(event.target.value)}>
@@ -76,7 +76,7 @@ export function StartSession({ directories, onCreated, onClose }: {
       </>}
       {modelError && <InlineError onRetry={reload} retryLabel="다시 불러오기">{modelError}</InlineError>}
       {error && <InlineError>{error}</InlineError>}
-      <Button type="submit" className="justify-self-end" disabled={pending || !canStart}>{pending ? '여는 중…' : '세션 열기'}</Button>
+      <Button type="submit" className="justify-self-end" disabled={pending || !canStart}>{pending ? '시작 중…' : '시작'}</Button>
     </form>
   </Modal>;
 }

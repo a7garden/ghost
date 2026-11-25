@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BriefcaseBusiness, ChartColumn, CircleAlert, Clock3, Gauge, History, KeyRound, Layers, ListChecks, Mic, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Smartphone, SquareTerminal, Users, Wifi, Wrench } from 'lucide-react';
+import { BriefcaseBusiness, ChartColumn, CircleAlert, Clock3, Gauge, History, KeyRound, Layers, ListChecks, Mic, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Smartphone, Bot, Users, Wifi, Wrench } from 'lucide-react';
 import { DutySwitch } from './components/DutySwitch';
 import { DutySettings } from './features/DutySettings';
 import { Banner, Button, EmptyState, ScrollRails, Skeleton, type CommandItem } from './ui';
@@ -272,7 +272,7 @@ function Shell() {
     { id: 'history', label: uiTerms.configHistory, icon: History, content: <ConfigHistory/> },
     { id: 'metrics', label: uiTerms.metrics, icon: ChartColumn, content: <ScopeMetrics/> },
     { id: 'host', label: uiTerms.connectionStatus, icon: Wifi, content: <HostView/> },
-    { id: 'coding', label: '코딩', icon: SquareTerminal, content: <PiConfigSettings/> },
+    { id: 'coding', label: '코딩', icon: Bot, content: <PiConfigSettings/> },
     { id: 'voice', label: '음성', icon: Mic, content: <VoiceSettings/> },
     { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
@@ -326,7 +326,7 @@ function Shell() {
             {section === 'mail' && <MailView navigate={navigate}/>}
             {orchestrationOpen && <Orchestration/>}
             {section === 'coding' && !orchestrationOpen && <Workbench scopes={state.scopes} compact={compact}
-              terminalId={params.get('terminal')} sessionId={embeddedSessionId} navigate={navigate}/>}
+              sessionId={embeddedSessionId} navigate={navigate}/>}
             {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>

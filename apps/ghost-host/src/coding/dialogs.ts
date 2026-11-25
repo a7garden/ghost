@@ -62,7 +62,7 @@ export class Dialogs {
   }
 
   async bind(session: AgentSession, onError: (error: unknown) => void): Promise<void> {
-    // Retain Pi's headless defaults for terminal-only surfaces. The selected SDK UI functions
+    // Retain Pi's headless defaults. The selected SDK UI functions
     // are routed to the same owner dialog queue as the explicit choices and approval tools.
     const defaults = new ExtensionRunner([], createExtensionRuntime(), "", session.sessionManager, new ModelRegistry(session.modelRuntime)).getUIContext();
     await session.bindExtensions({ mode: "rpc", onError,

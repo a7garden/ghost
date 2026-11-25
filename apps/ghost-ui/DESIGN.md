@@ -4,7 +4,7 @@
 - Every Ghost has the same durable runtime; mark only the default entry point. A request starts from the home composer or 일 맡기기, addressed to the default Ghost; delegation happens between Ghosts as child Work, not by the owner picking a recipient first.
 - The host contract (`@ghost/contract`) is the only API reference; the UI owns no second vocabulary for entities, commands or events.
 - Page headings name the destination. Do not append promotional subtitles, rhetorical slogans, English eyebrow labels, or companionship copy. Show actual state and actionable labels. Help belongs beside a field or in an empty/error state when needed.
-- Example data is explicitly labeled and kept separate from the host. No fake live terminal, model execution, or simulated streams.
+- Example data is explicitly labeled and kept separate from the host. No fake live sessions, model execution, or simulated streams.
 - The app icon is the round Ghost (approved face) with the blue working arc on a light tile; sources live in `apps/ghost-desktop/src-tauri/brand-source/`. The in-app built-in Ghost portrait uses the same face; see Ghost portraits below.
 
 ## App-owned UI
@@ -155,18 +155,16 @@ Feature-level compositions:
   composer edge carries a travelling signal while the Ghost responds: a comet on the edge,
   a soft glow behind it and a faint steady ring.
 - **Coding inbox**: blocked agents come first, then active work and unread completions.
-  The same inline approval sits above the pane composer. Consecutive tools and thinking
+  The same inline approval sits above the session composer. Consecutive tools and thinking
   fold in place; a reply ends that group, so later actions never move above the reply.
   Repeated identical operations share a count, and failures remain visible in the summary.
-  The space tree and terminal remain alternate views.
-  On phones, the pane title and state share the back bar. Tap the title for the full
-  path, branch, linked Work and sibling panes; swipe the title to switch siblings.
-  The view switch stays directly above the content. A selected diff has one file
+  The space tree remains an alternate view.
+  On phones, the session title and state share the back bar; the view switch stays
+  directly above the content. A selected diff has one file
   toolbar, and a blocking request replaces the disabled chat composer.
-  In the terminal, Esc, Tab, ↑, ↓ and Enter share one stationary row with an extra-key
-  pad that opens above it without displacing the terminal. Ghost-owned panes fit automatically. Watching someone else's pane does not
-  resize it; 직접 조작 requests control for this visit only. Taking another device's
-  active lease requires confirmation. The native workbench only creates a worktree when
+  Terminals and pane lease control are gone (owner decision 2026-11-25): the workbench
+  is spaces → agents, and each agent is a built-in GUI Pi coding session. The native
+  workbench only creates a worktree when
   **worktree로 시작** is checked; **git 변경** reads the focused space without staging
   or editing files. Direct writes and approval bypass stay visible even when options are folded.
 - **Collaboration**: a `delegate` result reads as a 위임 event line (Ghost · title), and a

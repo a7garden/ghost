@@ -22,12 +22,6 @@ it('keeps an old pane notification readable with no coding destination', () => {
   expect(notificationRoute(item, state)).toBeNull();
 });
 
-it('opens an owner terminal notification in the workbench', () => {
-  const id = '78396e40-f7fb-4208-9f60-2b543fa28e21';
-  expect(notificationRoute({ ...notification, id: `coding:terminal:${id}:1`, decisionId: null, workId: null }, state))
-    .toBe(`/coding?terminal=${id}`);
-});
-
 it('opens embedded session attention directly instead of opening the assigned Work', () => {
   const item = { ...notification, id: 'session:coding-52ab:turn:2:waiting', decisionId: null };
   expect(notificationRoute(item, state)).toBe('/coding?session=coding-52ab');

@@ -24,7 +24,6 @@ import type {
   ConnectionOAuthStart,
   CommandResponse,
   NextMessageSuggestions,
-  OmpInfo,
   ConversationPage,
   LedgerEvent,
   LiveEvent,
@@ -47,8 +46,7 @@ import type {
   WorkDetail,
   VoiceSettings,
 } from '@ghost/contract';
-import type { FolderListing, WorkbenchChanges, WorkbenchFileDiff, WorkbenchState, WorkbenchTerminalBinding, WorkbenchTerminalOpen } from '@ghost/contract';
-import { TERMINAL_BEARER_PREFIX, TERMINAL_PROTOCOL, type TerminalAgent, type TerminalCreate, type TerminalView } from '@ghost/contract';
+import type { FolderListing, WorkbenchChanges, WorkbenchFileDiff, WorkbenchState } from '@ghost/contract';
 
 declare global {
   interface Window {
@@ -246,29 +244,6 @@ export class HostClient {
     return this.json('/api/skills');
   }
 
-  createTerminal(spec: TerminalCreate): Promise<{ id: string }> {
-    return this.json('/api/terminals', codingJson('POST', spec));
-  }
-
-  terminals(signal?: AbortSignal): Promise<TerminalView[]> {
-    return this.json('/api/terminals', { signal });
-  }
-
-  terminalAgents(signal?: AbortSignal): Promise<TerminalAgent[]> {
-    return this.json('/api/terminals/agents', { signal, cache: 'no-store' });
-  }
-
-  closeTerminal(id: string): Promise<{ ok: true }> {
-    return this.json(`/api/terminals/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  }
-
-  openTerminalSocket(id: string, after: number | undefined): WebSocket {
-    const url = new URL(`/api/terminals/${encodeURIComponent(id)}/stream`, window.location.href);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    if (after !== undefined) url.searchParams.set('after', String(after));
-    return new WebSocket(url, this.token ? [TERMINAL_PROTOCOL, `${TERMINAL_BEARER_PREFIX}${this.token}`] : [TERMINAL_PROTOCOL]);
-  }
-
   workbench(signal?: AbortSignal): Promise<WorkbenchState> {
     return this.json('/api/workbench/spaces', { signal });
   }
@@ -286,10 +261,6 @@ export class HostClient {
     return this.json(`/api/workbench/${path}`, {
       method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
     });
-  }
-
-  openWorkbenchTerminal(paneId: string, options: WorkbenchTerminalOpen): Promise<WorkbenchTerminalBinding> {
-    return this.json(`/api/workbench/panes/${encodeURIComponent(paneId)}/terminal`, codingJson('POST', options));
   }
 
   orchestration(signal?: AbortSignal): Promise<OrchestrationView> {
@@ -419,9 +390,6 @@ export class HostClient {
     }
   }
 
-  ompInfo(cwd: string, signal?: AbortSignal): Promise<OmpInfo> {
-    return this.json(`/api/coding/omp?${new URLSearchParams({ cwd })}`, { signal });
-  }
   conversationSuggestions(conversation: string, signal?: AbortSignal): Promise<NextMessageSuggestions> {
     return this.json(`/api/suggestions?${new URLSearchParams({ conversation })}`, { signal });
   }

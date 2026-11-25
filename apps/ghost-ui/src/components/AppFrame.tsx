@@ -1,5 +1,5 @@
 import { createContext, useState, type ReactNode } from 'react';
-import { Ellipsis, Home, Inbox, Menu, MessageCircle, PanelsTopLeft, Search, Settings, SquareTerminal } from 'lucide-react';
+import { Ellipsis, Home, Inbox, Menu, MessageCircle, PanelsTopLeft, Search, Settings, Bot } from 'lucide-react';
 import { CommandPalette, Dialog, DialogContent, DialogTitle, Popover, PopoverContent, PopoverTrigger, TitleBar, type CommandItem } from '../ui';
 import { useCompact } from '../ui/adaptive';
 import { routeLabels } from '../uiText';
@@ -49,7 +49,7 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, callTray
     { id: 'home', path: '/', label: routeLabels.home, icon: Home, sections: ['home', 'work', 'goals'] },
     { id: 'conversations', path: '/conversations', label: routeLabels.conversations, icon: MessageCircle, sections: ['conversations', 'workspace', 'ghosts', 'scopes'] },
     { id: 'inbox', path: '/inbox', label: routeLabels.inbox, icon: Inbox, sections: ['inbox'] },
-    { id: 'coding', path: '/coding', label: routeLabels.coding, icon: SquareTerminal, sections: ['coding'] },
+    { id: 'coding', path: '/coding', label: routeLabels.coding, icon: Bot, sections: ['coding'] },
   ];
   const settings = !desktop && <button type="button" className="shell-icon-button min-[56rem]:hidden" aria-label={routeLabels.settings} title={routeLabels.settings}
     aria-current={section === 'settings' ? 'page' : undefined} onClick={() => navigate('/settings')}><Settings aria-hidden="true"/></button>;

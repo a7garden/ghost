@@ -36,13 +36,6 @@ export default defineConfig({
         // The host trusts only its own loopback authority, so the proxy presents it.
         const api = { target: `http://127.0.0.1:${host.port}`, changeOrigin: true, headers: { authorization: `Bearer ${host.token}` } };
         return { server: { proxy: {
-          '^/api/terminals/[^/]+/stream(?:\\?|$)': {
-            ...api, ws: true, rewriteWsOrigin: true,
-            bypass(request) {
-              // Never lend the dev owner's bearer to a WebSocket opened by another site.
-              if (request.headers.origin !== `http://${request.headers.host}`) return false;
-            },
-          },
           '/api': api,
         } } };
       },

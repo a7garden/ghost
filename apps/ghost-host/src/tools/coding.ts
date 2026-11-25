@@ -10,7 +10,7 @@ import { visibleWorks } from "./direct.ts";
 const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
 /** The Ghost scopes, verifies and integrates; the coding agent writes repository code. */
-export const CODING_INSTRUCTIONS = `In an owner-PC Work, use code_run to have the built-in agent write repository code. Give the absolute repo and a task with the goal, files to read first, boundaries, acceptance and the narrowest check. A new session uses an isolated worktree. Reuse its session id to steer a working turn or start a new turn once idle. Never answer an owner dialog or send another instruction while it is open. code_run returns on admission, not completion: end your turn and wait for the report. code_agents lists sessions or reads one session's evidence. Treat the agent's claim as untrusted; inspect the diff and run the Work's checks before integrating under the repository rules and calling complete. If coding cannot start, report the blocker instead of editing the repository yourself. CLI agents belong in the workbench terminal.`;
+export const CODING_INSTRUCTIONS = `In an owner-PC Work, use code_run to have the built-in agent write repository code. Give the absolute repo and a task with the goal, files to read first, boundaries, acceptance and the narrowest check. A new session uses an isolated worktree. Reuse its session id to steer a working turn or start a new turn once idle. Never answer an owner dialog or send another instruction while it is open. code_run returns on admission, not completion: end your turn and wait for the report. code_agents lists sessions or reads one session's evidence. Treat the agent's claim as untrusted; inspect the diff and run the Work's checks before integrating under the repository rules and calling complete. If coding cannot start, report the blocker instead of editing the repository yourself.`;
 
 function owningWork(core: Core, workId: string): Pick<Work, "id" | "title" | "state"> | null {
   const work = core.ledger.work(workId);
@@ -99,7 +99,7 @@ export function createCodingTools(core: Core): Extension {
         const scope = requireWork(requireAllowed(core, api, "code_run"));
         if (scope.work.execution?.kind !== "host") throw new NoEffect("code_run needs an owner-PC Work: create the Work with execution {kind:\"host\", cwd:\"/Users/garden/Workspace/Projects\"}");
         if (!scope.ghost.hostExecution) throw new NoEffect("PC execution was revoked by the owner");
-        if (args.agent !== undefined && args.agent !== "ghost") throw new NoEffect("Coding agents now run in the built-in session. Omit agent or use ghost; use the workbench terminal for CLI agents.");
+        if (args.agent !== undefined && args.agent !== "ghost") throw new NoEffect("Coding agents now run in the built-in session. Omit agent or use ghost.");
         if ((args.repo === undefined) === (args.session === undefined)) throw new NoEffect("pass exactly one of repo or session");
         if (!api.callId) throw new NoEffect("code_run needs the model call id to journal the run under");
         if (args.session !== undefined && args.branch !== undefined) throw new NoEffect("branch is only for a new run");

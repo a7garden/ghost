@@ -91,7 +91,7 @@ test('opens an embedded coding session when the owner taps its native notificati
   }, id);
   expect((await read).postDataJSON().command.notificationIds).toEqual([id]);
   await expect(page).toHaveURL(url => url.hash === `#/coding?session=${sampleSession.id}`);
-  await expect(page.getByRole('region', { name: `패널: ${sampleSession.title}`, exact: true })).toHaveAttribute('data-focused', 'true');
+  await expect(page.getByRole('region', { name: `에이전트: ${sampleSession.title}`, exact: true })).toHaveAttribute('data-focused', 'true');
 });
 
 test('keeps the long chat draft and its actions within the keyboard viewport', async ({ page }) => {

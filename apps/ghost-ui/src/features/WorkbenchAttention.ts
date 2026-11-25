@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { CodingSession, Pane } from '@ghost/contract';
+import type { Agent, CodingSession } from '@ghost/contract';
 import type { HostClient } from '../host/client';
 import { useHost } from '../host/context';
 
@@ -18,7 +18,7 @@ export function sessionAttention(before: CodingSession | undefined, next: Coding
   return null;
 }
 
-export function useWorkbenchAttention(panes: readonly Pane[] | null, focused: string | null) {
+export function useWorkbenchAttention(agents: readonly Agent[] | null, focused: string | null) {
   const { client } = useHost();
   const [sessions, setSessions] = useState<ReadonlyMap<string, CodingSession>>(() => feeds.get(client)?.sessions ?? new Map());
   const seen = useRef(new Map(sessions));
@@ -29,8 +29,8 @@ export function useWorkbenchAttention(panes: readonly Pane[] | null, focused: st
   const active = visible ? focused : null;
   useEffect(() => { feeds.set(client, { sessions, attention }); }, [client, sessions, attention]);
 
-  const targets = useRef({ panes, active });
-  useLayoutEffect(() => { targets.current = { panes, active }; }, [panes, active]);
+  const targets = useRef({ agents, active });
+  useLayoutEffect(() => { targets.current = { agents, active }; }, [agents, active]);
 
   const observe = useCallback((rows: CodingSession[], readSerial?: number) => {
     const changed = new Map<string, { session: CodingSession; signal: Attention | null }>();
@@ -44,22 +44,21 @@ export function useWorkbenchAttention(panes: readonly Pane[] | null, focused: st
     }
     if (!changed.size) return;
     setSessions(new Map(seen.current));
-    const { panes, active } = targets.current;
-    if (!panes) return;
+    const { agents, active } = targets.current;
+    if (!agents) return;
     setAttention(previous => {
       const next = new Map(previous);
-      for (const pane of panes) {
-        if (pane.kind !== 'session') continue;
-        const update = changed.get(pane.sessionId);
+      for (const { sessionId } of agents) {
+        const update = changed.get(sessionId);
         if (!update) continue;
         const { session, signal } = update;
-        if (pane.id === active || session.state === 'working' || session.state === 'closed' || (next.get(pane.id) === WAITING && session.state !== 'waiting')) next.delete(pane.id);
-        if (signal && pane.id !== active) next.set(pane.id, signal);
+        if (sessionId === active || session.state === 'working' || session.state === 'closed' || (next.get(sessionId) === WAITING && session.state !== 'waiting')) next.delete(sessionId);
+        if (signal && sessionId !== active) next.set(sessionId, signal);
       }
       return next;
     });
   }, []);
-  // Mounted panes also provide live SSE state; the list covers other tabs and spaces in one request.
+  // Mounted agents also provide live SSE state; the list covers other spaces in one request.
   const observer = useCallback((session: CodingSession) => {
     streamSerial.current.set(session.id, ++serial.current);
     observe([session]);
@@ -72,17 +71,17 @@ export function useWorkbenchAttention(panes: readonly Pane[] | null, focused: st
   }, []);
 
   useEffect(() => {
-    if (!panes) return;
+    if (!agents) return;
     setAttention(previous => {
-      const ids = new Set(panes.map(pane => pane.id));
+      const ids = new Set(agents.map(agent => agent.sessionId));
       if (!previous.has(active ?? '') && [...previous.keys()].every(id => ids.has(id))) return previous;
       return new Map([...previous].filter(([id]) => id !== active && ids.has(id)));
     });
-  }, [panes, active]);
+  }, [agents, active]);
 
   const [listError, setListError] = useState('');
   const [revision, reloadList] = useState(0);
-  const hasSessions = panes?.some(pane => pane.kind === 'session') ?? false;
+  const hasSessions = Boolean(agents?.length);
   const [showPicker, setShowPicker] = useState(false);
   useEffect(() => {
     if (!hasSessions && !showPicker) return;

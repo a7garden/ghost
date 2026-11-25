@@ -1,14 +1,11 @@
 import { mkdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import type { Pane, Space, Tab, WorkbenchFocus, WorkbenchPaneCreate, WorkbenchSpaceCreate, WorkbenchState, WorkbenchTerminalBinding } from "@ghost/contract";
+import type { Agent, Space, WorkbenchAgentCreate, WorkbenchFocus, WorkbenchSpaceCreate, WorkbenchState } from "@ghost/contract";
 import type { CodingSessionsPort } from "../coding/ports.ts";
-import { CommandError, conflict, invalid, notFound } from "../core/errors.ts";
+import { conflict, invalid, notFound } from "../core/errors.ts";
 import type { Ledger } from "../ledger/ledger.ts";
 import { createWorktree, repositoryOf } from "../sandbox/worktree.ts";
 import { spaceChanges } from "./changes.ts";
-import { closePane, firstPane, movePane, resizeSplit, splitPane } from "./layout.ts";
-import type { WorkbenchTerminals } from "./ports.ts";
 
 const KEY = "workbench.state";
 function required<T>(value: T | undefined, message: string): T {
@@ -25,65 +22,55 @@ function directory(path: string): string {
   return path;
 }
 
-export class Workbench {
-  private readonly terminalIds = new Map<string, string>();
-  private readonly pendingLaunches = new Set<string>();
-  private readonly opening = new Map<string, Promise<WorkbenchTerminalBinding>>();
-  private removing: ReadonlySet<string> | null = null;
+/** The state before 2.34: tabs held split panes of sessions and terminals. Only session panes survive as agents. */
+type StoredState = Partial<WorkbenchState> & Pick<WorkbenchState, "version" | "spaces"> & {
+  tabs?: { id: string; spaceId: string }[];
+  panes?: { id: string; tabId: string; kind: string; sessionId?: string }[];
+  focus?: { spaceId: string; sessionId?: string | null; paneId?: string | null } | null;
+};
 
+function current(stored: StoredState): WorkbenchState {
+  const { tabs, panes } = stored;
+  if (!tabs || !panes) return { version: stored.version, spaces: stored.spaces, agents: stored.agents ?? [], focus: stored.focus ? { spaceId: stored.focus.spaceId, sessionId: stored.focus.sessionId ?? null } : null };
+  const agents: Agent[] = [];
+  for (const tab of tabs) {
+    for (const pane of panes) {
+      if (pane.tabId !== tab.id || pane.kind !== "session" || !pane.sessionId) continue;
+      if (!agents.some(agent => agent.sessionId === pane.sessionId)) agents.push({ sessionId: pane.sessionId, spaceId: tab.spaceId });
+    }
+  }
+  const focused = panes.find(pane => pane.id === stored.focus?.paneId);
+  const sessionId = focused?.kind === "session" ? focused.sessionId ?? null : null;
+  return {
+    version: stored.version,
+    spaces: stored.spaces,
+    agents,
+    focus: stored.focus && stored.spaces.some(space => space.id === stored.focus!.spaceId)
+      ? { spaceId: stored.focus.spaceId, sessionId: agents.some(agent => agent.sessionId === sessionId) ? sessionId : null } : null,
+  };
+}
+
+export class Workbench {
   constructor(
     private readonly ledger: Pick<Ledger, "setting" | "putSetting" | "tx">,
     private readonly sessions: Pick<CodingSessionsPort, "get"> | null,
-    private readonly terminals: WorkbenchTerminals | null,
     private readonly stateRoot: string,
   ) {}
 
   read(): WorkbenchState {
-    return this.ledger.setting<WorkbenchState>(KEY, { version: 0, spaces: [], tabs: [], panes: [], focus: null });
+    return current(this.ledger.setting<StoredState>(KEY, { version: 0, spaces: [] }));
   }
 
   private change(version: number, edit: (state: WorkbenchState) => boolean | void): WorkbenchState {
     return this.ledger.tx(() => {
-      const state = this.atVersion(version);
-      if (edit(state) !== false) this.save(state);
+      const state = this.read();
+      if (state.version !== version) throw conflict("다른 곳에서 작업대를 바꿨습니다. 바뀐 배치를 불러왔으니 다시 시도하세요.");
+      if (edit(state) !== false) {
+        state.version++;
+        this.ledger.putSetting(KEY, state);
+      }
       return state;
     });
-  }
-
-  private atVersion(version: number): WorkbenchState {
-    if (this.removing) throw conflict("터미널을 종료하고 있습니다. 잠시 후 다시 시도하세요.");
-    const state = this.read();
-    if (state.version !== version) throw conflict("다른 곳에서 작업대를 바꿨습니다. 바뀐 배치를 불러왔으니 다시 시도하세요.");
-    return state;
-  }
-
-  private save(state: WorkbenchState): WorkbenchState {
-    state.version++;
-    this.ledger.putSetting(KEY, state);
-    return state;
-  }
-
-  private async remove(version: number, edit: (state: WorkbenchState, removed: Set<string>) => void): Promise<WorkbenchState> {
-    const state = this.atVersion(version);
-    const removed = new Set<string>();
-    edit(state, removed);
-    if (!removed.size) return this.save(state);
-    // Keep the old layout on close failure. Do not permit a writer or a restart to race the removal.
-    this.removing = removed;
-    try {
-      const results = await Promise.allSettled([...removed].map(async paneId => {
-        const id = this.terminalIds.get(paneId);
-        if (!id) return;
-        await this.terminals?.closeTerminal(id);
-        this.terminalIds.delete(paneId);
-      }));
-      const failure = results.find(result => result.status === "rejected");
-      if (failure) throw failure.reason;
-      for (const paneId of removed) this.pendingLaunches.delete(paneId);
-      return this.save(state);
-    } finally {
-      this.removing = null;
-    }
   }
 
   createSpace(input: WorkbenchSpaceCreate): WorkbenchState {
@@ -121,174 +108,64 @@ export class Workbench {
     });
   }
 
-  deleteSpace(id: string, version: number): Promise<WorkbenchState> {
-    return this.remove(version, (state, removed) => {
+  deleteSpace(id: string, version: number): WorkbenchState {
+    return this.change(version, state => {
       this.space(state, id);
-      const tabs = new Set(state.tabs.filter(tab => tab.spaceId === id).map(tab => tab.id));
       state.spaces = state.spaces.filter(space => space.id !== id);
-      state.tabs = state.tabs.filter(tab => !tabs.has(tab.id));
-      state.panes = state.panes.filter(pane => {
-        if (!tabs.has(pane.tabId)) return true;
-        if (pane.kind === "terminal") removed.add(pane.id);
-        return false;
-      });
-      if (state.focus?.spaceId === id) {
-        const space = state.spaces[0];
-        if (space) this.select(state, space.id, state.tabs.find(tab => tab.spaceId === space.id));
-        else state.focus = null;
-      }
+      state.agents = state.agents.filter(agent => agent.spaceId !== id);
+      if (state.focus?.spaceId !== id) return;
+      const next = state.spaces[0];
+      if (next) this.select(state, next.id);
+      else state.focus = null;
     });
   }
 
-  createTab(spaceId: string, version: number, name: string): WorkbenchState {
-    return this.change(version, state => {
+  addAgent(spaceId: string, input: WorkbenchAgentCreate): WorkbenchState {
+    return this.change(input.version, state => {
       this.space(state, spaceId);
-      const tab: Tab = { id: crypto.randomUUID(), spaceId, title: title(name), layout: null, focusedPaneId: null };
-      state.tabs.push(tab);
-      this.select(state, spaceId, tab);
+      const session = this.sessions?.get(input.sessionId);
+      if (!session) throw notFound("코딩 세션을 찾을 수 없습니다.");
+      const existing = state.agents.find(agent => agent.sessionId === session.id);
+      if (existing && existing.spaceId !== spaceId) throw invalid("이 에이전트는 다른 스페이스에 있습니다.");
+      if (!existing) state.agents.push({ sessionId: session.id, spaceId });
+      this.select(state, spaceId, session.id);
     });
   }
 
-  renameTab(id: string, version: number, nextTitle: string): WorkbenchState {
+  removeAgent(sessionId: string, version: number): WorkbenchState {
     return this.change(version, state => {
-      const tab = this.tab(state, id);
-      const next = title(nextTitle);
-      if (tab.title === next) return false;
-      tab.title = next;
-    });
-  }
-
-  deleteTab(id: string, version: number): Promise<WorkbenchState> {
-    return this.remove(version, (state, removed) => {
-      const tab = this.tab(state, id);
-      state.tabs = state.tabs.filter(tab => tab.id !== id);
-      state.panes = state.panes.filter(pane => {
-        if (pane.tabId !== id) return true;
-        if (pane.kind === "terminal") removed.add(pane.id);
-        return false;
-      });
-      if (state.focus?.tabId === id) this.select(state, tab.spaceId, state.tabs.find(candidate => candidate.spaceId === tab.spaceId));
-    });
-  }
-
-  addPane(tabId: string, input: WorkbenchPaneCreate): WorkbenchState {
-    const state = this.change(input.version, state => {
-      const tab = this.tab(state, tabId);
-      const id = crypto.randomUUID();
-      if (Boolean(input.targetPaneId) !== Boolean(input.direction)) throw invalid("분할할 패널과 방향을 선택하세요.");
-      const layout = splitPane(tab.layout, id, input.targetPaneId && input.direction ? {
-        target: input.targetPaneId, id: crypto.randomUUID(), direction: input.direction,
-      } : undefined);
-      let pane: Pane;
-      if (input.pane.kind === "session") {
-        const session = this.sessions?.get(input.pane.sessionId);
-        if (!session) throw notFound("코딩 세션을 찾을 수 없습니다.");
-        pane = { id, tabId, kind: "session", sessionId: session.id };
-      } else {
-        const terminalSpec = input.pane.terminalSpec ?? { cwd: this.space(state, tab.spaceId).root ?? homedir() };
-        pane = { id, tabId, kind: "terminal", terminalSpec: { ...terminalSpec, cwd: directory(terminalSpec.cwd) } };
-      }
-      state.panes.push(pane);
-      tab.layout = layout;
-      this.select(state, tab.spaceId, tab, id);
-    });
-    if (input.pane.kind === "terminal" && input.pane.terminalSpec?.command && state.focus?.paneId) {
-      this.pendingLaunches.add(state.focus.paneId);
-    }
-    return state;
-  }
-
-  deletePane(id: string, version: number): Promise<WorkbenchState> {
-    return this.remove(version, (state, removed) => {
-      const pane = this.pane(state, id);
-      const tab = this.tab(state, pane.tabId);
-      if (pane.kind === "terminal") removed.add(id);
-      tab.layout = closePane(tab.layout, id);
-      if (tab.focusedPaneId === id) tab.focusedPaneId = firstPane(tab.layout);
-      state.panes = state.panes.filter(pane => pane.id !== id);
-      if (state.focus?.tabId === tab.id) this.select(state, tab.spaceId, tab);
-    });
-  }
-
-  resize(tabId: string, splitId: string, version: number, ratio: number): WorkbenchState {
-    return this.change(version, state => {
-      const tab = this.tab(state, tabId);
-      const next = resizeSplit(tab.layout, splitId, ratio);
-      if (next === tab.layout) return false;
-      tab.layout = next;
-    });
-  }
-
-  move(id: string, targetId: string, version: number): WorkbenchState {
-    return this.change(version, state => {
-      const pane = this.pane(state, id), target = this.pane(state, targetId);
-      if (pane.tabId !== target.tabId) throw invalid("같은 탭 안에서만 패널을 옮길 수 있습니다.");
-      const tab = this.tab(state, pane.tabId);
-      if (id === targetId) return false;
-      if (!tab.layout) throw notFound("옮길 패널을 찾을 수 없습니다.");
-      tab.layout = movePane(tab.layout, id, targetId);
-      this.select(state, tab.spaceId, tab, id);
+      const agent = this.agent(state, sessionId);
+      state.agents = state.agents.filter(candidate => candidate !== agent);
+      const space = this.space(state, agent.spaceId);
+      if (space.lastSessionId === sessionId) delete space.lastSessionId;
+      if (state.focus?.sessionId === sessionId) this.select(state, agent.spaceId);
     });
   }
 
   focus(input: WorkbenchFocus): WorkbenchState {
     return this.change(input.version, state => {
-      const { spaceId, tabId, paneId } = input;
+      const { spaceId, sessionId } = input;
       this.space(state, spaceId);
-      const tab = tabId ? this.tab(state, tabId) : state.tabs.find(candidate => candidate.id === state.focus?.tabId && candidate.spaceId === spaceId)
-        ?? state.tabs.find(candidate => candidate.spaceId === spaceId);
-      if (tab && tab.spaceId !== spaceId) throw invalid("이 스페이스의 탭이 아닙니다.");
-      if (paneId && this.pane(state, paneId).tabId !== tab?.id) throw invalid("이 탭의 패널이 아닙니다.");
-      const focusedPane = paneId ?? tab?.focusedPaneId ?? null;
-      if (state.focus?.spaceId === spaceId && state.focus.tabId === (tab?.id ?? null) && state.focus.paneId === focusedPane) return false;
-      this.select(state, spaceId, tab, focusedPane);
+      if (sessionId && this.agent(state, sessionId).spaceId !== spaceId) throw invalid("이 스페이스의 에이전트가 아닙니다.");
+      const focused = sessionId ?? this.remembered(state, spaceId);
+      if (state.focus?.spaceId === spaceId && state.focus.sessionId === focused) return false;
+      this.select(state, spaceId, focused);
     });
   }
 
-  focusTerminal(id: string, version: number): WorkbenchState {
-    for (const [paneId, terminalId] of this.terminalIds) {
-      if (terminalId !== id) continue;
-      const state = this.read();
-      const tab = this.tab(state, this.pane(state, paneId).tabId);
-      return this.focus({ version, spaceId: tab.spaceId, tabId: tab.id, paneId });
-    }
-    throw notFound("이 터미널은 더 이상 열려 있지 않습니다.");
+  /** The agent last shown in the space, or its first one. */
+  private remembered(state: WorkbenchState, spaceId: string): string | null {
+    const last = this.space(state, spaceId).lastSessionId;
+    if (last && state.agents.some(agent => agent.sessionId === last && agent.spaceId === spaceId)) return last;
+    return state.agents.find(agent => agent.spaceId === spaceId)?.sessionId ?? null;
   }
 
-  private select(state: WorkbenchState, spaceId: string, tab?: Tab, paneId = tab?.focusedPaneId ?? null): void {
-    if (tab) tab.focusedPaneId = paneId;
-    state.focus = { spaceId, tabId: tab?.id ?? null, paneId };
+  private select(state: WorkbenchState, spaceId: string, sessionId = this.remembered(state, spaceId)): void {
+    const space = this.space(state, spaceId);
+    if (sessionId) space.lastSessionId = sessionId;
+    state.focus = { spaceId, sessionId };
   }
 
   private space(state: WorkbenchState, id: string) { return required(state.spaces.find(space => space.id === id), "스페이스를 찾을 수 없습니다."); }
-  private tab(state: WorkbenchState, id: string) { return required(state.tabs.find(tab => tab.id === id), "탭을 찾을 수 없습니다."); }
-  private pane(state: WorkbenchState, id: string) { return required(state.panes.find(pane => pane.id === id), "패널을 찾을 수 없습니다."); }
-
-  openTerminal(paneId: string, restart?: string, start = false): Promise<WorkbenchTerminalBinding> {
-    if (this.removing?.has(paneId)) return Promise.reject(conflict("이 패널을 닫고 있습니다."));
-    const pending = this.opening.get(paneId);
-    if (pending) return pending;
-    const opening = this.bindTerminal(paneId, restart, start).finally(() => this.opening.delete(paneId));
-    this.opening.set(paneId, opening);
-    return opening;
-  }
-
-  private async bindTerminal(paneId: string, restart: string | undefined, start: boolean): Promise<WorkbenchTerminalBinding> {
-    if (!this.terminals) throw new CommandError("unavailable", "이 Host에서는 터미널을 열 수 없습니다.");
-    const current = this.terminalIds.get(paneId);
-    if (current) {
-      if (current !== restart) return { id: current };
-      await this.terminals.closeTerminal(current);
-      this.terminalIds.delete(paneId);
-    }
-    // Recheck after the asynchronous close: a removed pane must never spawn a new PTY.
-    if (this.removing?.has(paneId)) throw conflict("이 패널을 닫고 있습니다.");
-    const pane = this.pane(this.read(), paneId);
-    if (pane.kind !== "terminal") throw invalid("터미널 패널이 아닙니다.");
-    if (pane.terminalSpec.command && !start && !current && !this.pendingLaunches.has(paneId)) return { id: null };
-    const id = this.terminals.create({ ...pane.terminalSpec, cols: 80, rows: 24 });
-    this.terminalIds.set(paneId, id);
-    this.pendingLaunches.delete(paneId);
-    return { id };
-  }
+  private agent(state: WorkbenchState, sessionId: string) { return required(state.agents.find(agent => agent.sessionId === sessionId), "에이전트를 찾을 수 없습니다."); }
 }

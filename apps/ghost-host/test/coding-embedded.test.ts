@@ -377,7 +377,7 @@ test("explicit CLI agents are refused before a coding effect or session is creat
   const { work, conversation } = await f.createWork();
   for (const agent of ["omp", "claude", "codex"]) {
     const result = await f.call(conversation, "code_run", { ...firstTask, agent });
-    expect(result).toMatchObject({ isError: true, text: expect.stringContaining("use the workbench terminal for CLI agents") });
+    expect(result).toMatchObject({ isError: true, text: expect.stringContaining("Omit agent or use ghost") });
   }
   expect(f.ledger.effectsForWork(work.id)).toEqual([]);
   expect(f.sessions.creates).toEqual([]);

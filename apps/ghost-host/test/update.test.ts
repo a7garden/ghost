@@ -4,13 +4,11 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import fixture from "./fixtures/update-signature.json";
 import { signingKey, updateFixture, type FixtureOptions, type UpdateFixture } from "./fixtures/update-helper.ts";
-import { Terminals } from "../src/terminal/index.ts";
 import { verifyMinisign } from "../src/update/signature.ts";
-import { hostIsIdle, shutdownForUpdate, Updater } from "../src/update/index.ts";
+import { shutdownForUpdate, Updater } from "../src/update/index.ts";
 import { sha256, validateTarball } from "../src/update/archive.ts";
 import { atomicWrite } from "../src/update/storage.ts";
 import { newer } from "../src/update/github.ts";
-import { harness } from "./support.ts";
 
 const fixtures: UpdateFixture[] = [];
 async function setup(options: FixtureOptions = {}) {
@@ -130,38 +128,6 @@ describe("installation", () => {
     expect(readFileSync(join(f.root, "update", "attempts"), "utf8")).toBe("0\n");
     expect(f.shutdowns).toBe(1);
   });
-  test("a terminal agent waiting for approval delays an update; an open idle shell does not", async () => {
-    const { core, ledger } = harness();
-    let terminals: Terminals | undefined;
-    const f = await setup({ idle: () => hostIsIdle(core, terminals) });
-    try {
-      await f.updater.check();
-      terminals = new Terminals(f.root, { pollMs: 40, quietMs: 1_000 });
-      const size = { cols: 80, rows: 24 };
-      const shell = terminals.create({ cwd: f.temp, command: "/bin/sh", args: ["-c", "read input"], ...size });
-      const command = join(f.temp, "claude");
-      writeFileSync(command, "#!/bin/sh\nprintf 'Execute this command? [y/N]'\nread input\nprintf '\\033[2J\\033[HReady\\n'\nread input\n", { mode: 0o700 });
-      const agent = terminals.create({ cwd: f.temp, command, ...size });
-      await until(() => terminals?.list().some(view => view.id === agent && view.state === "waiting") === true);
-      expect(hostIsIdle(core, terminals)).toBe(false);
-      f.updater.install(f.manifest.version);
-      await until(() => f.updater.status().phase !== "downloading");
-      expect(f.updater.status().phase).toBe("waiting");
-      expect(f.shutdowns).toBe(0);
-      expect(readlinkSync(join(f.base, "current"))).toBe(`releases/${f.oldName}`);
-      terminals.input(agent, "y\r");
-      await f.updater.settled();
-      expect(terminals.list()).toEqual(expect.arrayContaining([
-        expect.objectContaining({ id: shell, agent: null, state: "idle" }),
-        expect.objectContaining({ id: agent, agent: "claude", state: "idle" }),
-      ]));
-      expect(f.updater.status().error).toBeNull();
-      expect(f.shutdowns).toBe(1);
-    } finally {
-      await f.updater.close();
-      try { await terminals?.shutdown(); } finally { ledger.close(); }
-    }
-  }, 20_000);
   test("cancel while waiting leaves current untouched and removes staged release", async () => {
     const f = await setup({ idle: () => false }); await f.updater.check(); f.updater.install("2.2.0");
     await until(() => f.updater.status().phase === "waiting" || f.updater.status().phase === "error");
