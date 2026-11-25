@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import type { Command, Goal, Milestone, State, Work } from '@ghost/contract';
+import type { Command, Decision, Goal, Milestone, State, Work } from '@ghost/contract';
 import { readRunState } from './run-state';
 
 const at = Date.UTC(2026, 10, 11, 9);
@@ -87,6 +87,16 @@ async function mockGoals(page: Page, options: { cap?: boolean; closed?: boolean;
       const created = goal('created', { why: '', boundaries: '', signal: '', ...command });
       snapshot.goals!.push(created);
       data = { type: 'goal', goal: created };
+    } else if (command.type === 'message.send') {
+      // The main Ghost answers a goal request with a proposal, as goal_propose would.
+      const proposal: Decision = {
+        id: 'told-proposal', ghostId: defaultGhostId, kind: 'question', conversationId: command.conversationId, workId: null, effectId: null,
+        state: 'pending', title: '이 방향을 목표로 등록할까요?', detail: '', options: ['등록', '거절'],
+        proposal: { goal: { title: '함께 쓰는 기록 남기기', why: '같은 질문을 두 번 하지 않기 위해', boundaries: '', signal: '' } },
+        answer: null, createdAt: at + 10, resolvedAt: null,
+      };
+      snapshot.decisions.push(proposal);
+      data = { type: 'decision', decision: proposal };
     }
     if (data) {
       const body = `event: ledger\ndata: ${JSON.stringify({ seq: ++snapshot.seq, at, data })}\n\n`;
@@ -132,7 +142,7 @@ test('goals show chronology, proposals, inline evidence and owner settlement', a
   await expect(page.getByText('이정표 없음', { exact: true })).toBeVisible();
   await expect(page.getByText('목표 제안', { exact: true })).toBeVisible();
   await expect(page.locator('.decision__goal')).toContainText('팀이 배운 것을 다시 쓸 수 있게');
-  await expect(page.locator('.decision__goal')).toContainText('지키는 선');
+  await expect(page.locator('.decision__goal')).toContainText('단,개인 정보는 남기지 않습니다.');
   await expect(page.getByText('대체 상세 본문은 표시하지 않습니다.')).toHaveCount(0);
   await expect(page.locator('.goal-node[data-phase="next"]')).toHaveCount(2);
   await expect(page.locator('.goal-node[data-phase="later"]')).toHaveCount(1);
@@ -210,7 +220,7 @@ test('failed goal and milestone changes retain drafts and show Korean errors', a
   const conflict = '현재 상태에서는 변경할 수 없습니다. 목표와 이정표 상태를 확인해 주세요.';
   await page.getByRole('button', { name: '목표 추가', exact: true }).click();
   await page.getByRole('textbox', { name: '방향', exact: true }).fill('실패해도 남을 방향');
-  await page.keyboard.press('Enter');
+  await page.keyboard.press('Control+Enter');
   await expect(page.locator('.goal-composer').getByText(conflict)).toBeVisible();
   await expect(page.getByRole('textbox', { name: '방향', exact: true })).toHaveValue('실패해도 남을 방향');
   await page.keyboard.press('Escape');
@@ -230,23 +240,28 @@ test('failed goal and milestone changes retain drafts and show Korean errors', a
   await expect.poll(() => commands.at(-1)).toEqual({ type: 'milestone.update', milestoneId: 'next-a', state: 'dropped', outcome: '먼저 진행 중인 실험을 살펴봅니다.' });
 });
 
-test('empty goals start from one line and every detail is edited in place', async ({ page }) => {
+test('a new goal is completed as its statement, then every clause is edited in place', async ({ page }) => {
   const { commands } = await mockGoals(page, { empty: true });
   await expect(page.getByText('목표 없음', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '목표 추가', exact: true }).first().click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('textbox', { name: '방향', exact: true }).fill('  오래 이어 갈 방향  ');
+  // Enter walks the blanks in reading order and completes the statement on the last one.
   await page.keyboard.press('Enter');
-  await expect.poll(() => commands.at(-1)).toEqual({ type: 'goal.create', title: '오래 이어 갈 방향' });
-  await expect(page.getByRole('heading', { name: '오래 이어 갈 방향', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '이유', exact: true }).click();
-  await page.getByRole('textbox', { name: '이유', exact: true }).fill('차분한 이유');
-  await page.keyboard.press('Control+Enter');
-  await expect.poll(() => commands.at(-1)).toEqual({ type: 'goal.update', goalId: 'created', why: '차분한 이유' });
-  await page.getByRole('button', { name: '지키는 선', exact: true }).click();
-  await page.getByRole('textbox', { name: '지키는 선', exact: true }).fill('보내기 전 확인');
-  await page.getByRole('textbox', { name: '지키는 선', exact: true }).blur();
-  await expect.poll(() => commands.at(-1)).toEqual({ type: 'goal.update', goalId: 'created', boundaries: '보내기 전 확인' });
+  await page.keyboard.type('차분한 이유');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('보내기 전 확인');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('textbox', { name: '참고 신호', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => commands.at(-1)).toEqual({ type: 'goal.create', title: '오래 이어 갈 방향', why: '차분한 이유', boundaries: '보내기 전 확인', signal: '' });
+  const section = page.getByRole('region', { name: '오래 이어 갈 방향', exact: true });
+  await expect(section.getByText('왜냐하면', { exact: true })).toBeVisible();
+  await section.getByRole('button', { name: '참고 신호 추가', exact: true }).click();
+  await page.getByRole('textbox', { name: '참고 신호', exact: true }).fill('사람의 이야기');
+  await page.getByRole('textbox', { name: '참고 신호', exact: true }).blur();
+  await expect.poll(() => commands.at(-1)).toEqual({ type: 'goal.update', goalId: 'created', signal: '사람의 이야기' });
+  await expect(section.getByRole('button', { name: '참고 신호 추가', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '오래 이어 갈 방향', exact: true }).click();
   await page.getByRole('textbox', { name: '방향', exact: true }).fill('더 오래 이어 갈 방향');
   await page.keyboard.press('Enter');
@@ -263,4 +278,22 @@ test('empty goals start from one line and every detail is edited in place', asyn
   await dialog.getByRole('button', { name: '목표 종료', exact: true }).click();
   await expect.poll(() => commands.at(-1)).toEqual({ type: 'goal.update', goalId: 'created', state: 'closed' });
   await expect(page.locator('.goals-closed > summary')).toBeVisible();
+});
+
+test('a goal said freely goes to the main Ghost and returns as a proposed statement', async ({ page }) => {
+  const { commands } = await mockGoals(page, { empty: true });
+  await page.getByRole('button', { name: '목표 추가', exact: true }).first().click();
+  await page.getByRole('button', { name: /에게 말하기$/ }).click();
+  await page.getByRole('textbox', { name: /에게 할 말$/ }).fill('우리가 알아낸 걸 다들 다시 묻지 않게 하고 싶어');
+  await page.getByRole('button', { name: '보내기', exact: true }).click();
+  await expect.poll(() => commands.at(-1)?.type).toBe('message.send');
+  const sent = commands.at(-1) as Extract<Command, { type: 'message.send' }>;
+  expect(sent.text).toContain('goal_propose');
+  expect(sent.text).toContain('팀 전체 목표야.');
+  expect(sent.text).toContain('우리가 알아낸 걸 다들 다시 묻지 않게 하고 싶어');
+  const card = page.locator('.decision');
+  await expect(card.getByText('함께 쓰는 기록 남기기', { exact: true })).toBeVisible();
+  await expect(card.getByText('왜냐하면', { exact: true })).toBeVisible();
+  await expect(card.getByText('맞다는 신호는', { exact: true })).toHaveCount(0);
+  await expect(page.locator('.goal-composer')).toHaveCount(0);
 });

@@ -15,6 +15,7 @@ import { useHost } from '../host/context';
 import { browserHandoffProposal, decisionChip, decisionHeading, decisionTone, emptySecureForm, goalProposal, handoffDoneAnswer,
   secureFormBody, secureFormProposal, type SecureFormValues } from './decisionText';
 import { goalError } from './goals/goalError';
+import { GoalClauses } from './goals/GoalStatement';
 import { pendingDecisions, toneFor } from './ghostState';
 import { canHandOver, deferDecision, fullTextOpen, ownerOrder, setFullTextOpen, useLater } from './decisionQueue';
 import { relativeTime, useNow } from './time';
@@ -285,12 +286,10 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
     </header>
     <div className="decision__body">
     {showDetail && <div className="decision__detail decision__detail--md"><MessageBody text={detail}/></div>}
-    {proposedGoal && <dl className="decision__goal">
-      <div><dt>방향</dt><dd>{proposedGoal.title}</dd></div>
-      {proposedGoal.why && <div><dt>이유</dt><dd>{proposedGoal.why}</dd></div>}
-      {proposedGoal.boundaries && <div><dt>지키는 선</dt><dd>{proposedGoal.boundaries}</dd></div>}
-      {proposedGoal.signal && <div><dt>참고 신호</dt><dd>{proposedGoal.signal}</dd></div>}
-    </dl>}
+    {proposedGoal && <div className="decision__goal">
+      <p className="goal-statement__direction">{proposedGoal.title}</p>
+      <GoalClauses value={proposedGoal}/>
+    </div>}
 
     {summary && <div className="decision__summary decision__detail--md"><MessageBody text={summary}/></div>}
     {isResult && hasReport && (summary

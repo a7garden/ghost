@@ -65,11 +65,11 @@ Component styles live in the `components` cascade layer (`src/ui/compositions.cs
 `className` win. `src/main.tsx` imports global CSS first; that import declares the layer
 order component stylesheets join.
 
-Data entry never stacks labelled fields in a modal (owner decision 2026-11-25). A new thing
-starts from one line where it will live; everything else is edited in place on the thing
-itself, as text that turns into a field when touched and saves on Enter or when focus leaves.
-Missing optional parts appear as quiet add affordances, not empty fields. Dialogs remain for
-confirmations that name an irreversible consequence.
+Data entry never stacks labelled fields in a modal (owner decision 2026-11-25). Shape the input
+as the thing it makes: a record that reads as a sentence is written as that sentence, with blanks
+completed in reading order where the result will live, and edited in place afterwards. Where a
+Ghost can structure free words, saying it to the Ghost is an equal way in, and its proposal comes
+back in the same shape. Dialogs remain for confirmations that name an irreversible consequence.
 
 ## Agent components
 
@@ -434,11 +434,15 @@ There is no postMessage bridge, arbitrary JavaScript or direct Host access.
 
 목표 is a long-term team direction, never a quota or percentage. The owner writes it or
 answers the main Ghost's 목표 제안 with 등록 / 거절 in the existing decision deck.
-Each direction leads its own section; 이유, 지키는 선 and 참고 신호 stay quiet beneath it.
-Adding a direction is one line at the top of the list: type it, Enter. The direction, 이유,
-지키는 선 and 참고 신호 are edited in place; a missing one shows as a quiet 「+ 이유」-style
-affordance. Enter saves one-line text, ⌘/Ctrl+Enter or leaving saves longer text, Escape
-abandons, and a failed save keeps the draft open beside its error.
+Each direction reads as one statement: the direction, then 「왜냐하면 …」, 「단, …」 and
+「맞다는 신호는 …」 (leads take no particle, so any phrase fits). A new direction is that
+statement with blanks at the top of the list; Enter walks the blanks and completes it on the
+last, ⌘/Ctrl+Enter completes it anywhere. 「(메인)에게 말하기」 swaps the blanks for free words
+sent to the main Ghost's direct conversation; its 목표 제안 returns as the same statement in the
+deck and the composer closes, or points to the conversation when the main answered there instead.
+On an open goal every clause is edited in place, an unwritten one shown as a dotted blank;
+proposals and closed goals show only written clauses. Escape abandons, and a failed save keeps
+the draft open beside its error.
 The 이정표 line reads past → now → next → later, horizontal with a ScrollRail on desktop
 and upright on compact screens. Two active steps fork and rejoin on one column.
 Every state has its own shape; signal blue appears only for a linked Work actually running

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
-import { GOAL_SIGNAL_MAX, GOAL_TEXT_MAX, GOAL_TITLE_MAX, type Goal, type State } from '@ghost/contract';
+import { GOAL_TITLE_MAX, type Goal, type State } from '@ghost/contract';
 import { Button, InlineError, Page, PageHeader } from '../../ui';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useHost } from '../../host/context';
@@ -9,6 +9,7 @@ import { DecisionDeck } from '../Decision';
 import { goalProposal } from '../decisionText';
 import { GoalComposer } from './GoalComposer';
 import { GoalLine } from './GoalLine';
+import { GoalClauses } from './GoalStatement';
 import { InlineEdit } from './InlineEdit';
 import { goalError } from './goalError';
 import { goalLimit, goalsAtCap, groupGoalsByScope, open, scopeName } from './goalScope';
@@ -78,7 +79,6 @@ function GoalSection({ goal, state, grouped = false }: { goal: Goal; state: Stat
   const [closing, setClosing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [adding, setAdding] = useState<'why' | 'boundaries' | 'signal' | null>(null);
   const closed = goal.state === 'closed';
   const Title = grouped ? 'h3' : 'h2';
   const save = (patch: Partial<Pick<Goal, 'title' | 'why' | 'boundaries' | 'signal'>>) => client.send({ type: 'goal.update', goalId: goal.id, ...patch }).then(() => undefined);
@@ -88,9 +88,6 @@ function GoalSection({ goal, state, grouped = false }: { goal: Goal; state: Stat
     catch (reason) { setError(goalError(reason)); }
     finally { setBusy(false); }
   };
-  const done = (field: 'why' | 'boundaries' | 'signal') => setAdding(current => current === field ? null : current);
-  const missing = (['why', 'boundaries', 'signal'] as const).filter(field => !goal[field] && adding !== field);
-  const names = { why: '이유', boundaries: '지키는 선', signal: '참고 신호' } as const;
   return <section className="goal-section" aria-label={goal.title}>
     <header className="goal-section__heading"><div><Title>{closed ? goal.title
       : <InlineEdit value={goal.title} label="방향" maxLength={GOAL_TITLE_MAX} required onSave={title => save({ title })}>{goal.title}</InlineEdit>}</Title>
@@ -99,16 +96,7 @@ function GoalSection({ goal, state, grouped = false }: { goal: Goal; state: Stat
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => void changeState()}>{goal.state === 'paused' ? '재개' : '일시정지'}</Button>
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => setClosing(true)}>종료</Button></div>}
     </header>
-    {(goal.why || adding === 'why') && <p className="goal-section__why">{closed ? goal.why
-      : <InlineEdit value={goal.why} label="이유" maxLength={GOAL_TEXT_MAX} multiline startEditing={adding === 'why'} onDone={() => done('why')} onSave={why => save({ why })}>{goal.why}</InlineEdit>}</p>}
-    {(goal.boundaries || goal.signal || adding === 'boundaries' || adding === 'signal') && <dl className="goal-facts goal-section__context">
-      {(goal.boundaries || adding === 'boundaries') && <div><dt>지키는 선</dt><dd>{closed ? goal.boundaries
-        : <InlineEdit value={goal.boundaries} label="지키는 선" maxLength={GOAL_TEXT_MAX} multiline startEditing={adding === 'boundaries'} onDone={() => done('boundaries')} onSave={boundaries => save({ boundaries })}>{goal.boundaries}</InlineEdit>}</dd></div>}
-      {(goal.signal || adding === 'signal') && <div><dt>참고 신호</dt><dd>{closed ? goal.signal
-        : <InlineEdit value={goal.signal} label="참고 신호" maxLength={GOAL_SIGNAL_MAX} multiline startEditing={adding === 'signal'} onDone={() => done('signal')} onSave={signal => save({ signal })}>{goal.signal}</InlineEdit>}</dd></div>}
-    </dl>}
-    {!closed && missing.length > 0 && <div className="goal-section__add">
-      {missing.map(field => <Button key={field} variant="ghost" size="sm" onClick={() => setAdding(field)}><Plus/>{names[field]}</Button>)}</div>}
+    <GoalClauses value={goal} onSave={closed ? undefined : (field, text) => save({ [field]: text })}/>
     {error && <InlineError>{error}</InlineError>}
     <GoalLine milestones={(state.milestones ?? []).filter(item => item.goalId === goal.id)} state={state} readOnly={closed}/>
     {closing && <ConfirmDialog title="목표 종료" confirmLabel="목표 종료" onClose={() => setClosing(false)} onConfirm={async () => {
