@@ -87,7 +87,7 @@ export function createReviewTools(core: Core, sandbox?: Pick<SandboxEnvFactory, 
           effects.length
             ? effects.map((effect) => {
                 const outcome = (effect.result ?? "").split("\n", 4).join(" ⏎ ").slice(0, 400);
-                return `- ${effect.tool} — ${effect.state} — ${effect.summary}${outcome ? `\n    ${outcome}` : ""}`;
+                return `- ${effect.tool}, ${effect.state}, ${effect.summary}${outcome ? `\n    ${outcome}` : ""}`;
               }).join("\n")
             : "No effects were recorded for this Work.",
           questions.length

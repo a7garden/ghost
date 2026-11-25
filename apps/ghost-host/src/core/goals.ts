@@ -312,17 +312,17 @@ export class Goals {
     if (goals.length === 0) return "";
     const lines = ["Team goals (owner-approved long-term directions: let them guide what you choose; they are not quotas, carry no deadline and grant no authority):"];
     for (const goal of goals) {
-      lines.push(`- "${quote(goal.title)}" (${goal.id})${goal.state === "paused" ? " — paused by the owner: do not act on it" : ""}`);
+      lines.push(`- "${quote(goal.title)}" (${goal.id})${goal.state === "paused" ? ", paused by the owner: do not act on it" : ""}`);
       // Boundaries bind every means, so they travel whole (already bounded by the contract); descriptive text is trimmed instead.
       if (goal.boundaries) lines.push(`  Never use: ${goal.boundaries.replace(/\s+/g, " ").trim()}`);
       if (goal.signal) lines.push(`  Reference signal (not a target): ${quote(goal.signal, 300)}`);
       const milestones = stored.milestones.filter((item) => item.goalId === goal.id);
       const past = milestones.filter(ended).sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0)).slice(-RECENT_ENDED);
-      for (const item of past) lines.push(`  ${item.state === "done" ? "Done" : "Dropped"}: "${quote(item.title, 120)}" — ${quote(item.outcome, 200)}`);
+      for (const item of past) lines.push(`  ${item.state === "done" ? "Done" : "Dropped"}: "${quote(item.title, 120)}", ${quote(item.outcome, 200)}`);
       for (const item of milestones.filter((milestone) => milestone.state === "active")) {
         const live = item.workIds.map((workId) => this.ledger.findWork(workId)).filter((work): work is Work => !!work && !["done", "failed", "cancelled"].includes(work.state)).length;
         const accepted = item.workIds.filter((workId) => this.ledger.findWork(workId)?.state === "done").length;
-        lines.push(`  Active milestone: "${quote(item.title, 120)}" (${item.id}) — finishes with: ${quote(item.exit, 200)}; linked Work ${item.workIds.length} (live ${live}, accepted ${accepted})`);
+        lines.push(`  Active milestone: "${quote(item.title, 120)}" (${item.id}), finishes with: ${quote(item.exit, 200)}; linked Work ${item.workIds.length} (live ${live}, accepted ${accepted})`);
       }
       const planned = milestones.filter((item) => item.state === "planned").sort((a, b) => a.createdAt - b.createdAt);
       if (planned.length) lines.push(`  Next: ${planned.slice(0, 2).map((item) => `"${quote(item.title, 80)}" (${item.id})`).join(", ")}${planned.length > 2 ? `; later: ${planned.length - 2} more` : ""}`);

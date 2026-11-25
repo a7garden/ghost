@@ -95,7 +95,7 @@ export class MailWatcher {
           for (const message of newest) {
             const from = preview(message.from?.address ?? "", 60) || "보낸 사람 미상";
             const subject = preview(message.subject, 100) || "제목 없음";
-            lines.push(`${from} — ${subject}`);
+            lines.push(`${from}, ${subject}`);
           }
           this.core.notify({
             id: `mail-new:${connectionId}:${uidValidity}:${maxUnreadUid}`, kind: "message",

@@ -415,8 +415,8 @@ export class Autonomy {
       // Ids, state and failure reasons travel so the main can work_inspect the exact task.
       lines.push(`${ghost.isDefault ? "Team" : "Your"} settled Work: ${settled.count}`);
       for (const work of settled.works) {
-        const reason = work.reason ? ` — ${work.reason.split("\n", 1)[0]!.slice(0, 200)}` : "";
-        lines.push(`- "${work.title}" (${work.id}) — ${names.get(work.ghostId) ?? "?"} — ${work.state}${reason}`);
+        const reason = work.reason ? `, ${work.reason.split("\n", 1)[0]!.slice(0, 200)}` : "";
+        lines.push(`- "${work.title}" (${work.id}), ${names.get(work.ghostId) ?? "?"}, ${work.state}${reason}`);
       }
       if (settled.count > settled.works.length) lines.push(`+${settled.count - settled.works.length} more: work_list shows all, work_inspect takes a row's id`);
     }
@@ -448,7 +448,7 @@ export class Autonomy {
         const other = this.load(item.id);
         if (!other.enabled) return `- ${item.name} (${item.id}): self-directed drive off`;
         const next = other.nextAt === null ? "unplanned" : stamp(other.nextAt);
-        return `- ${item.name} (${item.id}): next ${next}${other.intent ? ` — ${other.intent.slice(0, 160)}` : ""}`;
+        return `- ${item.name} (${item.id}): next ${next}${other.intent ? `: ${other.intent.slice(0, 160)}` : ""}`;
       });
       if (rows.length) lines.push("", "Team plans:", ...rows);
     }

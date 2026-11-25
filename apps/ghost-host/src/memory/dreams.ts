@@ -136,7 +136,7 @@ export function memoryIndex(files: MemoryFile[]): string {
   let included = 0;
   for (const file of privateFiles) {
     const title = file.content.split("\n").find((line) => line.trim() && !line.startsWith("<!--"))?.replace(/^[#>\s]+/, "").replace(/[\x00-\x1f]/g, " ").slice(0, 80) ?? "Untitled";
-    const line = `- ${JSON.stringify(file.path)} — ${title}`;
+    const line = `- ${JSON.stringify(file.path)}, ${title}`;
     if (lines.length >= 190 || Buffer.byteLength([...lines, line].join("\n")) > 7500) break;
     lines.push(line);
     included++;

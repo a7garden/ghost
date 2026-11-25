@@ -36,7 +36,7 @@ export function createSourceTools(core: Core): Extension {
         if (!core.sources) throw new CommandError("unavailable", "the source store is not available");
         const rows = core.sources.listFor(scopeConversations(api));
         if (rows.length === 0) return text("No sources recorded yet.");
-        return text(rows.map((row) => `[${row.id}] ${row.title ?? "(untitled)"} — ${row.url} (${new Date(row.fetchedAt).toISOString()})`).join("\n"));
+        return text(rows.map((row) => `[${row.id}] ${row.title ?? "(untitled)"}, ${row.url} (${new Date(row.fetchedAt).toISOString()})`).join("\n"));
       } catch (error) {
         return errorResult(error);
       }

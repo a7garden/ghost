@@ -42,7 +42,7 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
       try {
         requireAllowed(core, api, "document_list");
         const pages = await documents.listPages(args.scope_id, args.query ?? null);
-        return text(pages.length === 0 ? "No pages matched." : pages.map((page: PageMeta) => `- ${page.title} (${page.pageId}) ${page.locator} — ${page.profile}`).join("\n"));
+        return text(pages.length === 0 ? "No pages matched." : pages.map((page: PageMeta) => `- ${page.title} (${page.pageId}) ${page.locator}, ${page.profile}`).join("\n"));
       } catch (error) {
         return errorResult(error);
       }
@@ -66,7 +66,7 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
         const page = await documents.readPage(args.scope_id, { pageId: args.page_id, locator: args.locator });
         markPolicyRead(core, scope.conversation.id, { untrustedInput: true, privateData: true });
         const body = page.body.length > READ_WINDOW ? `${page.body.slice(0, READ_WINDOW)}\n[truncated]` : page.body;
-        return text(`${page.title} (${page.pageId}) ${page.locator} — ${page.profile}\n\n${body}`);
+        return text(`${page.title} (${page.pageId}) ${page.locator}, ${page.profile}\n\n${body}`);
       } catch (error) {
         return errorResult(error);
       }

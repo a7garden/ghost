@@ -210,14 +210,14 @@ test("attachment previews bound text and images and only inline valid UTF-8", as
   ];
   const content = await renderUserContent("owner", attachments, store);
   expect(typeof content).toBe("string");
-  expect(content).toContain('[첨부 일부 생략: "long.md" — 처음 102400바이트만 포함]');
+  expect(content).toContain('[첨부 일부 생략: "long.md" (처음 102400바이트만 포함)]');
   expect(content).not.toContain("hidden");
   expect(content).not.toContain("\ufffd");
   expect(content).toContain("export const value = 42;");
   expect(content).not.toContain('File: "invalid.txt"');
   expect(content).toContain("- large.png (image/png, sha256:");
-  expect(content).toContain('[첨부 생략: "invalid.txt" — UTF-8 텍스트가 아님]');
-  expect(content).toContain('[첨부 생략: "large.png" — 이미지 크기 제한');
+  expect(content).toContain('[첨부 생략: "invalid.txt" (UTF-8 텍스트가 아님)]');
+  expect(content).toContain('[첨부 생략: "large.png" (이미지 크기 제한');
   expect(cutAttachmentBlock(content as string)).toBe("owner");
 });
 
@@ -248,12 +248,12 @@ test("attachment budgets use stored sizes, bound reads, and explain every omissi
   expect(images).toHaveLength(2);
   expect(images.every((part) => part.mimeType === "image/png")).toBe(true);
   const rendered = content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
-  expect(rendered).toContain('[첨부 생략: "oversized.png" — 이미지 크기 제한');
-  expect(rendered).toContain('[첨부 생략: "third.png" — 이미지 크기 제한');
+  expect(rendered).toContain('[첨부 생략: "oversized.png" (이미지 크기 제한');
+  expect(rendered).toContain('[첨부 생략: "third.png" (이미지 크기 제한');
   // Once the image budget is spent, even an invalid candidate is skipped before reading.
-  expect(rendered).toContain('[첨부 생략: "invalid.png" — 이미지 크기 제한');
-  expect(rendered).toContain('[첨부 생략: "third.txt" — 메시지 텍스트 크기 제한');
-  expect(rendered).toContain('[첨부 생략: "unknown.bin" — 지원하지 않는 파일 형식');
+  expect(rendered).toContain('[첨부 생략: "invalid.png" (이미지 크기 제한');
+  expect(rendered).toContain('[첨부 생략: "third.txt" (메시지 텍스트 크기 제한');
+  expect(rendered).toContain('[첨부 생략: "unknown.bin" (지원하지 않는 파일 형식');
   expect(store.reads).toEqual([
     { digest: first.digest, maxBytes: 4 * 1024 * 1024 },
     { digest: first.digest, maxBytes: 4 * 1024 * 1024 },
@@ -261,7 +261,7 @@ test("attachment budgets use stored sizes, bound reads, and explain every omissi
     { digest: text.digest, maxBytes: 100 * 1024 },
   ]);
   const mismatched = await renderUserContent("owner", [invalid], store);
-  expect(mismatched).toContain('[첨부 생략: "invalid.png" — 지원하는 이미지 형식이 아님]');
+  expect(mismatched).toContain('[첨부 생략: "invalid.png" (지원하는 이미지 형식이 아님)]');
 });
 
 test("image magic bytes determine the provider media type", async () => {

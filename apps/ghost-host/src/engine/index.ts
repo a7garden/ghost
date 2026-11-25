@@ -187,13 +187,22 @@ class HostEngine implements Engine, MemoryEngine {
     });
     this.fallbackExtension = defineExtension({
       name: "ghost.model-fallback",
-      sections: [{ key: "ghost_context", render: async ({ conversationId }) => {
-        const state = this.byPiId.get(conversationId) ?? await this.stateFor(this.core.ledger.conversationByPiId(String(conversationId))?.id ?? "");
-        if (!state) return;
-        await this.activateInputContext(state);
-        const conversation = this.core.ledger.conversation(state.hostId);
-        return this.instructionsFor({ conversation, ghost: this.core.ledger.ghost(conversation.ghostId), work: conversation.workId ? this.core.ledger.work(conversation.workId) : null });
-      } }],
+      // Sections render in this order on every request. A changed section is re-sent whole, so the large, stable
+      // instructions stay apart from the memory index and the turn's scope and attachments, which change often.
+      sections: [
+        { key: "ghost_instructions", render: async ({ conversationId }) => {
+          const setup = await this.sectionSetup(conversationId, true);
+          return setup && this.instructionsFor(setup);
+        } },
+        { key: "ghost_memory", render: async ({ conversationId }) => {
+          const setup = await this.sectionSetup(conversationId, false);
+          return setup && this.memoryFor(setup);
+        } },
+        { key: "ghost_context", render: async ({ conversationId }) => {
+          const setup = await this.sectionSetup(conversationId, false);
+          return setup && this.contextFor(setup);
+        } },
+      ],
       hooks: [hook(GenerationTask, {
         afterResponse: async (message, api) => {
           await this.recordReviewResponse(message, api);
@@ -338,14 +347,31 @@ class HostEngine implements Engine, MemoryEngine {
     }
   }
 
-  private async instructionsFor({ conversation, ghost, work }: ConversationSetup): Promise<string> {
+  /** The first section activates the turn's input context; the later ones read the scope it selected. */
+  private async sectionSetup(conversationId: number, activate: boolean): Promise<ConversationSetup | undefined> {
+    const state = this.byPiId.get(conversationId) ?? await this.stateFor(this.core.ledger.conversationByPiId(String(conversationId))?.id ?? "");
+    if (!state) return;
+    if (activate) await this.activateInputContext(state);
+    const conversation = this.core.ledger.conversation(state.hostId);
+    return { conversation, ghost: this.core.ledger.ghost(conversation.ghostId), work: conversation.workId ? this.core.ledger.work(conversation.workId) : null };
+  }
+
+  private instructionsFor({ conversation, ghost, work }: ConversationSetup): string | undefined {
     const kind = this.tools.instructionsFor(conversation, ghost, work);
-    const data = conversation.kind === "review" || conversation.kind === "subagent" ? "" : this.memory?.injected(ghost.id) ?? "";
-    if (data) markPolicyRead(this.core, conversation.id, { untrustedInput: true, privateData: true });
     if (work) markPolicyRead(this.core, conversation.id, this.core.ledger.setting<EffectTaint>(`work:source-taint:${work.id}`, { untrustedInput: false, privateData: false }));
+    return [ghost.persona, kind].filter(Boolean).join("\n\n").trim() || undefined;
+  }
+
+  private memoryFor({ conversation, ghost }: ConversationSetup): string | undefined {
+    const data = conversation.kind === "review" || conversation.kind === "subagent" ? "" : this.memory?.injected(ghost.id) ?? "";
+    if (!data) return;
+    markPolicyRead(this.core, conversation.id, { untrustedInput: true, privateData: true });
+    return data;
+  }
+
+  private async contextFor({ conversation, ghost, work }: ConversationSetup): Promise<string | undefined> {
     const context = this.core.ledger.setting<{ scopeId: string | null; docAttachments: DocRef[] }>(`context:${conversation.id}`, { scopeId: work?.scopeId ?? null, docAttachments: [] });
-    const attachments = await this.tools.contextFor?.(conversation, ghost, work, context.scopeId, context.docAttachments) ?? "";
-    return [ghost.persona, kind, data, attachments].filter(Boolean).join("\n\n").trim();
+    return (await this.tools.contextFor?.(conversation, ghost, work, context.scopeId, context.docAttachments))?.trim() || undefined;
   }
 
   /** `scopeId` names the receiving scope of the turn the compaction precedes; mid-run compactions keep the active one. */

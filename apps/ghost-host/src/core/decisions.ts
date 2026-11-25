@@ -555,7 +555,7 @@ export class Decisions {
           : `Call decision_settle with outcome "leave". ${RESULT_NOTE} Then reply only [quiet].`
         : settle
           ? `If it clearly serves what the owner wants, settle it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. If only the owner can judge, use outcome "leave" with your recommendation so they see it. Then reply only [quiet].`
-          : `Check it against what you know (the owner's earlier words, the recipient, the amount, the files, the result against its brief). If there is something the owner should know to decide — a mismatch, a risk, a confirmation that it matches — call decision_settle with outcome "leave" and one or two sentences in the owner's language, ending with what you recommend. Then reply only [quiet].`,
+          : `Check it against what you know (the owner's earlier words, the recipient, the amount, the files, the result against its brief). If there is something the owner should know to decide (a mismatch, a risk, a confirmation that it matches), call decision_settle with outcome "leave" and one or two sentences in the owner's language, ending with what you recommend. Then reply only [quiet].`,
     ].filter(Boolean);
     const submission = { text: lines.join("\n\n"), origin: "schedule" as const, requestId: `decision-review:${decision.id}`, sourceConversationId: decision.conversationId, scopeId: (decision.proposal?.policy as PolicyReceipt | undefined)?.scopeId ?? null };
     if (this.core.engine.wake) await this.core.engine.wake(main.id, submission, { slot: reviewer?.slot ?? undefined, decisionId: decision.id });

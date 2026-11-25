@@ -218,7 +218,7 @@ export function describeWorkLine(core: Core, work: Work): string {
   const assignee = core.ledger.ghost(work.ghostId).name;
   const owner = work.parentId === null ? "" : ` [child of ${work.parentId}]`;
   const deadline = work.deadlineAt === null ? "" : ` due ${new Date(work.deadlineAt).toISOString()}`;
-  return `- ${work.title} (${work.id}) — ${work.state}${owner} · ${assignee}${deadline}`;
+  return `- ${work.title} (${work.id}), ${work.state}${owner} · ${assignee}${deadline}`;
 }
 
 /**

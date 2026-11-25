@@ -137,7 +137,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
           const localIso = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${offset}`;
           const sender = entry.sender || entry.service || "unknown sender";
           const service = entry.service ? ` (${entry.service})` : "";
-          return `${entry.code} — ${sender}${service} — ${localIso} — ${entry.excerpt}`;
+          return `${entry.code}, ${sender}${service}, ${localIso}, ${entry.excerpt}`;
         });
         return { output: [{ type: "text", text: lines.join("\n") }] };
       } catch (error) {

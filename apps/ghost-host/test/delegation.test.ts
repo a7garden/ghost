@@ -242,14 +242,14 @@ describe("delegation roster", () => {
     const conversation = s.ledger.conversation(s.ledger.work(parent.id).conversationId!);
     // Tags name only capabilities this host has installed: without Reach or Mac ports there is no web or host tag.
     const bare = s.tools.instructionsFor(conversation, s.ghost, s.ledger.work(parent.id));
-    expect(bare).toContain(`Operator (ghost_id ${operator.id}) — Runs the Mac. [faux/gpt-4.1 image]`);
+    expect(bare).toContain(`Operator (ghost_id ${operator.id}): Runs the Mac. [faux/gpt-4.1 image]`);
     const equipped = createToolSet({ core: s.core, sandbox: stubSandbox, memory: null, documents: null, skills: null, reach: {} as never, host: {} as never });
     const instructions = equipped.instructionsFor(conversation, s.ghost, s.ledger.work(parent.id));
 
-    expect(instructions).toContain(`Helper (ghost_id ${s.helper.id}) — Does parts. [faux/gpt-4.1 image web]`);
-    expect(instructions).toContain(`Operator (ghost_id ${operator.id}) — Runs the Mac. [faux/gpt-4.1 image web host]`);
-    expect(instructions).toContain(`Custom (ghost_id ${custom.id}) — Custom model. [faux/custom-text web]`);
-    expect(instructions).toContain(`Remote (ghost_id ${remote.id}) — Unconfigured provider. [nowhere/m-1 web]`);
+    expect(instructions).toContain(`Helper (ghost_id ${s.helper.id}): Does parts. [faux/gpt-4.1 image web]`);
+    expect(instructions).toContain(`Operator (ghost_id ${operator.id}): Runs the Mac. [faux/gpt-4.1 image web host]`);
+    expect(instructions).toContain(`Custom (ghost_id ${custom.id}): Custom model. [faux/custom-text web]`);
+    expect(instructions).toContain(`Remote (ghost_id ${remote.id}): Unconfigured provider. [nowhere/m-1 web]`);
     expect(instructions).toContain("reads the result with a fresh context");
     // Self-delegation is intended: the delegating Ghost appears once, marked as a separate fresh-context Work.
     expect(instructions).toContain(`${s.ghost.name} (ghost_id ${s.ghost.id}; yourself, as a separate fresh-context Work)`);
@@ -264,7 +264,7 @@ describe("delegation roster", () => {
       s.ghost,
       s.ledger.work(parent.id),
     );
-    expect(instructions).toContain(`Helper (ghost_id ${s.helper.id}) — Does parts.`);
+    expect(instructions).toContain(`Helper (ghost_id ${s.helper.id}): Does parts.`);
     expect(instructions).not.toContain("image");
     expect(instructions).toContain("Ghosts you can delegate to:");
   });

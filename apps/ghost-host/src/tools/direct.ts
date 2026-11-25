@@ -118,7 +118,7 @@ export function createDirectTools(core: Core): Extension {
         return text(works.length === 0 ? "No Work here yet." : works.map((work) => {
           // One word of coding state per line: the runs' words arrive in work_inspect and the delivered report, not here.
           const coding = [...new Set(core.coding.list(work.id).filter((run) => run.state !== "closed").map((run) => run.state))];
-          return describeWorkLine(core, work) + (coding.length > 0 ? ` — coding: ${coding.join(", ")}` : "");
+          return describeWorkLine(core, work) + (coding.length > 0 ? `, coding: ${coding.join(", ")}` : "");
         }).join("\n"));
       } catch (error) {
         return errorResult(error);
@@ -238,7 +238,7 @@ export function createDirectTools(core: Core): Extension {
                     schedule.spec.kind === "at"
                       ? `at ${new Date(schedule.spec.at).toISOString()}`
                       : `every ${schedule.spec.seconds / 60} minutes`;
-                  return `- ${schedule.id} — ${spec} — ${schedule.state} — ${firstLine(schedule.prompt)}`;
+                  return `- ${schedule.id}, ${spec}, ${schedule.state}, ${firstLine(schedule.prompt)}`;
                 })
                 .join("\n"),
         );
@@ -275,7 +275,7 @@ export function createDirectTools(core: Core): Extension {
       try {
         const scope = requireAllowed(core, api, "ghost_list");
         const ghosts = core.ledger.ghosts().filter((ghost) => ghost.state === "active");
-        return text(ghosts.map((ghost: Ghost) => `- ${ghost.name} (${ghost.id}) — ${firstLine(ghost.persona)}`).join("\n"));
+        return text(ghosts.map((ghost: Ghost) => `- ${ghost.name} (${ghost.id}), ${firstLine(ghost.persona)}`).join("\n"));
       } catch (error) {
         return errorResult(error);
       }
@@ -320,8 +320,8 @@ function renderDetail(core: Core, work: Work, detail: WorkDetail): string {
     detail.artifacts.length ? `Artifacts:\n${detail.artifacts.map((artifact) => `  - ${artifact.name} ${artifact.digest.slice(0, 12)} (${artifact.size} bytes)`).join("\n")}` : "",
     // Coding state facts only; the agent's own words arrive with the delivered report, never through an inspect another conversation asked for.
     describeCodingRuns(core.coding.list(work.id)),
-    detail.effects.length ? `Effects:\n${detail.effects.map((effect) => `  - ${effect.tool} ${effect.summary} — ${effect.state}`).join("\n")}` : "",
-    detail.decisions.length ? `Decisions:\n${detail.decisions.map((decision) => `  - ${decision.kind}: ${decision.title} — ${decision.state}${decision.answer ? `: ${decision.answer}` : ""}`).join("\n")}` : "",
+    detail.effects.length ? `Effects:\n${detail.effects.map((effect) => `  - ${effect.tool} ${effect.summary}, ${effect.state}`).join("\n")}` : "",
+    detail.decisions.length ? `Decisions:\n${detail.decisions.map((decision) => `  - ${decision.kind}: ${decision.title}, ${decision.state}${decision.answer ? `: ${decision.answer}` : ""}`).join("\n")}` : "",
   ];
   return parts.filter(Boolean).join("\n\n");
 }

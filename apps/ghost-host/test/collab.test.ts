@@ -672,8 +672,8 @@ describe("peer questions", () => {
     const s = await setupWithSibling([]);
     const status = content(await call(s, s.child, "work_status", {}));
     expect(status).toContain("Participants in this root (address ask_peer to their Work ids):");
-    expect(status).toContain(`- ${s.parent.id} — Delegator — "Parent" — running`);
-    expect(status).toContain(`- ${s.sibling.id} — Peer — "Sibling" — running`);
+    expect(status).toContain(`- ${s.parent.id}, Delegator, "Parent", running`);
+    expect(status).toContain(`- ${s.sibling.id}, Peer, "Sibling", running`);
     const self = await call(s, s.child, "ask_peer", { work_id: s.child.id, question: "Self?" }, "self-q");
     expect(self.isError).toBe(true);
     expect(content(self)).toContain("cannot ask itself");

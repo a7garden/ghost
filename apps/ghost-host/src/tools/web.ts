@@ -103,7 +103,7 @@ const TRUNCATED_MARK = "\n[truncated]".length;
 function failure(result: ReachResult): CommandError {
   const error = result.error ?? { code: "internal", message: "agent-reach reported a failure", hint: null };
   const detail = `${error.code}: ${error.message}${error.hint ? ` (${error.hint})` : ""}`;
-  if (OWNER_CODES[error.code]) return new CommandError("unavailable", `${detail} — only the owner can fix this; do not retry.`);
+  if (OWNER_CODES[error.code]) return new CommandError("unavailable", `${detail}: only the owner can fix this; do not retry.`);
   // BAD_INPUT is the Ghost's mistake: it may fix the arguments and retry.
   if (error.code === "BAD_INPUT") return new CommandError("invalid", detail);
   return new CommandError("unavailable", detail);
@@ -114,7 +114,7 @@ function render(result: ReachResult, sources: readonly (string | null)[] = []): 
   if (!result.ok) throw failure(result);
   const blocks = result.items.map((item, index) => {
     const source = sources[index] ? `[${sources[index]}] ` : "";
-    const head = source + [item.title ?? "(untitled)", item.url].filter((part) => part !== null).join(" — ");
+    const head = source + [item.title ?? "(untitled)", item.url].filter((part) => part !== null).join(", ");
     const meta = [item.author, item.publishedAt].filter((part) => part !== null).join(", ");
     const body = item.text === null ? "" : `\n${clip(item.text, MAX_ITEM_CHARS)}`;
     return meta === "" ? `${head}${body}` : `${head} (${meta})${body}`;
@@ -213,7 +213,7 @@ export function createWebTools(core: Core, reach: ReachPort): Extension {
         const result = await reach.run(channel, action, clampTimeoutArgs(extra, reach.timeoutSeconds));
         if (!result.ok && channel === "github" && result.error?.code === "BAD_INPUT") {
           throw invalid(
-            "the github channel only accepts owner/repo or a github.com repo/issue/PR link as its target; search pages, api.github.com and raw.githubusercontent.com URLs are not github targets — read those with web_read instead",
+            "the github channel only accepts owner/repo or a github.com repo/issue/PR link as its target; search pages, api.github.com and raw.githubusercontent.com URLs are not github targets: read those with web_read instead",
           );
         }
         return render(result);

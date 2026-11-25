@@ -176,7 +176,7 @@ test("aggregates new unseen UIDs for the default Ghost and fetches only three re
     expect(f.app.ledger.notificationsForState()).toEqual([expect.objectContaining({
       id: "mail-new:work:7:4102", kind: "message", ghostId: f.app.ghost.id, conversationId: f.app.ghost.directConversationId,
       workId: null, decisionId: null, title: "새 메일",
-      body: "업무 메일 · 새 메일 4통\nfirst@example.com — First\nsecond@example.com — Second\nthird@example.com — Third",
+      body: "업무 메일 · 새 메일 4통\nfirst@example.com, First\nsecond@example.com, Second\nthird@example.com, Third",
     })]);
     expect(f.app.engine.submissions.size).toBe(0);
     expect(inbox.commands.filter(line => / UID SEARCH /i.test(line)).map(line => line.match(/UID \d+:\d+/i)?.[0])).toEqual(["UID 8:4103", "UID 5:7"]);
@@ -199,8 +199,8 @@ test("restart resumes from the persisted mark, reporting only mail received whil
     await f.app.watcher.start();
     await f.clock.advance();
     expect(f.app.ledger.notificationsForState().map(notification => [notification.id, notification.body]).sort()).toEqual([
-      ["mail-new:work:7:1", "업무 · 새 메일 1통\nsender@example.com — Before restart"],
-      ["mail-new:work:7:2", "업무 · 새 메일 1통\nsender@example.com — While stopped"],
+      ["mail-new:work:7:1", "업무 · 새 메일 1통\nsender@example.com, Before restart"],
+      ["mail-new:work:7:2", "업무 · 새 메일 1통\nsender@example.com, While stopped"],
     ]);
   } finally { await f.close(); }
 });
@@ -256,7 +256,7 @@ test("hostile encoded subjects cannot add lines or retain control characters", a
     const lines = f.app.ledger.notification("mail-new:work:7:1").body.split("\n");
     expect(lines).toHaveLength(2);
     expect(lines[0]).toBe("업무 계정 · 새 메일 1통");
-    expect(lines[1]).toMatch(/^sender@example\.com — Roadmap review x+…$/u);
+    expect(lines[1]).toMatch(/^sender@example\.com, Roadmap review x+…$/u);
     expect(lines[1]!.length).toBeLessThanOrEqual(163);
     expect(lines.some(line => /[\p{Cc}\p{Cf}]/u.test(line))).toBe(false);
   } finally { await f.close(); }

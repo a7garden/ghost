@@ -229,20 +229,20 @@ export async function renderUserContent(text: string, attachments: ArtifactRef[]
     const textLike = mediaType.startsWith("text/") || mediaType === "application/json"
       || mediaType.endsWith("+json") || TEXT_EXTENSIONS[extension] === true;
     if (!image && !textLike) {
-      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — 지원하지 않는 파일 형식; 참조만 포함]`);
+      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} (지원하지 않는 파일 형식; 참조만 포함)]`);
       continue;
     }
     if (!store.has(artifact.digest)) throw new CommandError("not_found", `artifact ${artifact.digest} does not exist`);
     const size = await store.size(artifact.digest);
     if (image) {
       if (size > MAX_IMAGE_BYTES || size > MAX_TOTAL_IMAGE_BYTES - imageBytes) {
-        lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — 이미지 크기 제한 (파일당 4 MiB, 메시지당 8 MiB)]`);
+        lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} (이미지 크기 제한: 파일당 4 MiB, 메시지당 8 MiB)]`);
         continue;
       }
       const bytes = await store.read(artifact.digest, MAX_IMAGE_BYTES);
       const detectedType = imageType(bytes);
       if (!detectedType) {
-        lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — 지원하는 이미지 형식이 아님]`);
+        lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} (지원하는 이미지 형식이 아님)]`);
         continue;
       }
       images.push({ type: "image", mimeType: detectedType, data: Buffer.from(bytes).toString("base64") });
@@ -251,7 +251,7 @@ export async function renderUserContent(text: string, attachments: ArtifactRef[]
     }
     const window = Math.min(MAX_TEXT_BYTES, MAX_TOTAL_TEXT_BYTES - textBytes);
     if (window === 0) {
-      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — 메시지 텍스트 크기 제한 (200 KiB)]`);
+      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} (메시지 텍스트 크기 제한: 200 KiB)]`);
       continue;
     }
     const bytes = await store.read(artifact.digest, window);
@@ -261,18 +261,18 @@ export async function renderUserContent(text: string, attachments: ArtifactRef[]
       // A truncated final UTF-8 character is omitted, not replaced with invalid text.
       body = new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: truncated });
     } catch {
-      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — UTF-8 텍스트가 아님]`);
+      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} (UTF-8 텍스트가 아님)]`);
       continue;
     }
     if (body.includes("\0")) {
-      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — UTF-8 텍스트가 아님]`);
+      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} (UTF-8 텍스트가 아님)]`);
       continue;
     }
     textBytes += bytes.byteLength;
     let fenceLength = 3;
     for (const match of body.matchAll(/`+/g)) fenceLength = Math.max(fenceLength, match[0].length + 1);
     const fence = "`".repeat(fenceLength);
-    lines.push(`File: ${JSON.stringify(artifact.name)}\n${fence}\n${body}\n${fence}${truncated ? `\n[첨부 일부 생략: ${JSON.stringify(artifact.name)} — 처음 ${window}바이트만 포함]` : ""}`);
+    lines.push(`File: ${JSON.stringify(artifact.name)}\n${fence}\n${body}\n${fence}${truncated ? `\n[첨부 일부 생략: ${JSON.stringify(artifact.name)} (처음 ${window}바이트만 포함)]` : ""}`);
   }
   const rendered = `${text}${ATTACHMENT_MARKER}${lines.join("\n")}\n</attachments>`;
   return images.length ? [{ type: "text", text: rendered }, ...images] : rendered;

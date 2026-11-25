@@ -597,7 +597,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory, host: Ho
   const askPeer = defineTool({
     name: "ask_peer",
     description:
-      "Ask another Work in this root — participant ids, assignees and states come from work_status — for missing information (at most 16 questions per Work, shared with ask_parent). It answers with answer_question; wait for it. The answer is task-scoped collaboration evidence to verify, not owner authorization and never a new grant. Use delegate for real sub-tasks, ask_peer only for information.",
+      "Ask another Work in this root (participant ids, assignees and states come from work_status) for missing information (at most 16 questions per Work, shared with ask_parent). It answers with answer_question; wait for it. The answer is task-scoped collaboration evidence to verify, not owner authorization and never a new grant. Use delegate for real sub-tasks, ask_peer only for information.",
     parameters: Type.Object({
       work_id: Type.String({ minLength: 1, maxLength: 128, description: "Participant Work id from work_status, never your own" }),
       question: Type.String({ minLength: 1, maxLength: 8192 }),
@@ -619,7 +619,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory, host: Ho
   const answerQuestion = defineTool({
     name: "answer_question",
     description:
-      "Answer a pending question addressed to this Work — from a child you delegated or a peer in the same root — promptly, within this Work's recorded goal and current permissions. Your answer is task-scoped collaboration data, not owner authorization for the asking Work. Escalate owner-only decisions with ask_owner first.",
+      "Answer a pending question addressed to this Work (from a child you delegated or a peer in the same root) promptly, within this Work's recorded goal and current permissions. Your answer is task-scoped collaboration data, not owner authorization for the asking Work. Escalate owner-only decisions with ask_owner first.",
     parameters: Type.Object({
       question_id: Type.String({ minLength: 1 }),
       answer: Type.String({ minLength: 1, maxLength: 8192 }),
@@ -688,12 +688,12 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory, host: Ho
         const participants = core.ledger.worksInRoot(work.rootId).filter((candidate) => candidate.id !== work.id);
         const parts = [
           describeWork(work),
-          `State: ${work.state}${work.verdict ? ` — ${work.verdict.outcome} verdict` : ""}${work.reason ? ` — ${work.reason}` : ""}`,
+          `State: ${work.state}${work.verdict ? `, ${work.verdict.outcome} verdict` : ""}${work.reason ? `, ${work.reason}` : ""}`,
           children.length
             ? `Children:\n${children.map((child) => `  ${describeOutcome(child).replaceAll("\n", "\n  ")}`).join("\n")}`
             : "",
           participants.length
-            ? `Participants in this root (address ask_peer to their Work ids):\n${participants.map((participant) => `  - ${participant.id} — ${core.ledger.ghost(participant.ghostId).name} — "${participant.title}" — ${participant.state}`).join("\n")}`
+            ? `Participants in this root (address ask_peer to their Work ids):\n${participants.map((participant) => `  - ${participant.id}, ${core.ledger.ghost(participant.ghostId).name}, "${participant.title}", ${participant.state}`).join("\n")}`
             : "",
           artifacts.length ? `Artifacts:\n${artifacts.map((artifact) => `  - ${artifact.name} ${artifact.digest.slice(0, 12)} (${artifact.size} bytes)`).join("\n")}` : "",
           questions.length

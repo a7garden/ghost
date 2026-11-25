@@ -72,8 +72,8 @@ export class Team {
       if (work.conversationId) sources?.add(work.conversationId);
       const assignee = this.ledger.ghost(work.ghostId).name;
       const marker = work.activityId ? " [activity]" : "";
-      const reason = work.reason ? ` — ${work.reason.split("\n", 1)[0]!.slice(0, 200)}` : "";
-      lines.push(`- "${work.title}" (${work.id}) — ${assignee} — ${work.state}${marker}${reason}`);
+      const reason = work.reason ? `, ${work.reason.split("\n", 1)[0]!.slice(0, 200)}` : "";
+      lines.push(`- "${work.title}" (${work.id}), ${assignee}, ${work.state}${marker}${reason}`);
     }
     const hidden = rows.length - Math.min(rows.length, MAX_CONTEXT_ROWS);
     if (hidden > 0) lines.push(`+${hidden} more: work_list shows all, work_inspect takes a row's id`);
