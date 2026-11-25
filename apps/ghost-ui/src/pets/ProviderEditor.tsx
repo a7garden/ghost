@@ -16,6 +16,7 @@ const KINDS: { value: ProviderKind; label: string }[] = [
   { value: 'kimi', label: 'Kimi For Coding' },
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'xai', label: 'xAI' },
+  { value: 'github_copilot', label: 'GitHub Copilot' },
   { value: 'openai_compatible', label: 'OpenAI 호환 서버' },
 ];
 

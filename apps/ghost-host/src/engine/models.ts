@@ -11,6 +11,7 @@ import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { kimiCodingProvider } from "@earendil-works/pi-ai/providers/kimi-coding";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
+import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import type { Secrets } from "../core/ports.ts";
 import { modelInputFor, ProviderCatalog } from "../integrations/provider-catalog.ts";
 
@@ -25,6 +26,9 @@ const API_BY_KIND = {
   kimi: "openai-completions",
   openrouter: "openai-completions",
   xai: "openai-responses",
+  // GitHub Copilot serves several wire APIs; modelOf resolves each model's API
+  // from the SDK catalog and this value only covers ids it does not know.
+  github_copilot: "openai-completions",
 } as const satisfies Record<ContractProvider["kind"], Api>;
 
 /** Where a provider lives when the owner did not give a base URL. */
@@ -38,6 +42,7 @@ const BASE_URL_BY_KIND = {
   kimi: "https://api.kimi.com/coding/v1",
   openrouter: "https://openrouter.ai/api/v1",
   xai: "https://api.x.ai/v1",
+  github_copilot: "https://api.individual.githubcopilot.com",
 } as const satisfies Record<ContractProvider["kind"], string | null>;
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
@@ -56,6 +61,7 @@ const SUBSCRIPTION_OAUTH_PROVIDERS = {
   kimi: kimiCodingProvider,
   openrouter: openrouterProvider,
   xai: xaiProvider,
+  github_copilot: githubCopilotProvider,
 } as const;
 
 const subscriptionOAuthFor = (kind: keyof typeof SUBSCRIPTION_OAUTH_PROVIDERS): OAuthAuth => {
@@ -76,6 +82,27 @@ export function apiFor(provider: ContractProvider, credential: Credential | unde
 export function modelInputOf(provider: ContractProvider, modelId: string, credential: Credential | undefined, catalog: ProviderCatalog): Model<Api>["input"] {
   return catalog.modelsFor(provider, credential?.type).find((info) => info.id === modelId)?.input
     ?? modelInputFor(provider.kind, modelId, apiFor(provider, credential));
+}
+
+/**
+ * GitHub Copilot serves three wire APIs; the SDK catalog decides each model's.
+ * Ids outside the bundled catalog follow the model family: Claude speaks the
+ * Anthropic Messages API, everything else the OpenAI Completions API.
+ */
+let copilotApiIndex: Map<string, Api> | undefined;
+function copilotApiFor(id: string): Api {
+  copilotApiIndex ??= new Map(githubCopilotProvider().getModels().map(model => [model.id, model.api as Api]));
+  return copilotApiIndex.get(id) ?? (id.includes("claude") ? "anthropic-messages" : "openai-completions");
+}
+
+let copilotApiMap: Partial<Record<Api, ProviderStreams>> | undefined;
+function copilotStreams(): Partial<Record<Api, ProviderStreams>> {
+  copilotApiMap ??= {
+    "openai-responses": openAIResponsesApi(),
+    "openai-completions": openAICompletionsApi(),
+    "anthropic-messages": streamsFor("anthropic-messages"),
+  };
+  return copilotApiMap;
 }
 
 function streamsFor(api: Api): ProviderStreams {
@@ -122,18 +149,19 @@ function anthropicThinking(info: ModelInfo): Pick<Model<"anthropic-messages">, "
 }
 
 function modelOf(provider: ContractProvider, info: ModelInfo, api: Api, baseUrl: string): Model<Api> {
+  const wire = provider.kind === "github_copilot" ? copilotApiFor(info.id) : api;
   return {
     id: info.id,
     name: info.name,
-    api,
+    api: wire,
     provider: provider.id,
     baseUrl,
-    input: info.input ?? modelInputFor(provider.kind, info.id, api),
+    input: info.input ?? modelInputFor(provider.kind, info.id, wire),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: info.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
     maxTokens: info.maxTokens ?? DEFAULT_MAX_TOKENS,
     reasoning: info.reasoning ?? false,
-    ...(api === "anthropic-messages" ? anthropicThinking(info) : {}),
+    ...(wire === "anthropic-messages" ? anthropicThinking(info) : {}),
   };
 }
 
@@ -160,6 +188,17 @@ export function createHostProvider(provider: ContractProvider, credential: Crede
         ? { auth: { apiKey: credential.key }, source: "Ghost secrets" }
         : undefined,
   };
+  const models = catalog.modelsFor(provider, credential?.type).map((info) => modelOf(provider, info, api, baseUrl));
+  // Copilot's token names the models the subscription actually serves; the rest leave the registry.
+  const availableModelIds = credential?.type === "oauth" && "availableModelIds" in credential
+    ? credential.availableModelIds
+    : undefined;
+  // Validated above: every entry passed the typeof string check.
+  const allowed = Array.isArray(availableModelIds) && availableModelIds.every(id => typeof id === "string")
+    ? availableModelIds as readonly string[]
+    : undefined;
+  const served = allowed ? models.filter(model => allowed.includes(model.id)) : models;
+  const copilot = provider.kind === "github_copilot";
   return createProvider<Api>({
     id: provider.id,
     name: provider.name,
@@ -173,8 +212,8 @@ export function createHostProvider(provider: ContractProvider, credential: Crede
             oauth: subscriptionFlow,
           }
         : { apiKey: apiKeyAuth },
-    models: catalog.modelsFor(provider, credential?.type).map((info) => modelOf(provider, info, api, baseUrl)),
-    api: codex ? openAICodexResponsesApi() : streamsFor(api),
+    models: served,
+    api: codex ? openAICodexResponsesApi() : copilot ? copilotStreams() : streamsFor(api),
   });
 }
 

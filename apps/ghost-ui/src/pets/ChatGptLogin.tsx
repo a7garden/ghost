@@ -47,6 +47,11 @@ const loginCopy: Record<Provider['kind'], { title: string; intro: string; pasteH
     intro: 'SuperGrok·X Premium 구독으로 인증합니다. API 키를 대신 쓰려면 제공자 편집에서 입력할 수 있습니다.',
     pasteHint: '',
   },
+  github_copilot: {
+    title: 'GitHub Copilot 로그인',
+    intro: 'GitHub Copilot 구독으로 인증합니다. 로그인한 계정이 사용할 수 있는 모델만 표시됩니다.',
+    pasteHint: '',
+  },
   google: { title: '로그인', intro: '', pasteHint: '' },
   minimax: { title: '로그인', intro: '', pasteHint: '' },
   openai_compatible: { title: '로그인', intro: '', pasteHint: '' },

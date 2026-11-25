@@ -5,6 +5,7 @@ import { kimiCodingProvider } from "@earendil-works/pi-ai/providers/kimi-coding"
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
+import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import type { Core } from "../core/core.ts";
 import { settingsView } from "../core/commands.ts";
 import { CommandError, notFound } from "../core/errors.ts";
@@ -21,6 +22,7 @@ const TRUSTED_VERIFICATION_PREFIX: Partial<Record<Provider["kind"], string>> = {
   openai: "https://auth.openai.com/codex/device",
   kimi: "https://www.kimi.com/code/",
   xai: "https://accounts.x.ai/oauth2/device",
+  github_copilot: "https://github.com/login/device",
 };
 
 const LOGIN_FAILURE_MESSAGE: Partial<Record<Provider["kind"], string>> = {
@@ -30,6 +32,7 @@ const LOGIN_FAILURE_MESSAGE: Partial<Record<Provider["kind"], string>> = {
   openrouter: "OpenRouter 로그인에 실패했습니다. 인증 코드가 올바른지 확인한 뒤 다시 시도해 주세요.",
   kimi: "Kimi 로그인에 실패했습니다. 기기 코드 로그인을 확인한 뒤 다시 시도해 주세요.",
   xai: "xAI 로그인에 실패했습니다. 기기 코드 로그인을 확인한 뒤 다시 시도해 주세요.",
+  github_copilot: "GitHub Copilot 로그인에 실패했습니다. 기기 코드 로그인을 확인한 뒤 다시 시도해 주세요.",
 };
 
 interface Login {
@@ -168,6 +171,7 @@ export class OAuthLogins {
       case "kimi": return kimiCodingProvider().auth.oauth!.login(interaction, { agentName: "ghost" });
       case "openrouter": return openrouterProvider().auth.oauth!.login(interaction, { agentName: "ghost" });
       case "xai": return xaiProvider().auth.oauth!.login(interaction, { agentName: "ghost" });
+      case "github_copilot": return githubCopilotProvider().auth.oauth!.login(interaction, { agentName: "ghost" });
       case "zai": return loginZai(interaction);
       default: throw new Error(`no login flow for ${provider.kind}`);
     }
@@ -179,6 +183,10 @@ export class OAuthLogins {
       if (prompt.options.some(option => option.id === "device_code")) return Promise.resolve("device_code");
       if (prompt.options.some(option => option.id === "browser")) return Promise.resolve("browser");
       return Promise.reject(new Error("unsupported login prompt"));
+    }
+    if (prompt.type === "text") {
+      // Copilot asks for a GitHub Enterprise domain; blank means github.com.
+      return Promise.resolve("");
     }
     if (prompt.type === "manual_code") {
       // The flow races the loopback callback against this prompt; the UI pastes the code here.

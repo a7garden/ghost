@@ -816,6 +816,7 @@ export const ProviderKind = Type.Union([
   Type.Literal("kimi"),
   Type.Literal("openrouter"),
   Type.Literal("xai"),
+  Type.Literal("github_copilot"),
 ]);
 export type ProviderKind = Static<typeof ProviderKind>;
 

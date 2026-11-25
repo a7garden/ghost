@@ -9,6 +9,7 @@ const OAUTH_ACCOUNT: Record<Provider['kind'], string> = {
   kimi: 'Kimi',
   openrouter: 'OpenRouter',
   xai: 'xAI',
+  github_copilot: 'GitHub Copilot',
   google: '',
   minimax: '',
   openai_compatible: '',
@@ -16,7 +17,7 @@ const OAUTH_ACCOUNT: Record<Provider['kind'], string> = {
 export const oauthName = (kind: Provider['kind']) => OAUTH_ACCOUNT[kind];
 
 /** Kinds that offer account sign-in beside the API key at their default server address. */
-export const OAUTH_KINDS: ReadonlySet<Provider['kind']> = new Set(['openai', 'anthropic', 'zai', 'kimi', 'openrouter', 'xai']);
+export const OAUTH_KINDS: ReadonlySet<Provider['kind']> = new Set(['openai', 'anthropic', 'zai', 'kimi', 'openrouter', 'xai', 'github_copilot']);
 
 export const uiTerms = {
   inbox: '확인할 일',

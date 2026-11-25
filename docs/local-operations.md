@@ -815,6 +815,7 @@ Mac 앱의 **인증 페이지 열기**·**API 키 발급**과 대화의 웹 링�
 - **Kimi For Coding**: 기기 코드 로그인. 표시된 코드를 kimi.com의 인증 페이지에서 입력하면 완료된다. 토큰은 만료 전 자동 갱신된다.
 - **OpenRouter**: 브라우저에서 openrouter.ai 로그인을 마치면 이 Mac의 콜백이 자동 완료하고, 다른 기기에서는 코드를 붙여넣는다. 발급된 키로 모든 OpenRouter 모델을 쓴다.
 - **xAI**: 기기 코드 로그인(SuperGrok·X Premium). 표시된 코드를 accounts.x.ai의 인증 페이지에서 입력하면 완료된다. 토큰은 만료 전 자동 갱신된다.
+- **GitHub Copilot**: 기기 코드 로그인(github.com 계정). 표시된 코드를 github.com/login/device에서 입력하면 완료된다. 로그인한 계정의 Copilot 구독이 제공하는 모델만 자동으로 켜지고 나머지는 목록에서 제외된다. Claude 모델은 `anthropic-messages`, Gemini는 `openai-completions`, GPT는 `openai-responses`로 요청한다. GitHub Enterprise 도메인은 아직 지원하지 않는다.
 
 인증 정보 저장·갱신·삭제와 API 키 전환 절차는 OpenAI OAuth와 같다. 서버 주소를 직접 설정한 제공자는 API 키만 받는다.
 

@@ -10,6 +10,7 @@ import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
+import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { zaiProvider } from "@earendil-works/pi-ai/providers/zai";
 
 export type CatalogFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -64,6 +65,7 @@ const minimax = minimaxProvider();
 const kimi = kimiCodingProvider();
 const openrouter = openrouterProvider();
 const xai = xaiProvider();
+const copilot = githubCopilotProvider();
 
 const openaiModels = chatCatalog(openai);
 const codexModels = chatCatalog(codex);
@@ -74,6 +76,7 @@ const minimaxModels = chatCatalog(minimax);
 const kimiModels = chatCatalog(kimi);
 const openrouterModels = chatCatalog(openrouter);
 const xaiModels = chatCatalog(xai);
+const copilotModels = chatCatalog(copilot);
 
 const CAPABILITY_SOURCES: Record<ContractProvider["kind"], readonly PiProvider[]> = {
   openai: [openai],
@@ -85,6 +88,7 @@ const CAPABILITY_SOURCES: Record<ContractProvider["kind"], readonly PiProvider[]
   kimi: [kimi],
   openrouter: [openrouter],
   xai: [xai],
+  github_copilot: [copilot],
 };
 
 /** Static SDK capabilities only; unknown custom model ids remain text-only. */
@@ -209,6 +213,18 @@ const PRESET_SEEDS: readonly PresetSeed[] = [
     suggestedOAuthModelId: "grok-4.6",
   },
   {
+    id: "github-copilot",
+    kind: "github_copilot",
+    name: "GitHub Copilot",
+    baseUrl: copilot.baseUrl ?? null,
+    credentialUrl: "https://github.com/features/copilot",
+    models: copilotModels,
+    // Sign-in enables and filters the models the subscription actually serves.
+    oauthModels: copilotModels,
+    suggestedModelId: "gpt-5.6-luna",
+    suggestedOAuthModelId: "gpt-5.6-luna",
+  },
+  {
     id: "custom",
     kind: "openai_compatible",
     name: "OpenAI 호환 서버",
@@ -232,6 +248,7 @@ const SAME_CATALOG_OAUTH: Record<ContractProvider["kind"], true | undefined> = {
   kimi: true,
   openrouter: true,
   xai: true,
+  github_copilot: true,
 };
 
 /**
@@ -253,6 +270,7 @@ const DEFAULT_KEYS: Record<ContractProvider["kind"], readonly string[]> = {
   kimi: [],
   openrouter: ["openrouter"],
   xai: ["xai"],
+  github_copilot: [],
 };
 
 const EXACT_KEYS: readonly (readonly [url: string, kind: ContractProvider["kind"], keys: readonly string[]])[] = [
