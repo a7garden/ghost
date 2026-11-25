@@ -65,6 +65,12 @@ Component styles live in the `components` cascade layer (`src/ui/compositions.cs
 `className` win. `src/main.tsx` imports global CSS first; that import declares the layer
 order component stylesheets join.
 
+Data entry never stacks labelled fields in a modal (owner decision 2026-11-25). A new thing
+starts from one line where it will live; everything else is edited in place on the thing
+itself, as text that turns into a field when touched and saves on Enter or when focus leaves.
+Missing optional parts appear as quiet add affordances, not empty fields. Dialogs remain for
+confirmations that name an irreversible consequence.
+
 ## Agent components
 
 Built for supervising agents instead of reusing generic cards and badges
@@ -429,6 +435,10 @@ There is no postMessage bridge, arbitrary JavaScript or direct Host access.
 목표 is a long-term team direction, never a quota or percentage. The owner writes it or
 answers the main Ghost's 목표 제안 with 등록 / 거절 in the existing decision deck.
 Each direction leads its own section; 이유, 지키는 선 and 참고 신호 stay quiet beneath it.
+Adding a direction is one line at the top of the list: type it, Enter. The direction, 이유,
+지키는 선 and 참고 신호 are edited in place; a missing one shows as a quiet 「+ 이유」-style
+affordance. Enter saves one-line text, ⌘/Ctrl+Enter or leaving saves longer text, Escape
+abandons, and a failed save keeps the draft open beside its error.
 The 이정표 line reads past → now → next → later, horizontal with a ScrollRail on desktop
 and upright on compact screens. Two active steps fork and rejoin on one column.
 Every state has its own shape; signal blue appears only for a linked Work actually running
@@ -439,6 +449,6 @@ three open directions unless the project's own limit says otherwise.
 
 A direction belongs to the whole team (shown as 전체) or to one project. The 목표 screen groups
 directions by project, whole-team first, and labels groups only once a project has a goal; the
-add dialog picks the project and explains a full group inside the dialog, so the button itself
+add line picks the project and explains a full group beneath itself, so the button
 stays enabled while any group has room. A project's 목표 tab shows only its directions and
 creates them in that project.
