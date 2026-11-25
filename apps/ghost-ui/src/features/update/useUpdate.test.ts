@@ -31,8 +31,12 @@ const fakeApi = (): UpdateApi => ({
   iosUpdateLink: vi.fn().mockResolvedValue({ install: 'itms-services://install', page: 'https://example.test/install' }),
 });
 
-beforeEach(() => { vi.useFakeTimers(); });
-afterEach(() => { vi.useRealTimers(); });
+beforeEach(() => {
+  vi.useFakeTimers();
+  const store = new Map<string, string>();
+  vi.stubGlobal('localStorage', { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); } });
+});
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 it('polls active phases every 2 s and refreshes idle status every 10 min without checking GitHub', async () => {
   const api = fakeApi();
@@ -116,7 +120,7 @@ it('refreshes idle status every 10 min regardless of auto-check or enabled state
 it('asks the desktop shell for its update while the host offers one', async () => {
   const shellCheck = vi.fn().mockResolvedValue({ version: '0.2.0', notes: '앱 개선' });
   const api = fakeApi();
-  api.update.mockResolvedValue(status({ shell: { version: '0.2.0', notes: '앱 개선' } }));
+  api.update.mockResolvedValue(status({ autoCheck: false, shell: { version: '0.2.0', notes: '앱 개선' } }));
   const monitor = new UpdateMonitor(api, { desktop: true, shellCheck });
   monitor.start();
   await vi.advanceTimersByTimeAsync(0);
@@ -125,6 +129,47 @@ it('asks the desktop shell for its update while the host offers one', async () =
   api.update.mockResolvedValue(status());
   await monitor.refresh();
   expect(monitor.get().shell).toBeNull();
+  monitor.stop();
+});
+
+it('installs the desktop app update by itself once per version when the host is current', async () => {
+  const shellCheck = vi.fn().mockResolvedValue({ version: '0.2.0', notes: '' });
+  const shellInstall = vi.fn().mockResolvedValue(undefined);
+  const api = fakeApi();
+  api.update.mockResolvedValue(status({ shell: { version: '0.2.0', notes: '' } }));
+  const monitor = new UpdateMonitor(api, { desktop: true, shellCheck, shellInstall });
+  monitor.start();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(shellInstall).toHaveBeenCalledTimes(1);
+  await monitor.refresh();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(shellInstall).toHaveBeenCalledTimes(1);
+  monitor.stop();
+});
+
+it('waits for the host release before updating the desktop app', async () => {
+  const shellInstall = vi.fn().mockResolvedValue(undefined);
+  const api = fakeApi();
+  api.update.mockResolvedValue(status({ latest: { version: '2.1.0', commit: 'def', notes: '', publishedAt: '' }, shell: { version: '0.2.0', notes: '' } }));
+  const monitor = new UpdateMonitor(api, { desktop: true, shellCheck: vi.fn().mockResolvedValue({ version: '0.2.0', notes: '' }), shellInstall });
+  monitor.start();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(shellInstall).not.toHaveBeenCalled();
+  monitor.stop();
+});
+
+it('reloads the UI when the host comes back as a new version', async () => {
+  const reload = vi.fn();
+  const api = fakeApi();
+  api.update
+    .mockResolvedValueOnce(activeStatus('installing'))
+    .mockResolvedValue(status({ current: { version: '2.1.0', commit: 'def' } }));
+  const monitor = new UpdateMonitor(api, { reload });
+  monitor.start();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(reload).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(UPDATE_POLL_MS);
+  expect(reload).toHaveBeenCalledTimes(1);
   monitor.stop();
 });
 
