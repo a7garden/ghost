@@ -306,9 +306,9 @@ test('an oauth mail domain offers login only, with the address as the username',
 
 test('a github account already signed in on this mac connects with one click', async ({ page }) => {
   const run = readRunState();
-  await page.goto(`${run.baseUrl}/#/settings?tab=connections`);
   interceptAuthTests(page);
   const { connect } = interceptLocalAccounts(page);
+  await page.goto(`${run.baseUrl}/#/settings?tab=connections`);
 
   const row = page.locator('.local-account', { hasText: 'e2e-gardener' });
   await expect(row).toBeVisible();

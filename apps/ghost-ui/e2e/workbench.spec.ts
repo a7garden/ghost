@@ -20,7 +20,11 @@ for (const width of [1440, 390]) {
       const coding = await mockCodingSessions(page);
       const { service } = await mockWorkbench(page, coding.creates);
       service.addAgent({ version: 0, sessionId: sampleSession.id, scopeId });
-      await openScreen(page, { name: 'workbench', route: () => '/coding', waits: () => [phone ? sampleSession.title : '새 에이전트'] }, 'light');
+      // The sample agents carry fixed 2026 times; the run's own clock would fold them away as days old.
+      await openScreen(page, {
+        name: 'workbench', route: () => '/coding', waits: () => [phone ? sampleSession.title : '새 에이전트'],
+        prepare: page => page.clock.setFixedTime(new Date(sampleSession.updatedAt + 60_000)),
+      }, 'light');
       const existing = agentPane(page, sampleSession.title);
       await expect(existing).toBeVisible();
 

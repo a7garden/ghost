@@ -36,6 +36,8 @@ export async function openScreen(page: Page, screen: Screen, theme: Theme): Prom
     localStorage.setItem('ghost-ui:preferences', JSON.stringify(preferences));
   }, { theme, animate: false, companion: false, companionProfile: '' });
   await page.clock.setFixedTime(new Date(state.fixedNow));
+  // Next-message suggestions come from a live model call that lands a moment after load; captures never show them.
+  await page.route('**/api/suggestions*', route => route.fulfill({ json: { suggestions: [] } }));
   await screen.prepare?.(page);
   await page.goto(`${state.baseUrl}/#${screen.route(state)}`);
   for (const text of screen.waits(state)) {
