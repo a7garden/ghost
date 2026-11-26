@@ -1187,7 +1187,7 @@ describe("collaboration migration 6 and autonomy migration 7", () => {
       expect(ledger.db.query("SELECT * FROM work_questions ORDER BY id").all()).toEqual(
         (oldQuestions as Record<string, unknown>[]).map(({ parent_work_id, ...rest }) => ({ ...rest, recipient_work_id: parent_work_id })),
       );
-      expect(ledger.ghost("g")).toMatchObject({ hostExecution: false, tools: ["read", "delegate"], directConversationId: "direct" });
+      expect(ledger.ghost("g")).toMatchObject({ hostExecution: false, tools: ["read", "delegate", "goal_list", "goal_propose"], directConversationId: "direct" });
       expect(ledger.piConversationId("direct")).toBe("pi-direct");
       expect(ledger.reviseHistory("child")).toEqual(history);
       expect(ledger.workQuestionsAwaitingSubmission().map((question) => question.id)).toEqual(["answered", "cancelled"]);

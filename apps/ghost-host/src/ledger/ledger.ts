@@ -35,6 +35,7 @@ import { idFor } from "../core/ids.ts";
 import { approvalRules } from "../core/policy.ts";
 import { MIGRATIONS } from "./schema.ts";
 import { migrateBrowserAuthority } from "./browser-authority.ts";
+import { migrateMainGoalTools } from "./goal-authority.ts";
 
 type Row = Record<string, SQLQueryBindings>;
 type Listener = (event: LedgerEvent) => void;
@@ -125,6 +126,7 @@ export class Ledger {
       this.db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
       this.migrate();
       migrateBrowserAuthority(this.db);
+      migrateMainGoalTools(this.db);
       if (!this.setting("policy:seeded", false)) this.db.transaction(() => {
         if (this.policyRules().length === 0) for (const rule of approvalRules(this.settings().approvals ?? DEFAULT_APPROVAL_POLICY)) this.db.query("INSERT INTO policy_rules(id,data) VALUES (?,?)").run(rule.id, JSON.stringify(rule));
         this.putSetting("policy:seeded", true);

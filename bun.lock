@@ -7,7 +7,7 @@
     },
     "apps/ghost-host": {
       "name": "@ghost/host",
-      "version": "2.46.0",
+      "version": "2.46.1",
       "bin": {
         "ghost": "./src/main.ts",
       },
