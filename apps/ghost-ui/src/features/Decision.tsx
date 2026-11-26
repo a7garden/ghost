@@ -282,7 +282,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
         <span className="truncate">{workTitle && workTitle !== heading ? workTitle : uiTerms.work}</span><ArrowUpRight size={13} aria-hidden="true"/>
       </button>}
     </div>
-    <h3 className="decision__title">{heading}</h3>
+    <h3 className="decision__title">{proposedGoal ? '이 방향을 목표로 등록할까요?' : heading}</h3>
     </header>
     <div className="decision__body">
     {showDetail && <div className="decision__detail decision__detail--md"><MessageBody text={detail}/></div>}

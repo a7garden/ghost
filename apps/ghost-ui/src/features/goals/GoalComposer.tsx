@@ -13,7 +13,15 @@ const emptyDraft: Draft = { title: '', why: '', boundaries: '', signal: '' };
 /** What the main Ghost receives when the owner would rather say a goal than write its statement. */
 export function goalRequest(text: string, scope: { id: string; name: string } | null): string {
   const where = scope ? `프로젝트 「${scope.name}」(scope_id ${scope.id})의 목표야.` : '팀 전체 목표야.';
-  return `이 생각을 팀 목표로 정리해서 goal_propose로 제안해 줘. ${where} 방향은 짧게 쓰고, 이유·지키는 선·참고 신호는 내 말에 있는 것만 채우고 지어내지 마.\n\n${text}`;
+  return [
+    `아래 내 말을 팀 목표로 goal_propose로 제안해 줘. ${where}`,
+    '- 방향: 내 말을 짧게 줄인 한 문장.',
+    '- 이유: 내가 한 말, 또는 그 말에서 바로 읽히는 뜻만. 기억, 지난 일, 예시를 끌어오지 마.',
+    '- 지키는 선, 참고 신호: 내가 직접 말했을 때만 적고, 말하지 않았으면 비워 둬. 말을 덧붙이거나 일반론을 만들지 마.',
+    '- 되묻지 말고 바로 제안해 줘.',
+    '',
+    `내 말: ${text}`,
+  ].join('\n');
 }
 
 /**
