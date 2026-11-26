@@ -1,15 +1,15 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Box, ChevronDown, Folder, GitBranch, PanelLeftOpen, Plus, SquareTerminal, X } from 'lucide-react';
+import { GitBranch, PanelLeftOpen, Plus, SquareTerminal, X } from 'lucide-react';
 import type { CodingSession as Session, CodingSessionCreate, Ghost, Scope, Work, WorkbenchState } from '@ghost/contract';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { HostError } from '../host/client';
 import { useHost } from '../host/context';
-import { Button, InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { Button, InlineError } from '../ui';
 import { shortcut } from '../ui/keys';
 import { AgentLaunch, type Launch } from './AgentLaunch';
 import { CodingSession } from './CodingSession';
 import { CodingSessionChanges } from './CodingSessionChanges';
-import { codingError } from './CodingSessionModel';
+import { codingError, embeddedSessionPath } from './CodingSessionModel';
 import { useWorkbenchAttention, type Attention } from './WorkbenchAttention';
 import { WorkbenchChanges } from './WorkbenchChanges';
 import { AgentMenu, AgentState, AttentionMark, InlineName, PaneHead, type PaneActions } from './WorkbenchPane';
@@ -32,8 +32,10 @@ const ATTENTION_PRIORITY: Record<Attention, number> = { done: 1, failed: 2, wait
 const RAIL_KEY = 'ghost.workbench.rail';
 const layoutKey = (scopeId: string | null) => scopeId ?? '';
 
-export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate }: {
-  scopes: readonly Scope[]; works: readonly Work[]; ghosts: readonly Ghost[]; compact: boolean; sessionId: string | null; navigate(path: string): void;
+export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, navigate }: {
+  scopes: readonly Scope[]; works: readonly Work[]; ghosts: readonly Ghost[]; compact: boolean;
+  /** Phone: an agent or the launch pad is on screen; otherwise the roster is. */
+  detail: boolean; sessionId: string | null; navigate(path: string, options?: { replace?: boolean }): void;
 }) {
   const { client } = useHost();
   const [state, setState] = useState<WorkbenchState | null>(null);
@@ -45,7 +47,6 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
   const [queued, setQueued] = useState(0);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const [dialog, setDialog] = useState<Dialog | null>(null);
-  const [projectsOpen, setProjectsOpen] = useState(false);
   const [compactRenaming, setCompactRenaming] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [railHidden, setRailHidden] = useState(() => { try { return localStorage.getItem(RAIL_KEY) === 'hidden'; } catch { return false; } });
@@ -242,24 +243,32 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
   }
 
   function selectProject(id: string | null) {
-    setProjectsOpen(false);
     if (latest.current?.focus?.scopeId === id && latest.current.focus !== null) return;
     showFailure(mutate('focus', 'POST', { scopeId: id }));
   }
 
   function openAgent(id: string, beside = false) {
-    setProjectsOpen(false);
     setLayout(current => beside ? split(current, id) : show(current, id));
+    if (compact) navigate(embeddedSessionPath(id));
   }
 
-  const replaceLaunch = (id: string) => setLayout(current => {
-    const at = current.panes.indexOf(LAUNCH);
-    if (current.panes.includes(id)) return at < 0 ? { ...current, active: current.panes.indexOf(id) } : close({ ...current, active: current.panes.indexOf(id) }, at);
-    if (at < 0) return show(current, id);
-    const panes = current.panes.slice();
-    panes[at] = id;
-    return { ...current, panes, active: at };
-  });
+  function newAgent(beside = false) {
+    setLayout(current => beside ? split(current, LAUNCH) : show(current, LAUNCH));
+    if (compact) navigate('/coding?launch=1');
+  }
+
+  // A launch pad gives way to the agent it started; on a phone that screen replaces the pad in history, so Back lands on the roster.
+  const replaceLaunch = (id: string) => {
+    setLayout(current => {
+      const at = current.panes.indexOf(LAUNCH);
+      if (current.panes.includes(id)) return at < 0 ? { ...current, active: current.panes.indexOf(id) } : close({ ...current, active: current.panes.indexOf(id) }, at);
+      if (at < 0) return show(current, id);
+      const panes = current.panes.slice();
+      panes[at] = id;
+      return { ...current, panes, active: at };
+    });
+    if (compact) navigate(embeddedSessionPath(id), { replace: true });
+  };
 
   async function launch({ prompt, place, choice }: Launch) {
     const withImages = Boolean(prompt.images?.length);
@@ -291,6 +300,8 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
       for (let at = next.panes.indexOf(id); at >= 0; at = next.panes.indexOf(id)) next = close(next, at);
       return next;
     }, key || null);
+    // The agent on a phone screen is gone: the roster is what is left to show.
+    if (compact && detail && id === activeSession) navigate('/coding', { replace: true });
   }
 
   function removeAgent(id: string) {
@@ -361,13 +372,13 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
   }
 
   const rail = <WorkbenchRail projects={projects} selected={selected} rows={projectRows} folded={folded} shownIds={shownIds} activeId={activeId}
-    launching={layout.panes.includes(LAUNCH)} sessions={sessions} attention={attention} ghosts={ghostMap} now={now} busy={busy || !state} canSplit={!compact}
-    selectProject={selectProject} openAgent={openAgent} newAgent={beside => { setProjectsOpen(false); setLayout(current => beside ? split(current, LAUNCH) : show(current, LAUNCH)); }}
+    launching={!compact && layout.panes.includes(LAUNCH)} sessions={sessions} attention={attention} ghosts={ghostMap} now={now} busy={busy || !state} canSplit={!compact}
+    selectProject={selectProject} openAgent={openAgent} newAgent={newAgent}
     renameAgent={renameAgent} removeAgent={id => setDialog({ type: 'deleteAgent', sessionId: id, title: sessions.get(id)?.title ?? '에이전트' })} pinAgent={pinAgent}
     createProject={createProject} openProjectSettings={id => navigate(`/scopes/${encodeURIComponent(id)}?view=settings`)}
     onCollapse={compact ? undefined : toggleRail}
     footer={<nav className="workbench-links" aria-label="코딩 메뉴">
-      {scope?.paths[0] && <button type="button" onClick={() => { setProjectsOpen(false); setDialog({ type: 'folderChanges', root: scope.paths[0]! }); }}><GitBranch size={15} aria-hidden="true"/>git 변경</button>}
+      {scope?.paths[0] && <button type="button" onClick={() => setDialog({ type: 'folderChanges', root: scope.paths[0]! })}><GitBranch size={15} aria-hidden="true"/>git 변경</button>}
       <a href="#/coding/orchestration" onClick={event => { event.preventDefault(); navigate('/coding/orchestration'); }}>오케스트레이션</a>
       <a href="#/coding/orchestration?import=1" onClick={event => { event.preventDefault(); navigate('/coding/orchestration?import=1'); }}>하네스 가져오기</a>
     </nav>}/>;
@@ -406,23 +417,20 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
   };
 
   const activeTitle = activeId === LAUNCH ? '새 에이전트' : activeSession ? sessions.get(activeSession)?.title ?? '에이전트' : scope?.name ?? '프로젝트 없음';
+  const roster = compact && !detail;
 
   return <div className="workbench" data-compact={compact || undefined} data-rail={!compact && railHidden ? 'hidden' : undefined}>
     <h1 className="sr-only">코딩 작업대</h1>
-    {compact ? <div className="workbench-compact-head">
+    {compact ? detail && <div className="workbench-compact-head">
       {compactRenaming && activeSession ? <InlineName className="workbench-compact-name" value={sessions.get(activeSession)?.title ?? '에이전트'} label="에이전트 이름" editing
-        onEditing={value => { if (!value) setCompactRenaming(false); }} onSave={title => renameAgent(activeSession, title)}/> : <Popover open={projectsOpen} onOpenChange={setProjectsOpen}>
-        <PopoverTrigger asChild><Button variant="ghost" className="justify-start" type="button" aria-label={`${scope?.name ?? '프로젝트 없음'}: ${activeTitle}`}>
-          {activeSession ? <AgentState state={sessions.get(activeSession)?.state}/> : scope ? <Folder aria-hidden="true"/> : <Box aria-hidden="true"/>}
-          <span className="workbench-agent-title">{activeTitle}</span><small>{scope?.name ?? '프로젝트 없음'}</small>
-          <AttentionMark signal={signals.get(selected) ?? [...signals.values()][0]}/><ChevronDown aria-hidden="true"/></Button></PopoverTrigger>
-        <PopoverContent className="workbench-space-popover" align="start" aria-label="프로젝트 목록">{rail}</PopoverContent>
-      </Popover>}
+        onEditing={value => { if (!value) setCompactRenaming(false); }} onSave={title => renameAgent(activeSession, title)}/> : <div className="workbench-compact-title">
+        {activeSession ? <AgentState state={sessions.get(activeSession)?.state}/> : <Plus aria-hidden="true"/>}
+        <span className="workbench-agent-title">{activeTitle}</span><small>{scope?.name ?? '프로젝트 없음'}</small>
+      </div>}
       {terminalToggle(activeId)}
       <Button variant="ghost" size="icon" type="button" aria-label="작업 변경" title="작업 변경" disabled={!activeSession && !scope?.paths[0]}
         onClick={() => activeSession ? changesFor(activeSession) : scope?.paths[0] && setDialog({ type: 'folderChanges', root: scope.paths[0] })}><GitBranch aria-hidden="true"/></Button>
-      {activeSession ? <AgentMenu projects={scopes} currentScopeId={scopeOf(activeSession)} actions={agentActions(activeSession)} onRename={() => setCompactRenaming(true)}/>
-        : <Button variant="ghost" size="icon" type="button" aria-label="새 에이전트" title="새 에이전트" disabled={!state} onClick={() => setLayout(current => show(current, LAUNCH))}><Plus aria-hidden="true"/></Button>}
+      {activeSession && <AgentMenu projects={scopes} currentScopeId={scopeOf(activeSession)} actions={agentActions(activeSession)} onRename={() => setCompactRenaming(true)}/>}
     </div> : railHidden ? <aside className="workbench-strip" aria-label="작업대 탐색">
       <Button variant="ghost" size="icon" type="button" aria-label="목록 펼치기" title={`목록 펼치기 · ${shortcut('B')}`} onClick={toggleRail}><PanelLeftOpen aria-hidden="true"/></Button>
       {projectRows.filter(row => !folded.has(row.sessionId)).map(row => {
@@ -439,7 +447,8 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
       {loaded && sessionId !== null && (sessionLink?.id !== sessionId
         ? <p className="workbench-error" role="status">에이전트를 여는 중…</p>
         : sessionLink.error && <div className="workbench-error"><InlineError>{sessionLink.error}</InlineError></div>)}
-      {state && <div ref={panesRef} className="workbench-panes" data-covered={(compact && terminalOpen && terminalCwd !== null) || undefined}
+      {roster && state && <aside className="workbench-rail" aria-label="작업대 탐색">{rail}</aside>}
+      {state && <div ref={panesRef} className="workbench-panes" data-covered={(roster || (compact && terminalOpen && terminalCwd !== null)) || undefined}
         onDragOver={event => {
           if (compact || !event.dataTransfer.types.includes(AGENT_DRAG)) return;
           event.preventDefault();
@@ -457,7 +466,7 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
         }}>
         {[...mounted, ...(layout.panes.includes(LAUNCH) && !mounted.includes(LAUNCH) ? [LAUNCH] : [])].map(id => {
           const index = layout.panes.indexOf(id);
-          const visible = compact ? index === layout.active : index >= 0;
+          const visible = compact ? detail && index === layout.active : index >= 0;
           const style = { order: index * 2, flexGrow: layout.sizes[index] ?? 1 } as CSSProperties;
           return <section key={id} className="workbench-pane" data-pane-index={visible ? index : undefined} hidden={!visible} style={style}
             data-active={(!compact && layout.panes.length > 1 && index === layout.active) || undefined} data-drop={dropHint?.index === index ? dropHint.side : undefined}
@@ -478,7 +487,7 @@ export function Workbench({ scopes, works, ghosts, compact, sessionId, navigate 
             setLayout(current => resize(current, index, step));
           }}/>)}
       </div>}
-      {terminalOpen && terminalCwd !== null && <WorkbenchTerminal key={terminalCwd} cwd={terminalCwd} onHide={() => setTerminalOpen(false)}/>}
+      {terminalOpen && terminalCwd !== null && !roster && <WorkbenchTerminal key={terminalCwd} cwd={terminalCwd} onHide={() => setTerminalOpen(false)}/>}
     </div>
     {sheet}
   </div>;

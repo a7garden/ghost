@@ -122,11 +122,14 @@ function Shell() {
     history.replaceState(history.state, '', `#${next}`);
     setRoute(next);
   };
-  const navigate = (path: string) => {
+  const navigate = (path: string, options?: { replace?: boolean }) => {
     const next = path === '/conversations' ? mainChatPath ?? path : path;
     const from = currentRoute();
     resetScroll();
-    if (from !== next) historyNav.push(`#${next}`);
+    if (from !== next) {
+      if (options?.replace) history.replaceState(history.state, '', `#${next}`);
+      else historyNav.push(`#${next}`);
+    }
     setRoute(next);
   };
   const navigateRef = useRef(navigate);
@@ -205,7 +208,8 @@ function Shell() {
 
   const selectedScope = section === 'scopes' && path.split('/')[2] ? decodeURIComponent(path.split('/')[2]!) : undefined;
   const embeddedSessionId = section === 'coding' ? params.get('session') : null;
-  const codingDetail = embeddedSessionId !== null;
+  // On a phone an agent or the launch pad is a screen of its own; /coding itself is the roster.
+  const codingDetail = embeddedSessionId !== null || (section === 'coding' && params.has('launch'));
   const projectOpen = section === 'scopes' && selectedScope !== undefined && !params.has('new') && Boolean(state?.scopes.some(scope => scope.id === selectedScope));
   const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail' || section === 'coding' || projectOpen;
 
@@ -326,7 +330,7 @@ function Shell() {
             {section === 'mail' && <MailView navigate={navigate}/>}
             {orchestrationOpen && <Orchestration/>}
             {section === 'coding' && !orchestrationOpen && <Workbench scopes={state.scopes} works={state.works} ghosts={state.ghosts} compact={compact}
-              sessionId={embeddedSessionId} navigate={navigate}/>}
+              detail={codingDetail} sessionId={embeddedSessionId} navigate={navigate}/>}
             {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>

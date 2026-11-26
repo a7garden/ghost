@@ -6,11 +6,12 @@ import { attachmentB64, editTool, loginDiff, mockCodingSessions, partialReply, s
 import { openScreen } from './visual';
 import { mockWorkbench } from './workbench-mock';
 
-/** Opens the launch pane of 프로젝트 없음, where sessions outside every project wait under 「이어서 하기」. */
+/** Opens the launch pane of 프로젝트 없음, where sessions outside every project wait under 「이어서 하기」. A phone reaches it from the roster. */
 async function openLaunch(page: Page, creates: unknown[]) {
   const { service } = await mockWorkbench(page, creates);
   service.focus({ version: 0, scopeId: null });
   await openScreen(page, { name: 'coding', route: () => '/coding', waits: () => ['새 에이전트'] }, 'light');
+  if ((page.viewportSize()?.width ?? 1440) < 896) await page.getByRole('button', { name: '새 에이전트', exact: true }).click();
   return page.getByRole('region', { name: '새 에이전트', exact: true });
 }
 
@@ -34,7 +35,7 @@ for (const width of [1440, 390]) {
       });
       const launch = await openLaunch(page, api.creates);
       await launch.getByRole('region', { name: '이전 세션' }).getByRole('button', { name: new RegExp(sampleSession.title) }).click();
-      await expect(page).toHaveURL(/#\/coding$/);
+      await expect(page).toHaveURL(width === 390 ? /#\/coding\?session=/ : /#\/coding$/);
       const agent = page.getByRole('region', { name: `에이전트: ${sampleSession.title}`, exact: true });
       await expect(agent).toBeVisible();
       const workspace = agent.getByRole('region', { name: '내장 코딩 세션' });

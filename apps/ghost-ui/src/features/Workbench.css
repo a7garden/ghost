@@ -142,19 +142,25 @@
   .workbench-menu button[data-danger] { color: var(--ghost-danger-ink); }
   .workbench :is(button, a, input, [role='separator']):focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: -2px; }
 
-  /* Phone: one row on top — the agent on screen, terminal, changes, and its menu. */
+  /* Phone: /coding is the roster — projects and their agents with the tab bar beneath. An agent or the launch pad is a screen
+     of its own: one row on top (state, name, terminal, changes, menu) and the composer alone on the bottom edge. */
   .workbench[data-compact] { display: flex; flex-direction: column; }
   .workbench[data-compact] .workbench-main { flex: 1; }
+  .workbench[data-compact] .workbench-rail { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 4px 14px 20px; border-inline-end: 0; }
+  .workbench[data-compact] .workbench-rail-head { padding-inline-start: 6px; }
+  .workbench[data-compact] .workbench-spaces { overflow: visible; }
+  .workbench[data-compact] .workbench-rail :is(.workbench-space-row > button:first-child, .workbench-agent-row > button:first-child, .workbench-agent-add, .workbench-links > :is(a, button)) { min-height: 48px; }
+  .workbench[data-compact] .workbench-space-row > button[aria-label] { opacity: 1; }
+  .workbench[data-compact] .workbench-agents > li:last-child { order: -1; }
+  .workbench[data-compact] .workbench-agent-add:not([aria-expanded]) { color: var(--ghost-ink); font-weight: 560; }
   .workbench-compact-head { display: flex; flex: none; align-items: center; min-height: 44px; padding: 0 2px 0 4px; border-block-end: 1px solid var(--ghost-line); }
-  .workbench-compact-head > button:first-child { flex: 1; min-width: 0; min-height: 44px; justify-content: start; gap: 8px; padding-inline: 8px; }
-  .workbench-compact-head > button:first-child > span:first-of-type { min-width: 0; overflow: hidden; color: var(--ghost-ink); font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
-  .workbench-compact-head > button:first-child > small { flex: 0 1 auto; max-width: 30%; overflow: hidden; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+  .workbench-compact-title { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; padding-inline: 12px 8px; }
+  .workbench-compact-title > .workbench-agent-title { min-width: 0; color: var(--ghost-ink); font-weight: 620; }
+  .workbench-compact-title > small { flex: 0 1 auto; max-width: 30%; overflow: hidden; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+  .workbench-compact-title > svg { flex: none; color: var(--ghost-ink3); }
   .workbench-compact-head > button { flex: none; min-width: 44px; min-height: 44px; }
   .workbench-compact-head svg { flex: none; }
   .workbench-compact-name { margin-inline: 4px; height: 36px; font-size: 16px; }
-  .workbench-space-popover { display: flex; flex-direction: column; width: min(21rem, calc(100vw - 16px)); max-height: var(--radix-popover-content-available-height); overflow-y: auto; padding: 6px; }
-  .workbench-space-popover :is(.workbench-space-row > button:first-child, .workbench-agent-row > button:first-child, .workbench-agent-add, .workbench-links > :is(a, button)) { min-height: 44px; }
-  .workbench-space-popover .workbench-space-row > button[aria-label] { opacity: 1; }
   .workbench[data-compact] .agent-launch { flex-direction: column-reverse; justify-content: flex-start; gap: 16px; padding: 12px 10px max(8px, env(safe-area-inset-bottom)); }
   .workbench[data-compact] .agent-launch__earlier { flex: 1; }
   :root[data-keyboard='open'] .workbench[data-compact] .agent-launch { padding-bottom: 8px; }

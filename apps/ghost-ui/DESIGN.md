@@ -180,8 +180,12 @@ Feature-level compositions:
   (⌘B) fold; the folded rail keeps a strip of agent state marks. A new agent starts from a launch
   pane, not a modal: the instruction is the form, with folder, worktree and model as chips in the
   composer and earlier sessions under 「이어서 하기」. A pane head is one row (state, name edited in
-  place, branch, terminal, 변경, menu, close); the model chip sits beside send. Phones show one
-  agent and one head row. Consecutive tools and thinking fold in place; a reply ends that group.
+  place, branch, terminal, 변경, menu, close); the model chip sits beside send. Phones split by what owns
+  the bottom edge (2026-11-26): `/coding` is the roster — projects, their agents as state shape, title, waiting
+  question and time, 새 에이전트 first — under the tab bar, with no composer. An agent or the launch pad is a
+  screen of its own (`/coding?session=` · `?launch=1`, Back returns to the roster): one head row (state, name,
+  terminal, 변경, menu) and the composer alone on the bottom edge, no tab bar. A launch replaces itself with the
+  agent it started in history. Consecutive tools and thinking fold in place; a reply ends that group.
   Terminals are optional, owner-only and on demand, never opened by an agent and not persisted
   across a Host restart. Changes views read without staging or editing files.
 - **Collaboration**: a `delegate` result reads as a 위임 event line (Ghost · title), and a

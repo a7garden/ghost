@@ -26,13 +26,22 @@ for (const width of [1440, 390]) {
         prepare: page => page.clock.setFixedTime(new Date(sampleSession.updatedAt + 60_000)),
       }, 'light');
       const existing = agentPane(page, sampleSession.title);
+      const projects = page.getByRole('navigation', { name: '프로젝트', exact: true });
+      const dock = page.getByRole('navigation', { name: '주요 화면' });
+      // The list lives in the rail on a desktop; on a phone it is /coding itself, with the tab bar under it and no agent open.
+      const list = async () => {
+        if (phone && !await projects.isVisible()) await page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true }).click();
+        return projects;
+      };
+      if (phone) {
+        await expect(dock).toBeVisible();
+        await expect(existing).toBeHidden();
+        await expect(page.getByRole('textbox', { name: '코딩 지시' })).toHaveCount(0);
+        await projects.getByTitle(sampleSession.title, { exact: true }).click();
+        await expect(dock).toBeHidden();
+      }
       await expect(existing).toBeVisible();
 
-      // The list lives in the rail on a desktop and in the project popover on a phone.
-      const list = async () => {
-        if (phone) await page.locator('.workbench-compact-head > button').first().click();
-        return page.getByRole('navigation', { name: '프로젝트', exact: true });
-      };
       await (await list()).getByRole('button', { name: '새 에이전트', exact: true }).click();
       const launch = page.getByRole('region', { name: '새 에이전트', exact: true });
       await launch.getByRole('textbox', { name: '코딩 지시' }).fill('로그인 버튼을 가운데로');
@@ -174,6 +183,7 @@ for (const width of [1440, 390]) {
       const { service } = await mockWorkbench(page, coding.creates);
       service.addAgent({ version: 0, sessionId: sampleSession.id, scopeId: null });
       await openScreen(page, { name: 'workbench terminal', route: () => '/coding', waits: () => [sampleSession.title] }, 'light');
+      if (phone) await page.getByRole('navigation', { name: '프로젝트', exact: true }).getByTitle(sampleSession.title, { exact: true }).click();
       const terminal = page.locator('section.workbench-terminal');
       await expect(terminal).toHaveCount(0);
       const toggle = page.getByRole('button', { name: '터미널', exact: true }).filter({ visible: true }).first();
