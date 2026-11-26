@@ -52,6 +52,9 @@ const quote = (value: string, max = 200) => {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 };
 
+/** When the owner last sent this Ghost a direct message. */
+export const ownerMessageKey = (ghostId: string) => `owner:lastMessageAt:${ghostId}`;
+
 /**
  * Team goals (owner decision 2026-11-11): long-term directions that guide what Ghosts choose on their own,
  * never quotas. The owner writes a goal or approves the main's proposal; under each goal the main keeps a
@@ -170,9 +173,11 @@ export class Goals {
     if (stored.goals.filter(goal => open(goal) && goal.scopeId === (input.scopeId ?? null)).length >= openGoals) throw conflict(`the owner already has ${openGoals} open goals; propose only after one closes`);
     if (stored.goals.some((goal) => open(goal) && goal.title === title)) throw conflict("this goal is already open");
     if (this.ledger.pendingDecisions().some((decision) => decision.proposal?.goal)) throw conflict("a goal proposal is already waiting for the owner");
+    // The pause stops the main from re-proposing on its own; a goal the owner has just asked for since the decline is not that.
     const cooldown = this.ledger.limits().goalProposalCooldownDays * DAY;
-    if (stored.declinedAt !== null && Date.now() - stored.declinedAt < cooldown) {
-      throw conflict(`the owner declined a goal proposal on ${new Date(stored.declinedAt).toISOString()}; do not propose another for ${this.ledger.limits().goalProposalCooldownDays} days`);
+    const askedSince = stored.declinedAt !== null && this.ledger.setting<number>(ownerMessageKey(main.id), 0) >= stored.declinedAt;
+    if (stored.declinedAt !== null && !askedSince && Date.now() - stored.declinedAt < cooldown) {
+      throw conflict(`the owner declined a goal proposal on ${new Date(stored.declinedAt).toISOString()}; do not propose another for ${this.ledger.limits().goalProposalCooldownDays} days unless the owner asks for one in a new message`);
     }
     const proposal: GoalProposal = { scopeId: input.scopeId ?? null, title, why: clean(input.why), boundaries: clean(input.boundaries), signal: clean(input.signal) };
     const detail = [

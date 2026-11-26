@@ -20,7 +20,7 @@ import { Autonomy, type AutonomyDeps } from "./autonomy.ts";
 import { Adaptations } from "./adaptations.ts";
 import { DutyClock } from "./duty.ts";
 import { Team } from "./team.ts";
-import { Goals } from "./goals.ts";
+import { Goals, ownerMessageKey } from "./goals.ts";
 import { Calls } from "./calls.ts";
 import type { SourceStore } from "../stores/sources.ts";
 
@@ -345,6 +345,7 @@ export class Core implements EngineEvents {
     const ghost = this.ledger.ghost(conversation.ghostId);
     if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);
     if (callId !== null) this.calls.requireLive(callId, conversationId);
+    this.ledger.tx(() => this.ledger.putSetting(ownerMessageKey(ghost.id), Date.now()));
     return this.run(`conversation:${conversationId}`, () =>
       // A spoken turn must still belong to a live call when the engine finally admits it, and is never quota-held past the call.
       this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments: attachments.filter((ref): ref is ArtifactRef => "digest" in ref), docAttachments: attachments.filter((ref): ref is DocRef => "kind" in ref), scopeId, ...(callId === null ? {} : { callId }) }, callId === null ? undefined : () => void this.calls.requireLive(callId, conversationId)),

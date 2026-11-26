@@ -71,6 +71,22 @@ describe("goal proposals", () => {
     expect(textOf(await propose({ ...proposal, title: "다른 방향" }, "p2"))).toContain("for 3 days");
   });
 
+  test("the pause after a decline gives way once the owner asks for a goal in a new message", async () => {
+    const t = team();
+    const propose = t.use(t.mainDirect, "goal_propose");
+    await propose(proposal, "p1");
+    const decision = t.ledger.pendingDecisions().find((item) => item.proposal?.goal)!;
+    await t.core.decisions.resolve(decision.id, { outcome: "answer", answer: "등록하지 마세요" });
+    // A message sent before the decline does not lift it; a later one does, for the Ghost it was sent to only.
+    t.ledger.tx(() => t.ledger.putSetting(`owner:lastMessageAt:${t.main.id}`, Date.now() - 60_000));
+    expect(textOf(await propose({ ...proposal, title: "다른 방향" }, "p2"))).toContain("for 3 days");
+    await t.core.sendMessage(t.mateDirect.id, "다른 얘기", "mate-1");
+    expect(textOf(await propose({ ...proposal, title: "다른 방향" }, "p3"))).toContain("for 3 days");
+    await t.core.sendMessage(t.mainDirect.id, "이 방향을 목표로 제안해 줘", "main-1");
+    expect((await propose({ ...proposal, title: "다른 방향" }, "p4")).isError).toBeFalsy();
+    expect(t.ledger.pendingDecisions().some((item) => item.proposal?.goal)).toBe(true);
+  });
+
   test("a non-main Ghost manages goals only inside a scope it receives", async () => {
     const t = team();
     t.ledger.tx(() => {
