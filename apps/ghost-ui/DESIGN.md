@@ -83,6 +83,17 @@ Shapes chosen per record (2026-11-26):
 - **메일**: new mail is a letter in the reading pane; replies and forwards continue under the original. 메일함 이동 is a row of destinations under the message actions.
 - **프로젝트 문서**: title and body are edited on the same page, with the index beside it on wide screens and the page taking the list's place on phones.
 
+## Screen structure — 2026-11-27
+
+Bespoke redraw of the landing screens around what the owner does: settle what waits, watch what moves, hand off.
+
+- **One row grammar** for decisions, Work, notices and documents: state glyph or face, title over a meta line (Ghost · project · state), a right-aligned time or value. Hairlines between rows, a frame only around a group, the selected row a hover fill with a 2px rule in its state colour. A single item is never its own card.
+- **홈** is a desk on wide screens: the decision queue and the open card lead on the left with 새 대화 below as one line per Ghost; the right column holds a compact hand-off bar, 진행 중 and 최근 끝난 일. With nothing waiting, the composer and live Work lead; a quiet workspace centres one composer. Phones keep 확인 필요 → composer → 새 대화 → 진행 중.
+- **확인할 일** pairs the queue with the selected decision's evidence (`?decision=`, first row selected by default on wide screens, the next selected after one settles). The recommended answer shows on the selected, hovered or focused row. 소식 and 처리한 결정 sit below as quiet groups. Phones open a decision as its own screen and Back restores the queue's scroll and focus.
+- **맡긴 일** is one ledger: 확인 필요, 진행 중, 끝난 일 (14 days, 더 보기). Ghost filter is inline text; `?ghost=` still works. Detail leads with the verdict, summary and files for a finished Work and with progress and waiting decisions for a live one; the instruction follows as a quiet block. The right rail (위임, 실행 환경, 실행 기록) renders only with content.
+- **프로젝트** has one bar. 문서 keeps a narrow index beside the open document, which opens by default on wide screens; PDC format is a quiet fact in the document header only and the back-to-index button shows on phones. Document update times are not shown because the Host does not report them.
+- Heading counts and duplicate group labels are removed; counts live on the sidebar and the activity island only.
+
 ## Agent components
 
 Built for supervising agents instead of reusing generic cards and badges

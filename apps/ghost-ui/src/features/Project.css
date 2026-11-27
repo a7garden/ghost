@@ -214,3 +214,10 @@
   .project, .project-decisions .deck__top { animation: none; }
 }
 }
+
+@layer components {
+  /* With the index beside it the open document needs no way back to the list; Escape still closes it. */
+  @media (min-width: 56rem) {
+    .doc-pane__bar [data-list-back] { display: none; }
+  }
+}

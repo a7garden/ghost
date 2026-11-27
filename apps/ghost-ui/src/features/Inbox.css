@@ -114,3 +114,8 @@
     .inbox, .inbox__row:not([data-swiping]) { animation: none; transition: none; }
   }
 }
+
+@layer components {
+  /* The card is only a focus target after a decision settles; its controls carry their own rings. */
+  .inbox__evidence .decision:focus { outline: none; }
+}

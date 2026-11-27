@@ -93,7 +93,7 @@ export default function PageEditor({ scopeId, pageId, onClose, onSaved, onDirtyC
     if (event.key.toLowerCase() === 's' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void save(); }
   }}>
     <header className="doc-pane__bar">
-      <Button variant="ghost" size="sm" type="button" disabled={saving} onClick={onClose}>
+      <Button variant="ghost" size="sm" type="button" data-list-back={!unsaved || undefined} disabled={saving} onClick={onClose}>
         <ChevronLeft size={15} aria-hidden="true"/>{unsaved ? (view ? '수정 취소' : '취소') : '문서 목록'}
       </Button>
       <div className="doc-pane__tools">

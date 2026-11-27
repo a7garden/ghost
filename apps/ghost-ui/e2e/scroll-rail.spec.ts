@@ -6,7 +6,7 @@ test('the rail follows owner scrolling and scrubbing, not automatic movement', a
   await page.goto(`${readRunState().baseUrl}/#/inbox`);
   const sheet = page.locator('.shell-sheet');
   await expect.poll(() => sheet.evaluate(element => element.scrollHeight - element.clientHeight)).toBeGreaterThan(100);
-  await sheet.hover();
+  await sheet.hover({ position: { x: 120, y: 70 } });
   const rail = page.locator('.ghost-rail[data-floating][data-axis="y"]');
   await expect(rail).toBeVisible();
   await page.mouse.wheel(0, 100);
@@ -23,7 +23,7 @@ test('the rail follows owner scrolling and scrubbing, not automatic movement', a
   await expect(rail).not.toHaveAttribute('data-active');
 
   // The same thumb remains a real scrollbar: dragging to the end reaches the end.
-  await sheet.hover();
+  await sheet.hover({ position: { x: 120, y: 70 } });
   const thumb = await rail.locator('.ghost-rail__thumb').boundingBox();
   const track = await rail.boundingBox();
   if (!thumb || !track) throw new Error('the scroll rail has no geometry');

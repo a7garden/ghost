@@ -36,11 +36,11 @@ Respect reduced motion: rings, sheens and streaming carets stop.
 
 | Destination | Primary purpose |
 | --- | --- |
-| 홈 | Hand-off, decisions, live and recent Work |
-| 확인할 일 | Every decision waiting on the owner as a triage list (recommended answer, hand to the main, put off), what the main is deciding, folded notifications and settled decisions |
-| 맡긴 일 | Delegation trees by state and assignee; detail with lifecycle, decisions, result, delegation map and effects |
+| 홈 | A desk: the decision queue with its evidence leads, beside a compact hand-off bar and live and recent Work |
+| 확인할 일 | Every decision waiting on the owner as a queue beside the selected decision's evidence (recommended answer, hand to the main, put off), what the main is deciding, news and settled decisions |
+| 맡긴 일 | One ledger grouped 확인 필요 · 진행 중 · 끝난 일; detail reads the result first, then the instruction, with delegation, environment and run history in a rail only when they exist |
 | Conversation | Continuous transcript, tool trails, anchored composer, scoped model choice |
-| 프로젝트 | One project as a place: a two-line bar (name, who carries it, folder; tabs), then 대화 · 맡긴 일 (what waits on the owner first) · 문서 · 목표, with 자동 활동 · 승인 규칙 · 성과와 비용 · 변경 기록 kept under 설정 |
+| 프로젝트 | One project as a place: one bar (name, who carries it, folder, tabs, 일 맡기기), then 대화 · 맡긴 일 (what waits on the owner first) · 문서 (index beside the open document) · 목표, with 자동 활동 · 승인 규칙 · 성과와 비용 · 변경 기록 kept under 설정 |
 | 목표 | Team and per-project directions with their 이정표 lines, grouped by project |
 | 설정 | Ghost settings, models, devices, schedules, host, display, desktop avatar (Mac app) |
 
