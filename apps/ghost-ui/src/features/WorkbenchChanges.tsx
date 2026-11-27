@@ -40,6 +40,22 @@ export function WorkbenchChanges({ root, onClose }: { root: string; onClose(): v
   }, [client, root, path, revision]);
 
   const detail = file?.path === path ? file : undefined;
+  const expanded = path && <article aria-label={path} className="coding-file-review">
+    {!detail ? <p className="embedded-muted" role="status">파일 차이를 불러오는 중…</p>
+      : detail.error ? <InlineError onRetry={refresh} retryLabel="다시 불러오기">{detail.error}</InlineError>
+      : detail.diff && <>
+        {detail.diff.staged && <section aria-label="스테이징된 변경">
+          <h3 className="embedded-muted">스테이징된 변경</h3>
+          <DiffText value={detail.diff.staged}/>
+        </section>}
+        {detail.diff.unstaged && <section aria-label="작업 폴더 변경">
+          <h3 className="embedded-muted">작업 폴더 변경</h3>
+          <DiffText value={detail.diff.unstaged}/>
+        </section>}
+        {!detail.diff.staged && !detail.diff.unstaged && !detail.diff.truncated && <p className="embedded-muted">표시할 파일 차이가 없습니다.</p>}
+        {detail.diff.truncated && <p className="embedded-muted">파일 차이가 커서 모두 표시할 수 없습니다.</p>}
+      </>}
+  </article>;
   return <Modal title="git 변경" drawer className="embedded-changes-sheet" onClose={onClose}>
     {error && <InlineError onRetry={refresh} retryLabel="다시 불러오기">{error}</InlineError>}
     {!changes && !error && <p className="embedded-muted" role="status">Git 변경을 불러오는 중…</p>}
@@ -48,37 +64,21 @@ export function WorkbenchChanges({ root, onClose }: { root: string; onClose(): v
         <span>{changes.branch && <><code>{changes.branch}</code> · </>}{changes.files.length ? `${changes.files.length}개 파일` : '변경된 파일 없음'}</span>
         <Button type="button" size="icon" variant="ghost" aria-label="변경 새로고침" title="변경 새로고침" onClick={refresh}><RefreshCw aria-hidden="true"/></Button>
       </div>
-      {changes.files.length > 0 && <ul className="coding-changed-files max-h-[30dvh] overflow-y-auto" aria-label="변경된 파일">
+      {changes.files.length > 0 && <ul className="coding-changed-files" aria-label="변경된 파일">
         {changes.files.map(entry => {
           const status = changeStatus[entry.status];
-          return <li key={entry.path}><button type="button" aria-current={entry.path === path || undefined}
-            onClick={() => { if (selected !== entry.path) { setFile(undefined); select(entry.path); } }}>
+          const open = entry.path === path;
+          return <li key={entry.path}><button type="button" aria-expanded={open}
+            onClick={() => { setFile(undefined); select(open ? null : entry.path); }}>
             <span className="coding-file-status" data-tone={status.tone} title={status.label} aria-label={status.label}>{status.mark}</span>
             <code>{entry.path}</code>
             <span className="coding-file-counts">{entry.additions !== null && <span data-kind="addition">+{entry.additions}</span>}
               {entry.deletions !== null && <span data-kind="deletion">−{entry.deletions}</span>}</span>
             <ChevronRight size={14} aria-hidden="true"/>
-          </button></li>;
+          </button>{open && expanded}</li>;
         })}
       </ul>}
       {changes.truncated && <p className="embedded-muted">변경 목록의 일부만 표시합니다.</p>}
-      {path && <article aria-label={path} className="grid min-w-0 gap-2">
-        <h3 className="break-all text-sm"><code>{path}</code></h3>
-        {!detail ? <p className="embedded-muted" role="status">파일 차이를 불러오는 중…</p>
-          : detail.error ? <InlineError onRetry={refresh} retryLabel="다시 불러오기">{detail.error}</InlineError>
-          : detail.diff && <>
-            {detail.diff.staged && <section aria-label="스테이징된 변경">
-              <h4 className="embedded-muted">스테이징된 변경</h4>
-              <DiffText value={detail.diff.staged}/>
-            </section>}
-            {detail.diff.unstaged && <section aria-label="작업 폴더 변경">
-              <h4 className="embedded-muted">작업 폴더 변경</h4>
-              <DiffText value={detail.diff.unstaged}/>
-            </section>}
-            {!detail.diff.staged && !detail.diff.unstaged && !detail.diff.truncated && <p className="embedded-muted">표시할 파일 차이가 없습니다.</p>}
-            {detail.diff.truncated && <p className="embedded-muted">파일 차이가 커서 모두 표시할 수 없습니다.</p>}
-          </>}
-      </article>}
     </>}
   </Modal>;
 }

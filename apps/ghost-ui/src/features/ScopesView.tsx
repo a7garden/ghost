@@ -1,24 +1,25 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react';
 import { FolderPlus } from 'lucide-react';
 import { Button, Page, PageHeader, SkeletonText } from '../ui';
-import type { PageSummary, Scope, State } from '@ghost/contract';
+import type { Ghost, PageSummary, Scope, State } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { routeLabels } from '../uiText';
-import { useNow } from './time';
+import { absoluteTime, relativeTime, useNow } from './time';
 import { ghostPresence, visibleGhosts } from './ghostState';
+import { decisionHeading } from './decisionText';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { WorkDispatch } from './WorkBrief';
 import { DocumentIndex } from '../components/projects/DocumentIndex';
 import { ProjectBar } from '../components/projects/ProjectBar';
 import { ProjectPulse } from '../components/projects/ProjectPulse';
 import { ProjectWork } from '../components/projects/ProjectWork';
-import { StateGlyph, workGlyph } from '../components/agent';
+import { StateGlyph, glyphLabel, type GlyphState } from '../components/agent';
 import { ScopeEditor } from './ScopeEditor';
 import { GhostChat } from './GhostChat';
 import { ScopeGoals } from './goals/Goals';
 import { ProjectSettings, settingsParts } from './ProjectSettings';
-import { projectWork } from './scopeState';
+import { projectWork, scopeDigests, type ScopeDigest } from './scopeState';
 import './scopes.css';
 import './Project.css';
 
@@ -37,12 +38,29 @@ function tabOf(view: string | undefined, fallback: string): string {
   return ['conversation', 'work', 'documents', 'goals'].includes(view ?? '') ? view! : fallback;
 }
 
-/** What a project row says at a glance: who carries it, what runs, what waits on the owner. */
-function rowFacts(scope: Scope, state: State | null) {
-  const carrier = state?.ghosts.find(ghost => ghost.id === scope.ghostId) ?? state?.ghosts.find(ghost => ghost.isDefault);
-  const { live, pending } = state ? projectWork(state, scope.id) : { live: [], pending: [] };
-  const glyph = pending.length ? 'attention' : scope.state === 'paused' ? 'waiting' : workGlyph(live[0]?.state ?? 'queued', false);
-  return { carrier: [carrier?.name ?? '받을 Ghost 없음', scope.state === 'paused' && '멈춤'].filter(Boolean).join(' · '), live: live.length, waiting: pending.length, glyph } as const;
+/** Who carries a project's conversation: the Ghost it names when one can still take it — never a quiet fallback to the main. */
+function carrierLine(scope: Scope, ghosts: readonly Ghost[]) {
+  const named = scope.ghostId ? ghosts.find(ghost => ghost.id === scope.ghostId) : ghosts.find(ghost => ghost.isDefault);
+  const carrier = named && named.state !== 'retired' && named.deletedAt === null
+    ? `${named.name}${named.state === 'paused' ? ' · 정지' : ''}`
+    : '받을 Ghost 없음';
+  return scope.state === 'paused' ? `멈춤 · ${carrier}` : carrier;
+}
+
+/** The row's state mark follows the subject it names; an empty project stays empty instead of borrowing "queued". */
+function rowMark(scope: Scope, digest: ScopeDigest | undefined): GlyphState | 'idle' {
+  if (digest?.decision) return 'attention';
+  if (scope.state === 'paused') return 'waiting';
+  if (digest?.liveWork) return digest.liveWork.state;
+  return digest?.settledWork ? digest.settledWork.state : 'idle';
+}
+
+/** What a project row offers as its next step: its own oldest owner decision, else newest live Work, else newest result. */
+function rowNext(state: State, digest: ScopeDigest | undefined): { term: string; title: string; path: string; at: number } | null {
+  if (digest?.decision) return { term: '확인 필요', title: decisionHeading(digest.decision, state), path: `/inbox?decision=${encodeURIComponent(digest.decision.id)}`, at: digest.decision.createdAt };
+  if (digest?.liveWork) return { term: glyphLabel[digest.liveWork.state], title: digest.liveWork.title, path: `/work/${encodeURIComponent(digest.liveWork.id)}`, at: digest.liveWork.updatedAt };
+  if (digest?.settledWork) return { term: '끝난 일', title: digest.settledWork.title, path: `/work/${encodeURIComponent(digest.settledWork.id)}`, at: digest.settledWork.endedAt ?? digest.settledWork.updatedAt };
+  return null;
 }
 
 export function ScopesView({ selectedScope, onSelectScope, createRequested, onCreateClosed, navigate, section, onSectionChange }: {
@@ -65,7 +83,7 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
   const [autoDirty, setAutoDirty] = useState(false);
   const [indexOnly, setIndexOnly] = useState(false);
   const [handoff, setHandoff] = useState<HTMLButtonElement | null>(null);
-  const [discard, setDiscard] = useState<DocumentOpening>();
+  const [discard, setDiscard] = useState<DocumentOpening | { leave(): void }>();
   const index = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const restoreIndex = useRef<{ trigger?: HTMLButtonElement; scrollTop?: number } | undefined>(undefined);
@@ -83,7 +101,14 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
   const activePageId = editorPageId ?? savedPageId ?? null;
   const documentDetail = active === 'documents' && !wide && editorPageId !== undefined;
   const select = (id: string) => onSelectScope ? onSelectScope(id) : navigate(id ? `/scopes/${encodeURIComponent(id)}` : '/scopes');
-  const changeSection = (id: string) => onSectionChange ? onSectionChange(id) : navigate(`/scopes/${encodeURIComponent(scope!.id)}?view=${id}`);
+  const leaveEditor = (leave: () => void) => {
+    if (active === 'documents' && dirty.current) setDiscard({ leave });
+    else leave();
+  };
+  const changeSection = (id: string) => {
+    if (id === 'documents' && id === active) return;
+    leaveEditor(() => onSectionChange ? onSectionChange(id) : navigate(`/scopes/${encodeURIComponent(scope!.id)}?view=${id}`));
+  };
   const applyOpening = (next: DocumentOpening) => {
     if (next.pageId !== null && scope?.vaultPath) setDefaultPage({ vaultPath: scope.vaultPath, id: next.pageId });
     dirty.current = false;
@@ -184,7 +209,8 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
     return <div className="project" data-view={active} data-handoff={Boolean(handoff) || undefined} data-doc-detail={documentDetail || undefined}>
       <ProjectBar scope={scope} receiver={receiver ? { id: receiver.id, name: receiver.name, presence: ghostPresence(receiver, state).state } : null}
         folder={scope.paths[0] ?? scope.vaultPath ?? undefined} tabs={tabs} active={active} onTab={changeSection} toolsRef={setToolsHost}
-        canHandoff={canHandoff} onHandoff={openHandoff} onManage={() => changeSection('settings')} onOpenGhost={id => navigate(`/ghosts/${encodeURIComponent(id)}`)}
+        canHandoff={canHandoff} onHandoff={openHandoff} onManage={() => changeSection('settings')}
+        onOpenGhost={id => leaveEditor(() => navigate(`/ghosts/${encodeURIComponent(id)}`))} onOpenCoding={path => leaveEditor(() => navigate(path))}
         onRename={async name => { await client.send({ type: 'scope.update', scopeId: scope.id, name }); }}/>
       <div className="project__body" ref={body}>
         {handoff && <div ref={dispatch} className="project__page project__dispatch">
@@ -197,7 +223,7 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
             <GhostChat key={`${scope.id}:${receiver.id}`} ghost={receiver} state={state} conversationId={receiver.directConversationId} threadId={null} navigate={navigate}
               initialScopeIds={[scope.id]} projectId={scope.id} toolsHost={toolsHost}/>
           </>
-          : <div className="project__page"><p className="project-empty">받을 Ghost가 정해지지 않았습니다.</p></div>)}
+          : <div className="project__page"><p className="project-empty">{scope.ghostId ? '이 프로젝트의 받을 Ghost와 지금 대화할 수 없습니다.' : '받을 Ghost가 정해지지 않았습니다.'}</p></div>)}
         {active === 'work' && <div className="project__page"><ProjectWork state={state} scope={scope} now={now} navigate={navigate}/></div>}
         {active === 'documents' && (scope.vaultPath
           ? <div className="project__page project__page--docs" data-split={wide && editorPageId !== undefined || undefined}>
@@ -211,19 +237,33 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
         {active === 'goals' && <div className="project__page"><ScopeGoals state={state} navigate={navigate} scopeId={scope.id}/></div>}
         {active === 'settings' && <div className="project__page"><ProjectSettings scope={scope} part={section ?? 'settings'} onPart={changeSection} navigate={navigate} onDeleted={() => select('')}/></div>}
       </div>
-      {discard && <ConfirmDialog title="저장하지 않은 변경" confirmLabel="버리고 열기" onConfirm={() => applyOpening(discard)} onClose={() => setDiscard(undefined)}>
-        열려 있는 문서에 저장하지 않은 변경이 있습니다. 버리고 다른 문서를 열까요?
+      {discard && <ConfirmDialog title="저장하지 않은 변경" confirmLabel={'leave' in discard ? '버리고 이동' : '버리고 열기'}
+        onConfirm={() => { if ('leave' in discard) { dirty.current = false; discard.leave(); } else applyOpening(discard); }}
+        onClose={() => setDiscard(undefined)}>
+        {'leave' in discard ? '문서에 저장하지 않은 변경이 있습니다. 버리고 이동할까요?' : '열려 있는 문서에 저장하지 않은 변경이 있습니다. 버리고 다른 문서를 열까요?'}
       </ConfirmDialog>}
     </div>;
   }
-  const ranked = scopes.map(item => ({ item, ...rowFacts(item, state) })).sort((a, b) => b.waiting - a.waiting || b.live - a.live || b.item.updatedAt - a.item.updatedAt);
+  const digests = state ? scopeDigests(state) : undefined;
+  const ranked = scopes
+    .map(item => {
+      const digest = digests?.get(item.id);
+      return { item, carrier: carrierLine(item, state?.ghosts ?? []), mark: rowMark(item, digest), next: state ? rowNext(state, digest) : null,
+        waiting: digest?.waiting ?? 0, live: digest?.live ?? 0 };
+    })
+    .sort((a, b) => b.waiting - a.waiting || b.live - a.live || b.item.updatedAt - a.item.updatedAt);
   return <Page width="reading"><PageHeader title={routeLabels.scopes} actions={<Button disabled={!state} onClick={() => setCreating(true)}><FolderPlus size={16}/>새 프로젝트</Button>}/>
-    {scopes.length ? <ul className="project-list">{ranked.map(({ item, carrier, live, waiting, glyph }) => <li key={item.id}>
+    {scopes.length ? <ul className="project-list project-directory">{ranked.map(({ item, carrier, mark, next }) => <li key={item.id}>
       <button type="button" className="project-item" onClick={() => select(item.id)}>
-        <span className="project-item__mark" aria-hidden="true"><StateGlyph state={glyph}/></span>
+        <span className="project-item__mark" data-idle={mark === 'idle' || undefined} aria-hidden="true">{mark !== 'idle' && <StateGlyph state={mark}/>}</span>
         <span className="project-item__copy"><span className="project-item__title">{item.name}</span><span className="project-item__meta">{carrier}</span></span>
-        <span className="project-item__value">{[waiting > 0 && `확인 필요 ${waiting}`, live > 0 && `진행 ${live}`].filter(Boolean).join(' · ')}</span>
       </button>
+      {next && <div className="project-directory__next">
+        <a className="project-directory__link" href={`#${next.path}`}>
+          <span className="project-directory__term">{next.term}</span><span className="project-directory__subject">{next.title}</span>
+        </a>
+        <time dateTime={new Date(next.at).toISOString()} title={absoluteTime(next.at)}>{relativeTime(next.at, now)}</time>
+      </div>}
     </li>)}</ul> : state && <p className="project-empty">등록된 프로젝트가 없습니다.</p>}
   </Page>;
 }

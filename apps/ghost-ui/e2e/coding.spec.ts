@@ -39,3 +39,27 @@ test('keeps old coding history readable and opens an embedded run in the workben
   const agent = page.getByRole('region', { name: `에이전트: ${sampleSession.title}`, exact: true });
   await expect(agent).toBeVisible();
 });
+
+test('reviews staged and unstaged changes under the selected file without losing the file list', async ({ page }) => {
+  const paths = ['src/header.ts', 'src/footer.ts'];
+  await openScreen(page, { name: 'project changes', route: state => `/coding/${state.scopeId}`, waits: () => ['git 변경'], prepare: async page => {
+    await page.route('**/api/workbench/changes?*', route => {
+      const path = new URL(route.request().url()).searchParams.get('path');
+      return route.fulfill({ json: path ? { path, staged: `+staged ${path}`, unstaged: `+local ${path}`, truncated: false } :
+        { branch: 'main', files: paths.map(path => ({ path, status: 'modified', additions: 2, deletions: 0 })), truncated: false } });
+    });
+  } }, 'light');
+  await page.getByRole('button', { name: 'git 변경' }).click();
+  const sheet = page.getByRole('dialog', { name: 'git 변경' });
+  for (const path of paths) {
+    const row = sheet.getByRole('listitem').filter({ has: page.getByRole('button', { name: new RegExp(path) }) });
+    await row.getByRole('button').click();
+    await expect(row.getByRole('region', { name: '스테이징된 변경' })).toContainText(`+staged ${path}`);
+    await expect(row.getByRole('region', { name: '작업 폴더 변경' })).toContainText(`+local ${path}`);
+    await expect(sheet.getByRole('article')).toHaveCount(1);
+  }
+  const last = sheet.getByRole('button', { name: /src\/footer\.ts/ });
+  await last.click();
+  await expect(last).toBeFocused();
+  await expect(sheet.getByRole('article')).toHaveCount(0);
+});

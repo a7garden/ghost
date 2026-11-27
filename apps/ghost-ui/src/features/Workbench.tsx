@@ -6,7 +6,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { StateGlyph } from '../components/agent';
 import { HostError } from '../host/client';
 import { useHost } from '../host/context';
-import { Button, Dialog, DialogContent, DialogTitle, InlineError, Navigation, NavigationGroup } from '../ui';
+import { Button, Dialog, DialogContent, DialogTitle, InlineError, Navigation, NavigationGroup, Popover, PopoverContent, PopoverTrigger } from '../ui';
 import { shortcut } from '../ui/keys';
 import { uiTerms } from '../uiText';
 import { AgentLaunch, type Launch } from './AgentLaunch';
@@ -16,7 +16,7 @@ import { codingError } from './CodingSessionModel';
 import { useWorkbenchAttention, type Attention } from './WorkbenchAttention';
 import { visibleGhosts } from './ghostState';
 import { WorkbenchChanges } from './WorkbenchChanges';
-import { AgentState, PaneHead, type PaneActions } from './WorkbenchPane';
+import { AgentState, PaneHead, StateWord, agentStateLabel, type PaneActions } from './WorkbenchPane';
 import { AGENT_DRAG, WorkbenchRail } from './WorkbenchRail';
 import { WorkbenchTerminal } from './WorkbenchTerminal';
 import { useNow } from './time';
@@ -106,24 +106,20 @@ export function Workbench({ scopes, works, ghosts, compact, scopeId, detail, ses
     return session && !session.repo && (session.state === 'working' || session.state === 'waiting') ? [session.cwd] : [];
   }));
 
-  const { signals, firstAttention, attentionCount } = useMemo(() => {
+  const { signals, review } = useMemo(() => {
     const signals = new Map<string | null, Attention | undefined>();
-    let firstWaiting: ProjectAgent | undefined;
-    let firstFailed: ProjectAgent | undefined;
-    let attentionCount = 0;
+    const review: ReviewItem[] = [];
     for (const row of rows) {
       const phase = sessions.get(row.sessionId)?.state;
-      if (phase === 'waiting' || phase === 'failed') {
-        attentionCount++;
-        if (phase === 'waiting') firstWaiting ??= row;
-        else firstFailed ??= row;
-      }
+      if (phase === 'waiting' || phase === 'failed') review.push({ row, state: phase });
       const signal = phase === 'waiting' || phase === 'failed' ? phase
         : phase === 'idle' && attention.get(row.sessionId) === 'done' ? 'done' : undefined;
       const prior = signals.get(row.scopeId);
       if (!prior || (signal && ATTENTION_PRIORITY[signal] > ATTENTION_PRIORITY[prior])) signals.set(row.scopeId, signal);
     }
-    return { signals, firstAttention: firstWaiting ?? firstFailed, attentionCount };
+    // 확인 필요 offers waiting agents before failed ones, in list order otherwise.
+    review.sort((a, b) => Number(a.state !== 'waiting') - Number(b.state !== 'waiting'));
+    return { signals, review };
   }, [rows, sessions, attention]);
   useEffect(() => { if (loaded) onProjectSignals(signals); }, [loaded, onProjectSignals, signals]);
 
@@ -412,13 +408,8 @@ export function Workbench({ scopes, works, ghosts, compact, scopeId, detail, ses
     </ConfirmDialog>;
   }
 
-  const attentionLabel = `확인 필요 ${attentionCount}`;
-  const attentionAction = firstAttention && <button type="button" className="workbench-review" disabled={busy}
-    aria-label={attentionLabel} title={`${attentionLabel} · ${sessions.get(firstAttention.sessionId)?.title ?? '에이전트'}`}
-    onClick={() => openAttention(firstAttention)}>
-    <StateGlyph state="attention" accessibleLabel=""/>
-    <span className="workbench-review__label">확인 필요</span>{' '}<span className="workbench-review__count">{attentionCount}</span>
-  </button>;
+  const attentionAction = <WorkbenchReview items={review} sessions={sessions} ghosts={ghostMap} scopes={scopes}
+    busy={busy} onOpen={openAttention}/>;
   const rail = <WorkbenchRail scope={scope} navigate={navigate} rows={projectRows} folded={folded} activeId={activeId}
     launching={!compact && layout.panes.includes(LAUNCH)} sessions={sessions} attention={attention} ghosts={ghostMap} now={now} busy={busy || !state} canSplit={!compact}
     openAgent={openAgent} newAgent={newAgent}
@@ -558,4 +549,73 @@ export function Workbench({ scopes, works, ghosts, compact, scopeId, detail, ses
       </DialogContent>
     </Dialog>}
   </div>;
+}
+
+/** What the rail's 확인 필요 offers: the agent row, and whether it waits or failed. */
+type ReviewItem = { row: ProjectAgent; state: 'waiting' | 'failed' };
+
+/** What a waiting or failed agent needs looked at: the question it asks, or its own title once it failed. */
+function reviewSubject(item: ReviewItem, sessions: ReadonlyMap<string, Session>) {
+  const session = sessions.get(item.row.sessionId);
+  return (item.state === 'waiting' ? session?.pendingDialog?.title : undefined) || session?.title || '에이전트';
+}
+
+/** Where the subject works and, for a Ghost's agent, who started it, e.g. “연구 · 비행 기록”. */
+function reviewContext(item: ReviewItem, ghosts: ReadonlyMap<string, { id: string; name: string }>, scopes: readonly Scope[]) {
+  const ghost = item.row.ghostId ? ghosts.get(item.row.ghostId) : undefined;
+  const project = scopes.find(scope => scope.id === item.row.scopeId)?.name ?? uiTerms.noProject;
+  return ghost ? `${ghost.name} · ${project}` : project;
+}
+
+/**
+ * The rail's 확인 필요. One waiting or failed agent shows its subject — the question it asks, or its own title
+ * once it fails — with its state and project, and opens at a press. Several offer their subjects to pick from,
+ * across projects; picking only focuses the agent through the workbench's own route, never answering or retrying.
+ */
+function WorkbenchReview({ items, sessions, ghosts, scopes, busy, onOpen }: {
+  items: readonly ReviewItem[]; sessions: ReadonlyMap<string, Session>;
+  ghosts: ReadonlyMap<string, { id: string; name: string }>; scopes: readonly Scope[];
+  busy: boolean; onOpen(target: ProjectAgent): void;
+}) {
+  const [open, setOpen] = useState(false);
+  // A subject that settles on its own leaves one behind, which a direct press serves better than an open list.
+  useEffect(() => { if (open && items.length < 2) setOpen(false); }, [open, items.length]);
+  // While the list is open it stays a list, so a settling subject closes it rather than swapping the control.
+  const single = items.length === 1 && !open ? items[0] : undefined;
+  if (single) {
+    const subject = reviewSubject(single, sessions);
+    const context = reviewContext(single, ghosts, scopes);
+    const name = `확인 필요 · ${subject} · ${agentStateLabel(single.state)} · ${context}`;
+    return <button type="button" className="workbench-review" disabled={busy} aria-label={name} title={name}
+      onClick={() => onOpen(single.row)}>
+      <StateGlyph state="attention" accessibleLabel=""/>
+      <span className="workbench-review__body">
+        <span className="workbench-review__subject">{subject}</span>
+        <span className="workbench-review__meta"><StateWord state={single.state}/><span className="workbench-review__context">{context}</span></span>
+      </span>
+    </button>;
+  }
+  if (!items.length) return null;
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild><button type="button" className="workbench-review" disabled={busy}
+      aria-label={`확인 필요 ${items.length}`} title={`확인 필요 ${items.length}`}>
+      <StateGlyph state="attention" accessibleLabel=""/>
+      <span className="workbench-review__label">확인 필요</span>{' '}<span className="workbench-review__count">{items.length}</span>
+    </button></PopoverTrigger>
+    <PopoverContent className="workbench-review-menu" align="start" aria-label="확인 필요 목록">
+      {items.map(item => {
+        const subject = reviewSubject(item, sessions);
+        const context = reviewContext(item, ghosts, scopes);
+        const name = `${subject} · ${agentStateLabel(item.state)} · ${context}`;
+        return <button key={item.row.sessionId} type="button" className="workbench-review-item" aria-label={name} title={name}
+          onClick={() => { setOpen(false); onOpen(item.row); }}>
+          <AgentState state={item.state} withCopy/>
+          <span className="workbench-review-item__body">
+            <span className="workbench-review-item__subject">{subject}</span>
+            <span className="workbench-review-item__meta"><StateWord state={item.state}/><span className="workbench-review-item__context">{context}</span></span>
+          </span>
+        </button>;
+      })}
+    </PopoverContent>
+  </Popover>;
 }

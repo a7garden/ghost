@@ -19,6 +19,10 @@
   .workbench-strip .workbench-review { flex-direction: column; justify-content: center; gap: 2px; width: 32px; padding-inline: 0; }
   .workbench-strip .workbench-review__label { display: none; }
   .workbench-strip .workbench-review__count { margin-inline-start: 0; }
+  .workbench-review__body { display: grid; flex: 1; gap: 1px; min-width: 0; }
+  .workbench-review__subject, .workbench-review__context { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .workbench-review__meta { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: var(--text-caption); font-weight: 500; }
+  .workbench-strip .workbench-review__body { display: none; }
 
   .workbench-rail-head { display: flex; flex: none; align-items: center; gap: 2px; padding: 0 0 4px 8px; }
   .workbench-rail-head h2 { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; margin: 0; color: var(--ghost-ink); font-size: var(--text-caption); font-weight: 600; }
@@ -64,6 +68,8 @@
   :is(.workbench-agent-meta, .workbench-pane__meta):not(:has(> *)) { display: none; }
   :is(.workbench-agent-question, .workbench-agent-detail) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .workbench-agent-question { color: var(--ghost-amber-ink); }
+  .workbench-agent-lead { grid-area: 1 / 2; overflow: hidden; font-size: var(--workbench-row-size, 13px); font-weight: 560; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+  .workbench-agent-meta .workbench-agent-title { overflow: hidden; color: var(--ghost-ink3); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
   .workbench-agent-time { grid-area: 1 / 3; color: var(--ghost-ink3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
   .workbench-ghost { display: inline-flex; flex: none; }
   .workbench-state-word { flex: none; white-space: nowrap; }
@@ -126,20 +132,17 @@
   /* Launch pad: the instruction is the form; earlier sessions wait below. */
   .agent-launch { --workbench-row-size: 15px; display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow-y: auto; padding: clamp(16px, 4vh, 44px) clamp(8px, 3cqi, 20px) 20px; }
   .agent-launch__composer, .agent-launch__earlier { width: 100%; max-width: 720px; margin-inline: auto; }
-  .agent-launch__place { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
-  .agent-launch__place .composer-chip { flex: 0 1 auto; min-width: 0; max-width: 180px; white-space: nowrap; }
-  .agent-launch__place .composer-chip > svg { flex: none; }
-  .agent-launch__place .composer-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .agent-launch .ghost-composer__footer { flex-wrap: nowrap; }
-  .agent-launch .ghost-composer__footer-slot { overflow: hidden; }
-  .agent-launch .ghost-composer__footer-actions { flex: none; }
+  .agent-launch__target { display: flex; min-width: 0; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; padding-block: 4px 10px; margin-block-end: 12px; border-block-end: 1px solid var(--ghost-line); }
+  .agent-launch__folder { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 36px; padding-inline: 4px; color: var(--ghost-ink); background: none; border: 0; cursor: pointer; }
+  .agent-launch__folder > span { min-width: 0; overflow-wrap: anywhere; text-align: start; font: 500 var(--text-caption)/1.45 var(--font-mono); }
+  .agent-launch__folder > svg { flex: none; color: var(--ghost-ink3); }
+  .agent-launch__folder:hover { background: var(--ghost-hover); }
+  .agent-launch__folders .coding-model-menu__list button > span { overflow-wrap: anywhere; font-family: var(--font-mono); }
   .workbench-pane .coding-model-chip { min-width: 0; }
   @container workbench-pane (max-width: 31rem) {
-    .agent-launch .ghost-composer__footer { flex-wrap: wrap; row-gap: 2px; }
-    .agent-launch .ghost-composer__footer-slot { order: -1; flex: 0 0 100%; }
-    .agent-launch .ghost-composer__footer-actions { flex: 0 1 auto; margin-inline-start: auto; max-width: calc(100% - var(--composer-action-size, 34px) - 8px); }
+    .agent-launch__target { align-items: flex-start; flex-direction: column; }
+    .agent-launch__folder { min-height: 44px; }
   }
-  .agent-launch__place .composer-chip[aria-pressed='true'] { color: var(--ghost-ink); background: var(--ghost-hover); }
   .agent-launch__earlier h3 { margin: 0 0 4px 8px; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 600; }
   .agent-launch__earlier ul { margin: 0; }
   .agent-launch__earlier .workbench-agent-open { min-height: 48px; }
@@ -175,6 +178,15 @@
   .workbench-menu button:hover:not(:disabled) { background: var(--ghost-hover); }
   .workbench-menu button:disabled { color: var(--ghost-ink3); }
   .workbench-menu button[data-danger] { color: var(--ghost-danger-ink); }
+
+  /* 확인 필요 choices: one row per waiting or failed agent, its subject first. */
+  .workbench-review-menu { display: grid; gap: 2px; padding: 4px; }
+  .workbench-review-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 5px 8px; border-radius: var(--radius-control); text-align: start; color: var(--ghost-ink); font-size: var(--text-ui); }
+  .workbench-review-item:hover { background: var(--ghost-hover); }
+  .workbench-review-item__body { display: grid; flex: 1; gap: 1px; min-width: 0; }
+  .workbench-review-item__subject { min-width: 0; overflow: hidden; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+  .workbench-review-item__meta { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--ghost-ink3); font-size: var(--text-caption); }
+  .workbench-review-item__context { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .workbench :is(button, a, input, [role='separator']):focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: -2px; }
 
   /* Phone: the tab bar stays under the project's agent roster. A session or launch owns the composer instead. */

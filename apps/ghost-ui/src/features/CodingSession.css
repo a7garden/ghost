@@ -1,11 +1,14 @@
 @layer components {
   .coding-changed-files { margin: 0; padding: 0; list-style: none; }
-  .coding-changed-files button { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 8px; align-items: center;
-    text-align: start; cursor: pointer; min-height: 44px; padding: 8px; border-radius: var(--radius-control); }
-  .coding-changed-files button:hover, .coding-changed-files button[aria-current] { background: var(--ghost-hover); }
-  .coding-changed-files button:focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: -2px; }
-  .coding-changed-files button > code { overflow-wrap: anywhere; }
-  .coding-changed-files svg { color: var(--ghost-ink3); }
+  .coding-changed-files > li + li { border-block-start: 1px solid var(--ghost-line); }
+  .coding-changed-files > li > button { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 8px; align-items: center;
+    text-align: start; cursor: pointer; min-height: 44px; padding: 8px; }
+  .coding-changed-files > li > button:is(:hover, [aria-expanded=true]) { background: var(--ghost-hover); }
+  .coding-changed-files > li > button > code { overflow-wrap: anywhere; }
+  .coding-changed-files > li > button > svg { color: var(--ghost-ink3); }
+  .coding-changed-files > li > button[aria-expanded=true] > svg { transform: rotate(90deg); }
+  .coding-file-review { display: grid; min-width: 0; gap: 12px; padding: 8px 12px; border-inline-start: 2px solid var(--ghost-line-strong); }
+  .coding-file-review > section { min-width: 0; }
   .coding-file-status { width: 19px; height: 19px; display: grid; place-content: center; border-radius: 4px;
     background: var(--ghost-inset); color: var(--ghost-ink2); font-family: var(--font-mono, monospace); font-size: var(--text-caption); }
   .coding-file-status[data-tone='positive'] { color: var(--ghost-success-ink); background: var(--ghost-success-tint); }

@@ -132,21 +132,24 @@ for (const width of [1440, 390]) {
   });
 }
 
-test('starts from one instruction with folder, worktree and model chips, renames in place, then preserves closed history read-only', async ({ page }) => {
+test('chooses the working folder and isolation before sending, then preserves closed history read-only', async ({ page }) => {
   const api = await mockCodingSessions(page);
   await page.route('**/api/folders**', route => route.fulfill({ json: { path: tmpdir(), parent: null, home: tmpdir(), shortcuts: [], truncated: false, entries: [] } }));
   const launch = await openLaunch(page, api.creates);
   // Outside a project the agent starts in the sandbox: no worktree choice until a folder is picked.
+  await expect(launch.getByRole('radiogroup', { name: '작업 방식' })).toHaveCount(0);
+  await launch.getByRole('textbox', { name: '코딩 지시' }).fill('로그인 흐름 점검');
   await launch.getByRole('button', { name: '작업 폴더: 샌드박스' }).click();
   await page.getByRole('dialog', { name: '작업 폴더' }).getByRole('button', { name: '다른 폴더…' }).click();
   await page.getByRole('button', { name: '이 폴더 선택' }).click();
-  await launch.getByRole('button', { name: '바로 작업' }).click();
+  await expect(launch.getByRole('radio', { name: '폴더에서 작업' })).toBeChecked();
+  await launch.getByRole('radio', { name: '별도 worktree' }).click();
   await launch.getByRole('button', { name: /^모델 Sparrow/ }).click();
   const models = page.getByRole('dialog', { name: '모델 선택' });
   await models.getByRole('button', { name: 'Atlas' }).click();
   await models.getByRole('radio', { name: '높음' }).click();
   await page.keyboard.press('Escape');
-  await launch.getByRole('textbox', { name: '코딩 지시' }).fill('로그인 흐름 점검');
+  await expect(launch.getByRole('textbox', { name: '코딩 지시' })).toHaveValue('로그인 흐름 점검');
   await launch.getByRole('button', { name: '지시 보내기' }).click();
   await expect.poll(() => api.creates).toEqual([{ repo: tmpdir(), model: { provider: 'sample', model: 'atlas' }, thinking: 'high', prompt: '로그인 흐름 점검' }]);
   const agent = page.getByRole('region', { name: '에이전트: 새 작업 트리', exact: true });

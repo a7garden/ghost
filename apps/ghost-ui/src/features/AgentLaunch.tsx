@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Box, Check, ChevronDown, Folder, FolderOpen, GitBranch } from 'lucide-react';
+import { Box, Check, ChevronDown, Folder, FolderOpen } from 'lucide-react';
 import type { CodingPrompt, CodingSession } from '@ghost/contract';
 import { FolderPicker } from '../components/FolderPicker';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { Popover, PopoverContent, PopoverTrigger, SegmentedControl } from '../ui';
 import { directoryName } from './CodingModel';
 import { CodingModelChip, type ModelChoice } from './CodingModelChip';
 import { CodingSessionComposer } from './CodingSessionComposer';
@@ -14,10 +14,10 @@ export type LaunchPlace = { folder: string | null; worktree: boolean };
 export type Launch = { prompt: CodingPrompt; place: LaunchPlace; choice: ModelChoice };
 
 const EARLIER_SHOWN = 5;
+const workModes = [{ value: 'direct', label: '폴더에서 작업' }, { value: 'worktree', label: '별도 worktree' }] as const;
 
 /**
- * The start of a new agent: the instruction is the form. Folder, worktree and model sit in the composer as chips with
- * the project's defaults, so the common case is typing and pressing Enter. Earlier sessions of the project wait below.
+ * Keep the working location and isolation choice visible before the first instruction.
  */
 export function AgentLaunch({ folders, busyFolders, earlier, onLaunch, onResume, disabled }: {
   folders: readonly string[];
@@ -40,12 +40,12 @@ export function AgentLaunch({ folders, busyFolders, earlier, onLaunch, onResume,
 
   return <div className="agent-launch">
     <div className="agent-launch__composer">
+      <div className="agent-launch__target">
+        <FolderChip folder={folder} folders={folders} onChange={next => { setFolder(next); setWorktree(null); }}/>
+        {folder !== null && <SegmentedControl aria-label="작업 방식" value={worktree ? 'worktree' : 'direct'} options={workModes}
+          onValueChange={mode => setWorktree(mode === 'worktree')}/>}
+      </div>
       <CodingSessionComposer state="idle" disabled={Boolean(disabled)} stopping={false} onAbort={() => {}} placeholder="새 에이전트에게 지시"
-        footer={<span className="agent-launch__place">
-          <FolderChip folder={folder} folders={folders} onChange={next => { setFolder(next); setWorktree(null); }}/>
-          {folder !== null && <button type="button" className="composer-chip" aria-pressed={worktree} title={worktree ? '별도 worktree와 브랜치에서 작업' : '폴더에서 바로 작업'}
-            onClick={() => setWorktree(!worktree)}><GitBranch size={13} aria-hidden="true"/><span>{worktree ? 'worktree' : '바로 작업'}</span></button>}
-        </span>}
         model={<CodingModelChip value={choice} onChange={setChoice}/>}
         onPrompt={prompt => onLaunch({ prompt, place: { folder, worktree }, choice })}/>
     </div>
@@ -65,21 +65,21 @@ export function AgentLaunch({ folders, busyFolders, earlier, onLaunch, onResume,
 function FolderChip({ folder, folders, onChange }: { folder: string | null; folders: readonly string[]; onChange(folder: string | null): void }) {
   const [open, setOpen] = useState(false);
   const [picking, setPicking] = useState(false);
-  const label = folder ? directoryName(folder) : '샌드박스';
+  const label = folder ?? '샌드박스';
   const choose = (next: string | null) => { onChange(next); setOpen(false); };
   return <>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" className="composer-chip" aria-label={`작업 폴더: ${folder ?? '샌드박스'}`} title={folder ?? '폴더 없이 빈 샌드박스에서 작업'}>
-          {folder ? <Folder size={13} aria-hidden="true"/> : <Box size={13} aria-hidden="true"/>}<span className="truncate">{label}</span><ChevronDown size={13} aria-hidden="true"/>
+        <button type="button" className="agent-launch__folder" aria-label={`작업 폴더: ${label}`} title={folder ?? '폴더 없이 빈 샌드박스에서 작업'}>
+          {folder ? <Folder size={16} aria-hidden="true"/> : <Box size={16} aria-hidden="true"/>}<span dir="auto">{label}</span><ChevronDown size={13} aria-hidden="true"/>
         </button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="start" className="coding-model-menu" aria-label="작업 폴더">
+      <PopoverContent side="bottom" align="start" className="coding-model-menu agent-launch__folders" aria-label="작업 폴더">
         <div className="coding-model-menu__list">
           {folders.map(path => <button key={path} type="button" aria-pressed={path === folder} title={path} onClick={() => choose(path)}>
-            <Folder size={14} aria-hidden="true"/><span>{directoryName(path)}</span>{path === folder && <Check size={14} aria-hidden="true"/>}
+            <Folder size={14} aria-hidden="true"/><span>{path}</span>{path === folder && <Check size={14} aria-hidden="true"/>}
           </button>)}
-          {folder && !folders.includes(folder) && <button type="button" aria-pressed title={folder}><Folder size={14} aria-hidden="true"/><span>{directoryName(folder)}</span><Check size={14} aria-hidden="true"/></button>}
+          {folder && !folders.includes(folder) && <button type="button" aria-pressed title={folder}><Folder size={14} aria-hidden="true"/><span>{folder}</span><Check size={14} aria-hidden="true"/></button>}
           <button type="button" aria-pressed={folder === null} onClick={() => choose(null)}><Box size={14} aria-hidden="true"/><span>샌드박스</span>{folder === null && <Check size={14} aria-hidden="true"/>}</button>
           <button type="button" onClick={() => { setOpen(false); setPicking(true); }}><FolderOpen size={14} aria-hidden="true"/><span>다른 폴더…</span></button>
         </div>

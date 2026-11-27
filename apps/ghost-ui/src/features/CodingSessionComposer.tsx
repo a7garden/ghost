@@ -22,12 +22,10 @@ async function encodeImage({ file, name, type }: LocalImage): Promise<PromptImag
   return { data, mimeType: type, name: name.slice(0, 200) };
 }
 
-export function CodingSessionComposer({ state, disabled, stopping, onPrompt, onAbort, placeholder = '코딩 지시를 입력하세요', footer, model }: {
+export function CodingSessionComposer({ state, disabled, stopping, onPrompt, onAbort, placeholder = '코딩 지시를 입력하세요', model }: {
   state: CodingSession['state']; disabled: boolean; stopping: boolean;
   onPrompt(prompt: CodingPrompt): Promise<{ disposition: 'started' | 'queued' }>; onAbort(): void;
   placeholder?: string;
-  /** Beside the attach button: where a new agent works. */
-  footer?: ReactNode;
   /** Beside send: the model chip. */
   model?: ReactNode;
 }) {
@@ -94,7 +92,7 @@ export function CodingSessionComposer({ state, disabled, stopping, onPrompt, onA
     {attachmentError && <InlineError>{attachmentError}</InlineError>}
     {tooLong && <InlineError>지시는 24,000자까지 보낼 수 있습니다.</InlineError>}
     {queued && busy && <p className="embedded-prompt-status" role="status">후속 지시를 예약했습니다.</p>}
-    <Composer label="코딩 지시" placeholder={placeholder} footer={footer} value={draft} onValueChange={setDraft}
+    <Composer label="코딩 지시" placeholder={placeholder} value={draft} onValueChange={setDraft}
       submitLabel={label} onSubmit={text => void send(text, mode)} disabled={disabled} pending={pending} running={state === 'working'}
       canSubmitEmpty={images.length > 0} onFiles={add}
       onKeyDown={event => {

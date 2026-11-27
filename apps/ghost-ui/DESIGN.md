@@ -91,7 +91,7 @@ Bespoke redraw of the landing screens around what the owner does: settle what wa
 - **홈** is a desk on wide screens: the decision queue and the open card lead on the left with 새 대화 below as one line per Ghost; the right column holds a compact hand-off bar, 진행 중 and 최근 끝난 일. With nothing waiting, the composer and live Work lead; a quiet workspace centres one composer. Phones keep 확인 필요 → composer → 새 대화 → 진행 중.
 - **확인할 일** pairs the queue with the selected decision's evidence (`?decision=`, first row selected by default on wide screens, the next selected after one settles). The recommended answer shows on the selected, hovered or focused row. 소식 and 처리한 결정 sit below as quiet groups. Phones open a decision as its own screen and Back restores the queue's scroll and focus.
 - **맡긴 일** is one ledger: 확인 필요, 진행 중, 끝난 일 (14 days, 더 보기). Ghost filter is inline text; `?ghost=` still works. Detail leads with the verdict, summary and files for a finished Work and with progress and waiting decisions for a live one; the instruction follows as a quiet block. The right rail (위임, 실행 환경, 실행 기록) renders only with content.
-- **프로젝트** has one bar. 문서 keeps a narrow index beside the open document, which opens by default on wide screens; PDC format is a quiet fact in the document header only and the back-to-index button shows on phones. Document update times are not shown because the Host does not report them.
+- **프로젝트** opens the project or its next decision/Work from the directory. In a project, the conversation tools sit with its identity and the same project’s coding workbench is a destination. 문서 keeps its index beside the open document on wide screens and uses a separate detail on phones.
 - Heading counts and duplicate group labels are removed; counts live on the sidebar and the activity island only.
 
 ## Screen structure, round 2 — 2026-11-27
@@ -106,7 +106,7 @@ Bespoke redraw of the landing screens around what the owner does: settle what wa
 ## Screen structure, round 3 — 2026-11-27
 
 - **메일**: the folder column is gone. A head over the list holds the accounts and mailboxes as inline text tabs with unread counts, search, refresh and 메일 쓰기; list and reader fill the rest. Rows follow the row grammar (unread: ink name, 650 weight and a signal dot; read: quiet), the reader's header is subject, sender → recipients · date on one line, with reply and forward as words and the other actions as a labelled icon group. Wide screens preview the first unread message without marking it read. Phones keep tabs on one scrolling line and restore the list on Back.
-- **코딩 작업대**: the rail leads with 확인 필요 N (an agent waiting or failed anywhere, one press opens the first); agent rows carry the shared state glyph and a state word only when not calm; the footer is one labelled 도구 group. A pane head is state, name edited in place, branch, then 터미널 · 변경 · ⋯ · 닫기 with names; a waiting pane is marked amber in its head while the active pane keeps its ink line. A launch pane shows earlier sessions under the composer. On windows under 1100px wide the app sidebar defaults to folded on this screen unless the owner chose otherwise (`ghost.sidebar`). A terminal belongs to the pane that asked for it and opens in that session's folder.
+- **코딩 작업대**: the attention control identifies the waiting or failed agent. A single target opens directly; with several, choose a session by subject and project. Opening a session never answers it. The rail keeps context visible as the owner switches panes. A pane head is state, an editable name, branch, terminal, changes, menu and close.
 - **코딩 대화**: one text column; a turn's tool calls are one group on a left rule that folds to a sentence (파일 수정 1 · 명령 실행 1) and opens to rows that name a state only when not done; diffs open inline; sub-agent tools nest. Questions from the agent sit above the composer like a 확인할 일 card with an amber mark. 중단 is a labelled button only while running.
 - `--ghost-amber-ink` is `#995400` in light so amber text keeps AA on selected rows.
 
@@ -205,8 +205,7 @@ Feature-level compositions:
   panes (⌘-click, 「옆에 열기」, or drag a row onto a pane's right side) with draggable borders; the
   active pane carries a top line and is the Host focus. The app sidebar (⌘\\) and the project rail
   (⌘B) fold; the folded rail keeps a strip of agent state marks. A new agent starts from a launch
-  pane, not a modal: the instruction is the form, with folder, worktree and model as chips in the
-  composer and earlier sessions under 「이어서 하기」. A pane head is one row (state, name edited in
+  pane, not a modal: the working path and the choice between working there or in a separate worktree sit above the instruction. The model stays beside send and earlier sessions under 「이어서 하기」. A pane head is one row (state, name edited in
   place, branch, terminal, 변경, menu, close); the model chip sits beside send. Phones split by what owns
   the bottom edge (2026-11-26): `/coding` is the roster — projects, their agents as state shape, title, waiting
   question and time, 새 에이전트 first — under the tab bar, with no composer. An agent or the launch pad is a

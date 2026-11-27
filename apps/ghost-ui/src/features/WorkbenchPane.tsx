@@ -15,7 +15,10 @@ const agentStates: Record<Session['state'], { glyph: GlyphState; label: string; 
   closed: { glyph: 'cancelled', label: '닫힘' },
 };
 
-export function AgentState({ state, attention, withCopy = false }: { state?: Session['state']; attention?: Attention; withCopy?: boolean }) {
+/** The word a state wears in captions, e.g. 답변 대기 for waiting, 실패 for failed. */
+export const agentStateLabel = (state: Session['state']) => agentStates[state].label;
+ 
+ export function AgentState({ state, attention, withCopy = false }: { state?: Session['state']; attention?: Attention; withCopy?: boolean }) {
   if (!state) return null;
   const { glyph, label, word } = agentStates[state];
   const done = state === 'idle' && attention === 'done';
@@ -31,7 +34,7 @@ export function AttentionMark({ signal }: { signal?: Attention }) {
     accessibleLabel={signal === 'waiting' ? agentStates.waiting.label : undefined}/>;
 }
 
-function StateWord({ state }: { state?: Session['state'] }) {
+export function StateWord({ state }: { state?: Session['state'] }) {
   if (!state || !agentStates[state].word) return null;
   return <span className="workbench-state-word" data-state={state}>{agentStates[state].label}</span>;
 }
@@ -49,16 +52,25 @@ export function AgentRowBody({ session, attention, ghost, detail, now }: {
   session?: Session; attention?: Attention; ghost?: GhostIdentity; detail?: string; now: number;
 }) {
   const state = session?.state;
+  const title = session?.title || '에이전트';
   const question = state === 'waiting' ? session?.pendingDialog?.title : undefined;
   return <>
-    <span className="workbench-row-mark"><AgentState state={state} attention={attention} withCopy/></span>
-    <span className="workbench-agent-title">{session?.title || '에이전트'}</span>
-    <span className="workbench-agent-meta">
-      {ghost && <AgentFace ghost={ghost} size={14}/>}
-      <StateWord state={state}/>
-      {question ? <span className="workbench-agent-question" title={question}>{question}</span>
-        : detail && <span className="workbench-agent-detail" title={detail}>{detail}</span>}
-    </span>
+    <span className="workbench-row-mark"><AgentState state={state} attention={attention} withCopy={!question}/></span>
+    {question ? <>
+      {/* A waiting agent leads with what it asks; its own title follows as context. */}
+      <span className="workbench-agent-question workbench-agent-lead" title={question}>{question}</span>
+      <span className="workbench-agent-meta">
+        {ghost && <AgentFace ghost={ghost} size={14}/>}
+        <span className="workbench-agent-title" title={title}>{title}</span>
+      </span>
+    </> : <>
+      <span className="workbench-agent-title">{title}</span>
+      <span className="workbench-agent-meta">
+        {ghost && <AgentFace ghost={ghost} size={14}/>}
+        <StateWord state={state}/>
+        {detail && <span className="workbench-agent-detail" title={detail}>{detail}</span>}
+      </span>
+    </>}
     {session && <time className="workbench-agent-time" dateTime={new Date(session.updatedAt).toISOString()} title={absoluteTime(session.updatedAt)}>{relativeTime(session.updatedAt, now)}</time>}
   </>;
 }

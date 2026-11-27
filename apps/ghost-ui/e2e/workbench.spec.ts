@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import type { CodingSession } from '@ghost/contract';
+import type { CodingDialog, CodingSession } from '@ghost/contract';
 import { mockCodingSessions, sampleSession } from './coding-session-mock';
 import { readRunState } from './run-state';
 import { openScreen } from './visual';
@@ -61,7 +61,7 @@ for (const width of [1440, 390]) {
       await coding.showApproval();
       const rows = await list();
       const row = rows.getByRole('listitem').filter({ hasText: sampleSession.title });
-      const pending = page.getByRole('complementary', { name: '작업대 탐색' }).getByRole('button', { name: /^확인 필요 1$/ });
+      const pending = page.getByRole('complementary', { name: '작업대 탐색' }).getByRole('button', { name: '확인 필요 · 도구 실행 확인 · 답변 대기 · 비행 기록' });
       await expect(row.locator('.workbench-state')).toHaveAttribute('data-state', 'attention');
       await expect(row.locator('.workbench-agent-question')).toBeVisible();
       await pending.click();
@@ -125,10 +125,54 @@ test('opens an agent that needs attention even from another project', async ({ p
   service.focus({ version: 1, scopeId: null });
   await coding.patch({ state: 'failed' });
   await openScreen(page, { name: 'workbench attention', route: () => '/coding', waits: () => ['새 에이전트'] }, 'light');
-  await page.getByRole('complementary', { name: '작업대 탐색' }).getByRole('button', { name: /^확인 필요 1$/ }).click();
+  await page.getByRole('complementary', { name: '작업대 탐색' }).getByRole('button', { name: '확인 필요 · 로그인 화면 다듬기 · 실패 · 비행 기록' }).click();
   await expect(agentPane(page, sampleSession.title)).toBeVisible();
   await expect(page).toHaveURL(url => url.hash === `#/coding/${scopeId}?session=${sampleSession.id}`);
   await expect.poll(() => service.read().focus).toEqual({ scopeId, sessionId: sampleSession.id });
+});
+
+test('확인 필요가 여럿이면 주제를 골라 열고, 열었다고 저절로 풀리지 않는다', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { scopeId } = readRunState();
+  const coding = await mockCodingSessions(page);
+  const { service } = await mockWorkbench(page, coding.creates);
+  service.addAgent({ version: 0, sessionId: sampleSession.id, scopeId });
+  await openScreen(page, { name: 'workbench attention picker', route: () => '/coding', waits: () => ['새 에이전트'] }, 'light');
+  // A second signal in another project, seeded through the same API the app itself uses.
+  const approval: CodingDialog = { id: 'picker-approval', kind: 'approval', title: '도구 실행 확인', createdAt: sampleSession.createdAt,
+    tool: { name: 'bash', summary: 'bun run screenshot --output /tmp/login.png' } };
+  await page.evaluate(async dialog => {
+    await fetch('/api/coding/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cwd: '/nowhere' }) });
+    await fetch('/api/coding/sessions/new-1', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ state: 'waiting', pendingDialog: dialog }) });
+  }, approval);
+  service.addAgent({ version: 1, sessionId: 'new-1', scopeId: null });
+  service.focus({ version: 2, scopeId: null });
+  await coding.patch({ state: 'failed' });
+  await page.goto(`${readRunState().baseUrl}/#/coding/-`);
+  await page.reload();
+  await expect(rail(page).getByRole('heading', { name: '프로젝트 없음' })).toBeVisible();
+  const review = rail(page).getByRole('button', { name: '확인 필요 2' });
+  await expect(review).toBeVisible();
+  await review.click();
+  const chooser = page.getByRole('dialog', { name: '확인 필요 목록' });
+  await expect(chooser.getByRole('button', { name: '도구 실행 확인 · 답변 대기 · 프로젝트 없음' })).toBeVisible();
+  const evidence = process.env.GHOST_WORKBENCH_EVIDENCE_DIR;
+  if (evidence) {
+    mkdirSync(evidence, { recursive: true });
+    await page.screenshot({ path: join(evidence, 'attention-picker-1440.png'), animations: 'disabled', caret: 'hide' });
+  }
+  // The non-first subject: the failed agent of another project.
+  await chooser.getByRole('button', { name: '로그인 화면 다듬기 · 실패 · 비행 기록' }).click();
+  const pane = agentPane(page, sampleSession.title);
+  await expect(pane).toBeVisible();
+  await expect(pane.locator('.workbench-pane__head .workbench-state-word')).toHaveText('실패');
+  await expect(page).toHaveURL(url => url.hash === `#/coding/${scopeId}?session=${sampleSession.id}`);
+  await expect.poll(() => service.read().focus).toEqual({ scopeId, sessionId: sampleSession.id });
+  // Choosing only focuses the agent: nothing is answered or retried, and both signals remain.
+  expect(coding.answers).toEqual([]);
+  expect(coding.prompts).toEqual([]);
+  expect(coding.aborts).toBe(0);
+  await expect(review).toBeVisible();
 });
 
 test('switches projects from the sidebar and lists a newly created project without another setup', async ({ page, request }) => {
