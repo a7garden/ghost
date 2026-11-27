@@ -177,3 +177,8 @@
     .mail-search input { font-size: max(16px, var(--text-ui)); }
   }
 }
+
+@layer components {
+  /* The title bar's back arrow already returns to the list; the in-page button stays for assistive technology only. */
+  .mail-pane__back--bar { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}

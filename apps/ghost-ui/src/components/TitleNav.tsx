@@ -19,7 +19,7 @@ export function TitleNav({ crumbs, canBack, canForward, onBack, onForward, navig
   const compact = useCompact();
   return <nav className="title-nav" aria-label="위치">
     {(!compact || compactBack) && <span className="title-nav__steps">
-      <button type="button" className="title-nav__step" disabled={!canBack && !compact} aria-label="뒤로" title={`뒤로 · ${shortcut('[')}`} onClick={() => canBack ? onBack() : compactBack && navigate(compactBack)}><ChevronLeft aria-hidden="true"/></button>
+      <button type="button" className="title-nav__step" disabled={!canBack && !compact} aria-label="뒤로" title={`뒤로 · ${shortcut('[')}`} onClick={() => { if (!window.dispatchEvent(new Event('ghost:back', { cancelable: true }))) return; if (canBack) onBack(); else if (compactBack) navigate(compactBack); }}><ChevronLeft aria-hidden="true"/></button>
       {!compact && <button type="button" className="title-nav__step" disabled={!canForward} aria-label="앞으로" title={`앞으로 · ${shortcut(']')}`} onClick={onForward}><ChevronRight aria-hidden="true"/></button>}
     </span>}
     <ol className="title-nav__trail">

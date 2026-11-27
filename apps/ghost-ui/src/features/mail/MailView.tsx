@@ -463,6 +463,19 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
     if (!compact && !compose && phase === 'ready') previewUnread();
   }, [compact, compose, phase, scope, list.messages]);
 
+  // On a phone the title bar's 「<」 is the one way back: it closes the open message before it leaves the page.
+  useEffect(() => {
+    if (!phone) return;
+    const back = (event: Event) => {
+      const button = backButton.current;
+      if (!button || button.disabled) return;
+      event.preventDefault();
+      button.click();
+    };
+    window.addEventListener('ghost:back', back);
+    return () => window.removeEventListener('ghost:back', back);
+  }, [phone]);
+
   const closeOpen = () => {
     activeOpen.current = null;
     setOpenKey(null); setOpenTarget(null); setOpenMessage(null); setMessageError(''); setActionError(''); setBusy('');
@@ -695,7 +708,7 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
       </div>
     </section>
     {reader && <div className="mail-pane">
-      {stacked && !freshLetter && <Button ref={backButton} type="button" className="mail-pane__back" variant="ghost" size="sm"
+      {stacked && !freshLetter && <Button ref={backButton} type="button" className={phone ? 'mail-pane__back mail-pane__back--bar' : 'mail-pane__back'} variant="ghost" size="sm"
         aria-label={openMessage ? undefined : '목록으로'} disabled={Boolean(compose)} onClick={closeOpen}>
         <ChevronLeft size={15} aria-hidden="true"/>목록
       </Button>}

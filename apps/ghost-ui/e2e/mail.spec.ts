@@ -318,7 +318,7 @@ test('phone stacks account and mailbox tabs in two rows and restores the scrolle
   expect(top).toBeGreaterThan(0);
   await mail.click();
   await expect(page.getByRole('article', { name: '메일 읽기: B read' })).toBeVisible();
-  await page.getByRole('button', { name: '목록', exact: true }).click();
+  await page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true }).click();
   await expect(scroll).toHaveJSProperty('scrollTop', top);
   await expect(mail).toBeFocused();
   await expect(archive).toHaveAttribute('aria-current', 'true');
@@ -413,7 +413,7 @@ test('closing a pending read invalidates it before the same UID is opened again'
   const api = await mailApi(page); await openMail(page); await expect(row(page, 'A INBOX #1')).toBeVisible();
   const pending = api.holdNext(url => url.pathname.endsWith('/A/message'));
   await row(page, 'A INBOX #1').click(); const old = await pending;
-  await page.getByRole('button', { name: '목록으로', exact: true }).click();
+  await page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true }).click();
   await row(page, 'A INBOX #1').click();
   await expect(page.getByRole('article', { name: '메일 읽기: A read' })).toBeVisible();
   await expect(page.getByRole('button', { name: '안읽음으로 표시', exact: true })).toBeEnabled();
