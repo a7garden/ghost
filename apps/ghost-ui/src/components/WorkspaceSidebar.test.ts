@@ -114,6 +114,15 @@ it('nests a project right under its Ghost, even when the folded pool would hide 
   expect(html).not.toContain('>idle<');
 });
 
+it('offers the unscoped workbench only when coding has unscoped agents', () => {
+  expect(render({ section: 'coding' })).not.toContain('프로젝트 없음');
+  expect(render({ projectSignals: new Map([[null, 'waiting']]) })).not.toContain('프로젝트 없음');
+  const html = render({ section: 'coding', selectedScope: null, projectSignals: new Map([[null, undefined]]) });
+  expect(html.match(/프로젝트 없음/g)).toHaveLength(1);
+  expect(html).toMatch(/sidebar-project--unscoped"[^>]*>[\s\S]*?프로젝트 없음/);
+  expect(html.match(/aria-current="page"/g)).toHaveLength(2);
+});
+
 it('shows host trouble on the settings entry only once it is announced, toned by severity', () => {
   expect(render()).not.toContain('연결됨');
   expect(render({ status: { state: 'connecting', label: '연결 확인 중', quiet: true } })).not.toContain('연결 확인 중');

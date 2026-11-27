@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { ArrowLeft, Download, Plus, SlidersHorizontal } from 'lucide-react';
 import {
   ORCHESTRATION_MAX_CONCURRENCY, ORCHESTRATION_MAX_DEPTH, OrchestrationConfig as ConfigSchema, SESSION_MODEL_ROLE, orchestrationIssues, validate,
@@ -7,6 +7,7 @@ import {
 } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { Button, InlineError, SkeletonRows } from '../ui';
+import { uiTerms } from '../uiText';
 import { OrchestrationGraph } from './OrchestrationGraph';
 import { OrchestrationInspector } from './OrchestrationInspector';
 import { addNode, connectAgents, issueText, moveNode, removeNode, renameNode, type NodeKey } from './OrchestrationModel';
@@ -14,9 +15,7 @@ import { mergeImport, selectableItems, type ImportSelection } from './Orchestrat
 import { useOrchestrationActivity } from './OrchestrationActivity';
 import './Orchestration.css';
 
-export const orchestrationPath = '/coding/orchestration';
-
-export function Orchestration() {
+export function Orchestration({ importRequested, onImportOpened }: { importRequested: boolean; onImportOpened(): void }) {
   const { client } = useHost();
   const [stored, setStored] = useState<OrchestrationView | null>(null);
   const [draft, setDraft] = useState<OrchestrationConfig | null>(null);
@@ -98,24 +97,19 @@ export function Orchestration() {
     closeImport();
   }
 
-  // /coding/orchestration?import=1 opens the panel once; the flag drops in place so Back does not reopen it.
-  const asked = useRef(false);
-  useEffect(() => {
-    if (asked.current) return;
-    asked.current = true;
-    if (!new URLSearchParams(location.hash.split('?')[1] ?? '').has('import')) return;
-    const next = location.hash.replace(/([?&])import=1(&|$)/, (_, lead: string, tail: string) => tail ? lead : '').replace(/[?&]$/, '');
-    history.replaceState(history.state, '', `#${next}`);
+  const startRequestedImport = useEffectEvent(() => {
+    onImportOpened();
     void openImport();
-  }, [client]);
+  });
+  useEffect(() => { if (importRequested) startRequestedImport(); }, [importRequested]);
 
   const toggle = (list: string[], name: string) => list.includes(name) ? list.filter(item => item !== name) : [...list, name];
   const available = sources?.filter(entry => entry.available) ?? [];
 
-  return <section className="orchestration" aria-label="오케스트레이션">
+  return <section className="orchestration" aria-label={uiTerms.orchestration}>
     <header className="orchestration-heading">
-      <a href="#/coding" className="orchestration-back" aria-label="코딩 작업대로"><ArrowLeft size={17}/></a>
-      <h1>오케스트레이션</h1>
+      <a href="#/settings" className="orchestration-back" aria-label="설정으로"><ArrowLeft size={17}/></a>
+      <h1>{uiTerms.orchestration}</h1>
       {config && <label className="orchestration-master"><input type="checkbox" role="switch" checked={config.enabled} disabled={!editable}
         onChange={event => change({ ...config, enabled: event.target.checked })}/>위임 사용</label>}
     </header>
@@ -130,7 +124,7 @@ export function Orchestration() {
           <Button variant="add" size="sm" disabled={!editable || Object.keys(config.modelRoles).length >= 128} onClick={() => {
             const result = addNode(config, 'roles', stored.models[0]); change(result.config); select(result.node, true);
           }}>모델 역할</Button>
-          <Button variant="ghost" size="sm" disabled={!editable || importing} onClick={() => void openImport()}><Download size={15}/>하네스 가져오기</Button>
+          <Button variant="ghost" size="sm" disabled={!editable || importing} onClick={() => void openImport()}><Download size={15}/>{uiTerms.importHarness}</Button>
         </div>
         <div className="orchestration-actions orchestration-save">
           <span role="status">{saved && !dirty ? '저장됨' : ''}</span>
@@ -245,7 +239,7 @@ function SessionPolicy({ sessions, globalEnabled }: { sessions: CodingSession[];
   }, [client, sessionId]);
   const available = sessions.some(session => session.id === sessionId);
   return <details className="orchestration-session-policy">
-    <summary>세션별 위임</summary>
+    <summary>코딩 세션별 위임</summary>
     {sessions.length === 0 ? <p>열린 코딩 세션이 없습니다.</p> : <>
       <label>코딩 세션<select value={available ? sessionId : ''} disabled={busy} onChange={event => { setEnabled(null); setError(''); setSessionId(event.target.value); }}>
         <option value="">세션 선택</option>{sessions.map(session => <option key={session.id} value={session.id}>{session.title}</option>)}

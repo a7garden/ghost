@@ -1,5 +1,5 @@
 @layer components {
-  /* Frame: the project rail (or its folded strip) and the panes. */
+  /* Frame: the current project's agent rail (or its folded strip) and the panes. */
   .workbench { display: grid; grid-template-columns: clamp(12rem, 19%, 16.5rem) minmax(0, 1fr); min-width: 0; min-height: 0; color: var(--ghost-ink); }
   .workbench[data-rail='hidden'] { grid-template-columns: 44px minmax(0, 1fr); }
   .workbench-rail { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: 8px; border-inline-end: 1px solid var(--ghost-line); }
@@ -13,7 +13,7 @@
     border-radius: var(--radius-control); color: var(--ghost-amber-ink); font-size: 13px; font-weight: 600; text-align: start;
   }
   .workbench-review:hover { box-shadow: inset 0 0 0 1px var(--ghost-amber); }
-  .workbench-review .state-glyph, .workbench :is(.workbench-state, .workbench-project-signal)[data-tone='amber'] { color: var(--ghost-amber-ink); }
+  .workbench-review .state-glyph, .workbench .workbench-state[data-tone='amber'] { color: var(--ghost-amber-ink); }
   .workbench-review:disabled { cursor: wait; }
   .workbench-review__count { margin-inline-start: auto; font-variant-numeric: tabular-nums; }
   .workbench-strip .workbench-review { flex-direction: column; justify-content: center; gap: 2px; width: 32px; padding-inline: 0; }
@@ -21,33 +21,25 @@
   .workbench-strip .workbench-review__count { margin-inline-start: 0; }
 
   .workbench-rail-head { display: flex; flex: none; align-items: center; gap: 2px; padding: 0 0 4px 8px; }
-  .workbench-rail-head h2 { flex: 1; }
-  :is(.workbench-rail-head, .workbench-tools) h2 { margin: 0; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 600; }
-  .workbench-spaces { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-
-  /* Rows: a project, then under the one on screen its agents. */
-  .workbench-project { flex: none; min-width: 0; }
-  .workbench-project + .workbench-project { border-block-start: 1px solid var(--ghost-line); }
-  .workbench-project[data-selected] { padding-block-end: 4px; }
-  .workbench-space-row, .workbench-agent-row { display: flex; align-items: center; min-width: 0; }
-  .workbench-space-row > button:first-child, .workbench-agent-add, .workbench-tools li > :is(a, button) {
-    display: flex; flex: 1; min-width: 0; min-height: 34px; align-items: center; gap: 8px; padding: 5px 8px;
-    border-radius: var(--radius-control); text-align: start; color: var(--ghost-ink2); font-size: var(--workbench-row-size, 13px); font-weight: 560; text-decoration: none;
+  .workbench-rail-head h2 { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; margin: 0; color: var(--ghost-ink); font-size: var(--text-caption); font-weight: 600; }
+  .workbench-rail-head h2 a { display: flex; align-items: center; gap: inherit; min-width: 0; color: inherit; text-decoration: none; }
+  .workbench-rail-head h2 a:hover { text-decoration: underline; }
+  .workbench-rail-head h2 span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .workbench-rail-head svg, .workbench-agent-list svg, .workbench-git svg { flex: none; }
+  .workbench-agent-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-block-end: 4px; }
+  .workbench-agent-row { display: flex; align-items: center; min-width: 0; }
+  .workbench-agent-add, .workbench-git {
+    display: flex; min-width: 0; min-height: 34px; align-items: center; gap: 8px; padding: 5px 8px;
+    border-radius: var(--radius-control); text-align: start; color: var(--ghost-ink2); font-size: var(--workbench-row-size, 13px); font-weight: 560;
   }
-  .workbench-space-row > button:first-child[aria-current] { color: var(--ghost-ink); }
-  .workbench-space-row > button:first-child > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .workbench-project-signal { margin-inline-start: auto; }
-  .workbench-space-row > button[aria-label] { flex: none; opacity: 0; }
-  .workbench-space-row:is(:hover, :focus-within) > button[aria-label] { opacity: 1; }
-  .workbench-spaces svg, .workbench-tools svg { flex: none; }
   .workbench-agents { margin: 0 2px 0 8px; }
-  :is(.workbench-agents, .workbench-tools ul, .agent-launch__earlier ul) { padding: 0; list-style: none; }
-  :is(.workbench-agents, .workbench-tools ul, .agent-launch__earlier ul):has(> li + li) {
+  :is(.workbench-agents, .agent-launch__earlier ul) { padding: 0; list-style: none; }
+  :is(.workbench-agents, .agent-launch__earlier ul):has(> li + li) {
     border: 1px solid var(--ghost-line); border-radius: var(--radius-control);
   }
-  :is(.workbench-agents, .workbench-tools ul, .agent-launch__earlier ul) > li + li { border-block-start: 1px solid var(--ghost-line); }
-  :is(.workbench-agents, .workbench-tools ul, .agent-launch__earlier ul) > li:first-child { border-start-start-radius: inherit; border-start-end-radius: inherit; }
-  :is(.workbench-agents, .workbench-tools ul, .agent-launch__earlier ul) > li:last-child { border-end-start-radius: inherit; border-end-end-radius: inherit; }
+  :is(.workbench-agents, .agent-launch__earlier ul) > li + li { border-block-start: 1px solid var(--ghost-line); }
+  :is(.workbench-agents, .agent-launch__earlier ul) > li:first-child { border-start-start-radius: inherit; border-start-end-radius: inherit; }
+  :is(.workbench-agents, .agent-launch__earlier ul) > li:last-child { border-end-start-radius: inherit; border-end-end-radius: inherit; }
   .workbench-agents .touch-context { border-radius: inherit; }
   .workbench-agent-row { border-radius: inherit; }
   :is(.workbench-agent-row, .workbench-strip__agent):has(.workbench-state[data-tone='amber']) { --workbench-row-rule: var(--ghost-amber); }
@@ -79,17 +71,12 @@
   .workbench-state-word[data-state='waiting'] { color: var(--ghost-amber-ink); }
   .workbench-state-word[data-state='failed'] { color: var(--ghost-danger-ink); }
   .workbench-agent-add { width: 100%; }
-  .workbench-project > .workbench-agent-add { padding-inline-start: 17px; }
+  .workbench-agent-list > .workbench-agent-add { padding-inline-start: 16px; }
   .workbench-agent-add[aria-expanded] { border-radius: inherit; }
-  :is(.workbench-space-row > button:first-child, .workbench-agent-add, .workbench-tools li > :is(a, button), .agent-launch__earlier .workbench-agent-open):hover,
+  :is(.workbench-agent-add, .workbench-git, .agent-launch__earlier .workbench-agent-open):hover,
   .workbench-agent-row:not([data-selected]):hover { background: var(--ghost-hover); }
   .workbench-agent-add[data-selected] { color: var(--ghost-ink); background: var(--ghost-hover2); }
-  .workbench-project-draft { display: flex; align-items: center; gap: 2px; padding: 2px 0 6px; }
-  .workbench-project-draft input { min-width: 0; flex: 1; }
-  .workbench-tools { flex: none; padding-block-start: 12px; }
-  .workbench-tools h2 { padding: 0 8px 4px; }
-  .workbench-tools ul { margin: 0; }
-  .workbench-tools li > :is(a, button) { width: 100%; border-radius: inherit; }
+  .workbench-git { flex: none; margin-block-start: 8px; }
 
   /* Panes: side by side on wide screens, one at a time on the phone. */
   .workbench-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -190,16 +177,17 @@
   .workbench-menu button[data-danger] { color: var(--ghost-danger-ink); }
   .workbench :is(button, a, input, [role='separator']):focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: -2px; }
 
-  /* Phone: /coding is the roster — projects and their agents with the tab bar beneath. An agent or the launch pad is a screen
-     of its own: one row on top (state, name, terminal, changes, menu) and the composer alone on the bottom edge. */
+  /* Phone: the tab bar stays under the project's agent roster. A session or launch owns the composer instead. */
   .workbench[data-compact] { --workbench-row-size: 15px; display: flex; flex-direction: column; }
   .workbench[data-compact] .workbench-main { flex: 1; }
   .workbench[data-compact] .workbench-rail { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 6px 14px 20px; border-inline-end: 0; }
-  .workbench[data-compact] .workbench-rail-head { padding-inline-start: 8px; }
-  .workbench[data-compact] .workbench-spaces { flex: none; overflow: visible; }
-  .workbench[data-compact] .workbench-spaces > .workbench-agent-add { color: var(--ghost-ink); margin-block-end: 6px; }
-  .workbench[data-compact] :is(.workbench-space-row > button:first-child, .workbench-agent-open, .workbench-agent-add, .workbench-tools li > :is(a, button), .workbench-review) { min-height: 48px; }
-  .workbench[data-compact] .workbench-space-row > button[aria-label] { opacity: 1; }
+  .workbench[data-compact] .workbench-rail-head h2 { font-size: var(--workbench-row-size); }
+  .workbench[data-compact] .workbench-rail-head > :is(a, button) { min-width: 44px; min-height: 44px; }
+  .workbench[data-compact] .workbench-agent-list { flex: none; overflow: visible; }
+  .workbench[data-compact] .workbench-agent-list > .workbench-agent-add { color: var(--ghost-ink); margin-block-end: 6px; }
+  .workbench[data-compact] :is(.workbench-agent-open, .workbench-agent-add, .workbench-git, .workbench-review) { min-height: 48px; }
+  .workbench-project-sheet { max-height: 86dvh; overflow-y: auto; }
+  .workbench-project-sheet .sidebar-project { min-height: 44px; }
   .workbench[data-compact] .workbench-pane__head { gap: 6px; padding: 2px 2px 2px 12px; min-height: 48px; }
   .workbench[data-compact] .workbench-pane__actions > button { min-width: 44px; min-height: 44px; }
   .workbench[data-compact] .workbench-pane__actions > button > span { display: none; }

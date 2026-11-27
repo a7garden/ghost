@@ -8,6 +8,7 @@ import { NoEffect } from "../core/effects.ts";
 import { idFor } from "../core/ids.ts";
 import { NotFound } from "../ledger/ledger.ts";
 import { markPolicyRead, policyRead } from "../core/policy-context.ts";
+import { orchestrationStore } from "../orchestration/config.ts";
 
 /** What one tool call is bound to. Resolved from the ledger row of the calling conversation, never from model arguments. */
 export interface Scope {
@@ -126,6 +127,7 @@ export function requireAllowed(core: Core, api: Pick<ToolExecutionApi, "conversa
     if (!selected.includes(name)) throw forbidden(`${name} was not selected for this subagent`);
   } else if (!kinds.includes(kind)) throw forbidden(`${name} does not run in a ${scope.conversation.kind} conversation`);
   if (!matchesToolPatterns(scope.ghost.tools, name)) throw forbidden(`${name} is not enabled for ${scope.ghost.name}; if the goal needs it, ask once with capability_request (tools: ["${name}"]) and end your turn`);
+  if (name === "subagent_run" && !orchestrationStore(core.ledger).get().enabled) throw forbidden("subagent orchestration is disabled");
   if (!workAllowsTool(core, scope.work, name)) throw forbidden(`${name} is outside this Work's activity rule, which only the owner changes; do the step with another tool or report it in complete`);
   if (scope.work?.execution?.kind === "host" && ["read", "write", "edit", "bash", "publish_artifact", "code_agents", "code_run"].includes(name) && !scope.ghost.hostExecution) throw forbidden("direct PC execution was revoked by the owner");
   if (scope.work && scope.ghost.state !== "active") throw forbidden("the executing Ghost is no longer active");

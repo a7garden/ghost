@@ -3,9 +3,8 @@ import type { CodingSession, PiPackage, PiSettings, PiSettingsOverrides } from '
 import type { PiGlobalConfig, PiSessionView } from '../host/client';
 import { useHost } from '../host/context';
 import { Button, InlineError, SettingsGroup, SettingsRow, SkeletonRows } from '../ui';
-import { useEmbeddedModels } from './CodingSessionLive';
 import { codingBusy, codingError } from './CodingSessionModel';
-import { PI_BASE_TOOLS, PiCompactionFields, PiDeliveryField, PiDisclosure, PiImageField, PiModelFields, PiRetryFields, PiToolFields } from './PiConfigFields';
+import { PI_BASE_TOOLS, PiCompactionFields, PiDeliveryField, PiDisclosure, PiImageField, PiRetryFields, PiToolFields } from './PiConfigFields';
 import { PiConfigPackages, PiPackageRows } from './PiConfigPackages';
 import './PiConfig.css';
 import './SettingsLists.css';
@@ -13,7 +12,6 @@ import './SettingsLists.css';
 export function PiConfigSettings() {
   const { client } = useHost();
   const formId = useId();
-  const { models, error: modelError, reload: reloadModels } = useEmbeddedModels(true);
   const [config, setConfig] = useState<PiGlobalConfig>();
   const [draft, setDraft] = useState<PiSettings>();
   const [packages, setPackages] = useState<PiPackage[]>([]);
@@ -53,8 +51,6 @@ export function PiConfigSettings() {
         }, reason => setError(codingError(reason, '코딩 설정을 저장하지 못했습니다.'))).finally(() => setSaving(false));
       }}>
         <fieldset disabled={saving}>
-          <PiModelFields value={draft} models={models} change={change}/>
-          {modelError && <InlineError onRetry={reloadModels} retryLabel="다시 불러오기">{modelError}</InlineError>}
           <PiDisclosure label="맥락 압축" value={draft.compaction.enabled ? '켬' : '끔'}>
             <PiCompactionFields value={draft.compaction} change={compaction => change({ ...draft, compaction })}/>
           </PiDisclosure>
@@ -151,9 +147,6 @@ export function PiSessionSettings({ session, disabled }: { session: CodingSessio
         }, '세션 설정을 저장하지 못했습니다.');
       }}>
         <fieldset disabled={locked}>
-          {(draft.model !== undefined || draft.thinking !== undefined) && <SettingsRow label="모델과 생각 수준">
-            <Button size="sm" type="button" variant="ghost" onClick={() => setDraft(({ model: _model, thinking: _thinking, ...rest }) => rest)}>전역 기본값 사용</Button>
-          </SettingsRow>}
           <LocalField label="맥락 압축" current={draft.compaction} fallback={defaults.compaction}
             change={compaction => setDraft({ ...draft, compaction })}
             render={value => <PiCompactionFields value={{ ...defaults.compaction, ...value }} change={compaction => setDraft({ ...draft, compaction })}/>}/>

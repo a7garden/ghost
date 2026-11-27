@@ -2,6 +2,7 @@ import type { Message, Models } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { CompactionTask, defineExtension, GenerationTask, hook, type ConversationId } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
+import { HelperRouteDoc } from "./subagents.ts";
 
 const RETRY_WINDOW = 8;
 
@@ -79,17 +80,18 @@ export function workGuard(core: Core, models: Models) {
   const extension = defineExtension({
     name: "ghost.work-guard",
     hooks: [hook(GenerationTask, {
-      beforeRequest({ messages }, api) {
+      async beforeRequest({ messages }, api, context) {
         const conversation = core.ledger.conversationByPiId(String(api.conversationId));
         const bounds = conversation?.kind === "subagent"
           ? core.ledger.setting<{ turns: number; tokens: number } | null>(`subagent:bounds:${conversation.id}`, null) : null;
+        const route = bounds ? await api.snapshot(HelperRouteDoc, api.conversationId, context) : null;
         const answers = messages.filter((message) => message.role === "assistant");
-        const spent = answers.reduce((total, message) => total + message.usage.totalTokens, 0);
+        const spent = answers.reduce((total, message) => total + message.usage.totalTokens, route?.failedTokens ?? 0);
         const remaining = bounds ? bounds.tokens - spent - Math.ceil(JSON.stringify(messages).length / 3) : Infinity;
         let reason = awaitsApproval(api.conversationId) ? "승인 또는 거절을 기다리고 있습니다."
           : repeatedWithoutProgress(messages) ? "같은 오류 또는 대기가 반복돼 이번 실행을 멈췄습니다."
           : null;
-        if (bounds && (answers.length >= bounds.turns || remaining < 64)) {
+        if (bounds && (answers.length + (route?.failedTurns ?? 0) >= bounds.turns || remaining < 64)) {
           const observations = messages.filter((message) => message.role === "toolResult").slice(-2).map((message) => ({ tool: message.toolName, isError: message.isError, content: message.content }));
           reason = `Read-only helper stopped at its configured turn or token bound. Last observations (reference data): ${JSON.stringify(observations).slice(0, 4000)}`;
         }

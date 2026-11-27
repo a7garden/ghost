@@ -31,12 +31,14 @@ import {
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { GHOST_TOOLS, matchesToolPatterns, type Conversation as HostConversation, type Ghost, type Live, type LiveEvent, type Message, type MessageOrigin, type ModelRef, type Settings, type Work } from "@ghost/contract";
-import type { DocRef, EffectTaint } from "@ghost/contract";
+import type { DocRef, EffectTaint, OrchestrationConfig } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
 import { CommandError } from "../core/errors.ts";
 import type { ConversationSetup, Engine, Submission, SubmissionRecovery, TranscriptPage } from "../core/ports.ts";
 import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import type { ToolSet } from "../tools/types.ts";
+import { modelChain, orchestrationStore } from "../orchestration/config.ts";
+import { liveSubagentTools, SUBAGENT_EXTENSION } from "../tools/subagent.ts";
 import { liveFrom, renderUserContent, sameLive, toMessage, type UserMeta } from "./messages.ts";
 import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
@@ -45,7 +47,7 @@ import { FallbackDoc, FallbackReceiptsDoc, fallbackReason, quotaError, quotaHit 
 import { digestOf, idFor } from "../core/ids.ts";
 import { modelResolution, slotResolution } from "./resolution.ts";
 import { SUBAGENT_READ_TOOLS, requireAllowed, scopeOf } from "../tools/shared.ts";
-import { HelpersDoc, WakeRepliesDoc } from "./subagents.ts";
+import { HelperRouteDoc, HelpersDoc, WakeRepliesDoc, helperRole, subagentRegistry, type HelperRole } from "./subagents.ts";
 import { withClockStamp } from "../core/clock.ts";
 import { recordMetricUsage } from "../core/metrics.ts";
 import { connectionToolName, mcpToolName } from "../tools/dynamic.ts";
@@ -150,6 +152,7 @@ class HostEngine implements Engine, MemoryEngine {
   /** Listeners that arrived before the conversation was opened. */
   private readonly pendingListeners = new Map<string, Set<(event: LiveEvent) => void>>();
   private readonly unsubscribeLedger: () => void;
+  private readonly unsubscribeOrchestration?: () => void;
   private readonly commits: CommitObservation;
   private readonly memory?: MemoryStore;
   private readonly memoryCatchups = new Map<string, Promise<void>>();
@@ -159,6 +162,7 @@ class HostEngine implements Engine, MemoryEngine {
   private metricCatchup: Promise<void> | null = null;
   private memoryRepair: Promise<void> | null = null;
   private readonly toolLoads = new Map<number, Promise<void>>();
+  private readonly runningHelpers = new Map<string, number>();
   private closing = false;
 
   constructor(deps: EngineDeps, harness: Harness, private readonly models: Models, ownedModels: MutableModels | null, private readonly registry: Registry, private readonly guardExtension: Extension) {
@@ -234,7 +238,7 @@ class HostEngine implements Engine, MemoryEngine {
         onYield: async (_answer, api): Promise<undefined> => {
           const state = this.byPiId.get(api.conversationId);
           const conversation = state && this.core.ledger.findConversation(state.hostId);
-          if (!state || !conversation) return;
+          if (!state || !conversation || conversation.kind === "subagent") return;
           if (conversation.kind === "direct") await this.compactDirect(state);
           const ghost = this.core.ledger.ghost(conversation.ghostId);
           const work = conversation.workId ? this.core.ledger.work(conversation.workId) : null;
@@ -276,6 +280,13 @@ class HostEngine implements Engine, MemoryEngine {
       })],
     });
     registry.install(this.fallbackExtension);
+    const helpers = registry.snapshot().extension(SUBAGENT_EXTENSION);
+    if (helpers) {
+      const store = orchestrationStore(this.core.ledger);
+      const update = (config: OrchestrationConfig) => registry.install(liveSubagentTools(helpers, config));
+      update(store.get());
+      this.unsubscribeOrchestration = store.subscribe(update);
+    }
     this.unsubscribeLedger = this.core.ledger.subscribe((event) => {
       if (event.data.type === "settings") this.rebuildModels();
     });
@@ -296,6 +307,7 @@ class HostEngine implements Engine, MemoryEngine {
       } });
     } catch (error) {
       this.unsubscribeLedger();
+      this.unsubscribeOrchestration?.();
       throw error;
     }
   }
@@ -359,7 +371,8 @@ class HostEngine implements Engine, MemoryEngine {
   private instructionsFor({ conversation, ghost, work }: ConversationSetup): string | undefined {
     const kind = this.tools.instructionsFor(conversation, ghost, work);
     if (work) markPolicyRead(this.core, conversation.id, this.core.ledger.setting<EffectTaint>(`work:source-taint:${work.id}`, { untrustedInput: false, privateData: false }));
-    return [ghost.persona, kind].filter(Boolean).join("\n\n").trim() || undefined;
+    const role = conversation.kind === "subagent" ? helperRole(this.core, conversation.id) : null;
+    return [role?.instructions ?? ghost.persona, kind].filter(Boolean).join("\n\n").trim() || undefined;
   }
 
   private memoryFor({ conversation, ghost }: ConversationSetup): string | undefined {
@@ -388,7 +401,9 @@ class HostEngine implements Engine, MemoryEngine {
   /** Apply the conversation's agent: model, thinking level, instructions and tools. */
   private async configure(state: ConversationState, setup: ConversationSetup, servingModel?: ModelRef): Promise<void> {
     const { conversation, ghost, work } = setup;
-    const model = servingModel ?? this.resolveModel(this.core.ledger.settings(), conversation, ghost, work);
+    const role = conversation.kind === "subagent" ? helperRole(this.core, conversation.id) : null;
+    // A permission refresh must not overwrite a route already handed off in Pi.
+    const model = servingModel ?? (role ? undefined : this.resolveModel(this.core.ledger.settings(), conversation, ghost, work));
     let extensions = [...this.tools.extensionsFor(conversation, ghost, work), this.fallbackExtension];
     if (conversation.kind === "work" || conversation.kind === "subagent") extensions.push(this.guardExtension);
     if (this.tools.prepare) extensions = await this.tools.prepare(conversation, ghost, work, extensions);
@@ -426,8 +441,8 @@ class HostEngine implements Engine, MemoryEngine {
     }
     await state.pi.configure(
       {
-        model: model ? { provider: model.provider, modelId: model.model } : null,
-        thinkingLevel: model?.thinking ?? "off",
+        model: model ? { provider: model.provider, modelId: model.model } : model,
+        thinkingLevel: model === undefined ? undefined : model?.thinking ?? "off",
         extensions,
         tools: grantedTools,
         instructions: null,
@@ -483,6 +498,10 @@ class HostEngine implements Engine, MemoryEngine {
       this.core.catalog.modelsFor(provider, this.core.secrets.credential(provider.id)?.type).some((item) => item.id === model.model);
   }
 
+  private usableHelperModel(model: ModelRef, settings: Settings): boolean {
+    return this.usable(model, settings) && !this.core.quota.blocked(model.provider) && this.models.getModel(model.provider, model.model) !== undefined;
+  }
+
   // Submitting
   async wake(ghostId: string, submission: Submission, options: { slot?: string; decisionId?: string; ownerConversationId?: string; sourceConversationId?: string } = {}): Promise<void> {
     const ghost = this.core.ledger.ghost(ghostId);
@@ -525,56 +544,90 @@ class HostEngine implements Engine, MemoryEngine {
     return name.startsWith("conn.") && this.core.ledger.connections().some((connection) => connectionToolName(connection.id) === name);
   }
 
-  async runSubagent(parentId: string, input: { task: string; tools?: string[]; max_turns?: number; max_tokens?: number }, api: ToolExecutionApi, context: Context): Promise<string> {
+  async runSubagent(parentId: string, input: Parameters<NonNullable<Engine["runSubagent"]>>[1], api: ToolExecutionApi, context: Context): Promise<string> {
     const recorded = await api.memo<string>("result", context);
     if (recorded !== undefined) return recorded;
+    const config = orchestrationStore(this.core.ledger).get();
+    if (!config.enabled) throw new CommandError("forbidden", "subagent orchestration is disabled");
     const parent = this.core.ledger.conversation(parentId);
     if (!["direct", "wake", "work"].includes(parent.kind)) throw new CommandError("forbidden", "subagents cannot spawn helpers");
-    const ghost = this.core.ledger.ghost(parent.ghostId);
-    const work = parent.workId ? this.core.ledger.work(parent.workId) : null;
-    const parentState = await this.ensureState(parentId);
-    const agent = await parentState.pi.agent(context);
-    const offered = agent.tools.map((tool) => tool.name);
-    const allowed = offered.filter((name) => this.helperRead(name) && (!input.tools || input.tools.includes(name)));
-    if (input.tools?.some((name) => !allowed.includes(name))) throw new CommandError("forbidden", "helper tools must be a read-only subset of the parent's current tools");
-    const inherited = this.core.ledger.setting<{ scopeId: string | null; docAttachments: DocRef[] }>(`context:${parentId}`, { scopeId: work?.scopeId ?? null, docAttachments: [] });
-    const id = idFor(parentId, `subagent:${api.callId}`);
-    const piId = await api.commit(async (tx) => {
-      const helpers = await tx.doc(HelpersDoc, api.conversationId);
-      if (helpers.byCall[api.callId] !== undefined) return helpers.byCall[api.callId]!;
-      const child = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
-      helpers.byCall[api.callId] = child.id;
-      return child.id;
-    }, context);
-    this.core.ledger.tx(() => {
-      if (!this.core.ledger.findConversation(id)) {
-        const child = this.core.newConversation(ghost.id, "subagent", null, "Read-only helper", id);
-        child.model = agent.model ? { provider: agent.model.provider, model: agent.model.modelId, thinking: agent.thinkingLevel === "low" || agent.thinkingLevel === "medium" || agent.thinkingLevel === "high" ? agent.thinkingLevel : "off" } : null;
-        this.core.ledger.putConversation(child);
-        this.core.ledger.putSetting(`subagent:parent:${id}`, parentId);
-        this.core.ledger.putSetting(`subagent:work:${id}`, parent.workId);
-        this.core.ledger.putSetting(`subagent:scope:${id}`, inherited.scopeId);
-        this.core.ledger.putSetting(`subagent:tools:${id}`, allowed);
-        this.core.ledger.putSetting(`subagent:bounds:${id}`, { turns: input.max_turns ?? 12, tokens: input.max_tokens ?? 16000 });
-      }
-      this.core.ledger.setPiConversationId(id, String(piId));
-    });
-    markPolicyRead(this.core, id, policyTaint(this.core, parentId));
-    const handle = await api.conversation(piId as ConversationId, context);
-    if (!handle) throw new CommandError("unavailable", "helper conversation is missing");
+    const active = this.runningHelpers.get(parentId) ?? 0;
+    if (active >= config.limits.maxConcurrency) throw new CommandError("conflict", "subagent concurrency limit reached");
+    this.runningHelpers.set(parentId, active + 1);
     try {
-      context.abortSignal?.throwIfAborted();
-      await this.submit(id, { text: input.task, origin: "work", requestId: `subagent:${api.callId}`, ...inherited });
-      await handle.waitForIdle(context);
-      const childState = await this.ensureState(id);
-      const entries = await childState.pi.entries({}, 20, undefined, context);
-      const final = entries.items.find((entry) => entry.kind === "pi.assistant")?.model?.find((item): item is AssistantMessage => item.role === "assistant");
-      const answer = final && (final.stopReason === "stop" || final.stopReason === "length")
-        ? final.content.filter((part) => part.type === "text").map((part) => part.text).join("\n")
-        : `Read-only helper ended without a final answer: ${final?.errorMessage ?? final?.stopReason ?? "no assistant entry"}`;
-      return await api.memo("result", answer, context);
+      const work = parent.workId ? this.core.ledger.work(parent.workId) : null;
+      const parentState = await this.ensureState(parentId);
+      const agent = await parentState.pi.agent(context);
+      const offered = agent.tools.map((tool) => tool.name);
+      const allowed = offered.filter((name) => this.helperRead(name) && (!input.tools || input.tools.includes(name)));
+      if (input.tools?.some((name) => !allowed.includes(name))) throw new CommandError("forbidden", "helper tools must be a read-only subset of the parent's current tools");
+      const inherited = this.core.ledger.setting<{ scopeId: string | null; docAttachments: DocRef[] }>(`context:${parentId}`, { scopeId: work?.scopeId ?? null, docAttachments: [] });
+      const id = idFor(parentId, `subagent:${api.callId}`);
+      const previous = this.core.ledger.findConversation(id);
+      const parentModel = agent.model && { provider: agent.model.provider, model: agent.model.modelId };
+      const thinking = agent.thinkingLevel === "low" || agent.thinkingLevel === "medium" || agent.thinkingLevel === "high" ? agent.thinkingLevel : "off";
+      let role = previous ? helperRole(this.core, id) : null;
+      if (!previous && input.agent !== undefined) {
+        const selected = config.agents.find(candidate => candidate.name === input.agent);
+        if (!selected) throw new CommandError("invalid", `unknown orchestration agent: ${input.agent}`);
+        if (!selected.readOnly) throw new CommandError("forbidden", `orchestration agent ${selected.name} is not read-only`);
+        if (!parentModel) throw new CommandError("unavailable", "the parent conversation has no resolved model");
+        const chain = modelChain(config, selected.modelRole, { model: parentModel, thinking })
+          .map<ModelRef>(({ provider, model, thinking }) => ({ provider, model, thinking: thinking ?? "off" }));
+        const settings = this.core.ledger.settings();
+        const first = chain.findIndex(model => this.usableHelperModel(model, settings));
+        if (first < 0) throw new CommandError("unavailable", `no usable model for orchestration role ${selected.modelRole}`);
+        role = { modelRole: selected.modelRole, instructions: selected.instructions, models: chain.slice(first) };
+      }
+      const piId = await api.commit(async (tx) => {
+        const helpers = await tx.doc(HelpersDoc, api.conversationId);
+        if (helpers.byCall[api.callId] !== undefined) return helpers.byCall[api.callId]!;
+        const child = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
+        helpers.byCall[api.callId] = child.id;
+        return child.id;
+      }, context);
+      this.core.ledger.tx(() => {
+        if (!this.core.ledger.findConversation(id)) {
+          const child = this.core.newConversation(parent.ghostId, "subagent", null, "Read-only helper", id);
+          child.model = role?.models[0] ?? (parentModel ? { ...parentModel, thinking } : null);
+          this.core.ledger.putConversation(child);
+          this.core.ledger.putSetting(`subagent:parent:${id}`, parentId);
+          this.core.ledger.putSetting(`subagent:work:${id}`, parent.workId);
+          this.core.ledger.putSetting(`subagent:scope:${id}`, inherited.scopeId);
+          this.core.ledger.putSetting(`subagent:tools:${id}`, allowed);
+          this.core.ledger.putSetting(`subagent:bounds:${id}`, { turns: input.max_turns ?? 12, tokens: input.max_tokens ?? 16000 });
+          if (role) this.core.ledger.putSetting(`subagent:role:${id}`, role);
+        }
+        this.core.ledger.setPiConversationId(id, String(piId));
+      });
+      markPolicyRead(this.core, id, policyTaint(this.core, parentId));
+      const handle = await api.conversation(piId as ConversationId, context);
+      if (!handle) throw new CommandError("unavailable", "helper conversation is missing");
+      try {
+        context.abortSignal?.throwIfAborted();
+        await this.submit(id, { text: input.task, origin: "work", requestId: `subagent:${api.callId}`, ...inherited });
+        const childState = await this.ensureState(id);
+        for (;;) {
+          await handle.waitForIdle(context);
+          const entries = await childState.pi.entries({}, 20, undefined, context);
+          const final = entries.items.find((entry) => entry.kind === "pi.assistant")?.model?.find((item): item is AssistantMessage => item.role === "assistant");
+          const quota = role && final && quotaHit(final);
+          if (role && quota) {
+            if (await this.continueFallback(childState, role, context)) continue;
+            throw new CommandError("unavailable", `no remaining usable model for orchestration role ${role.modelRole}: ${quota.reason}`);
+          }
+          const answer = final && (final.stopReason === "stop" || final.stopReason === "length")
+            ? final.content.filter((part) => part.type === "text").map((part) => part.text).join("\n")
+            : `Read-only helper ended without a final answer: ${final?.errorMessage ?? final?.stopReason ?? "no assistant entry"}`;
+          return await api.memo("result", answer, context);
+        }
+      } finally {
+        if (context.abortSignal?.aborted) await handle.abort(ctx);
+      }
     } finally {
-      if (context.abortSignal?.aborted) await handle.abort(ctx);
+      const remaining = this.runningHelpers.get(parentId)! - 1;
+      if (remaining) this.runningHelpers.set(parentId, remaining);
+      else this.runningHelpers.delete(parentId);
     }
   }
 
@@ -992,6 +1045,7 @@ class HostEngine implements Engine, MemoryEngine {
     this.closing = true;
     await Promise.allSettled(this.core.ledger.conversations().filter((host) => host.kind === "subagent").map(async (host) => (await this.stateFor(host.id))?.pi.abort(ctx)));
     await Promise.allSettled([...this.memoryCatchups.values(), this.memoryRepair, this.metricCatchup, ...this.toolLoads.values()]);
+    this.unsubscribeOrchestration?.();
     this.unsubscribeLedger();
     this.commits.detach();
     await Promise.allSettled([...this.states.values()].map((state) => state.dispatch));
@@ -1143,6 +1197,8 @@ class HostEngine implements Engine, MemoryEngine {
     if (!end || state.aborted) return false;
     const conversation = this.core.ledger.findConversation(state.hostId);
     if (!conversation) return false;
+    // Named helpers settle inside their parent tool task, never in the background quota queue.
+    if (conversation.kind === "subagent" && helperRole(this.core, conversation.id)) return false;
     const settings = this.core.ledger.settings();
     const ghost = this.core.ledger.ghost(conversation.ghostId);
     const work = conversation.workId ? this.core.ledger.work(conversation.workId) : null;
@@ -1164,31 +1220,32 @@ class HostEngine implements Engine, MemoryEngine {
   }
 
   /** Continue committed context, not input: no second user entry or request-id admission. */
-  private async continueFallback(state: ConversationState): Promise<boolean> {
+  private async continueFallback(state: ConversationState, helper?: HelperRole, context = ctx): Promise<boolean> {
     // Merely opening an idle historical conversation must not retry its old error.
-    if (!state.busy || state.aborted) return false;
+    if ((!helper && !state.busy) || state.aborted || this.closing) return false;
     const conversation = this.core.ledger.findConversation(state.hostId);
     if (!conversation) return false;
     const settings = this.core.ledger.settings();
     const ghost = this.core.ledger.ghost(conversation.ghostId);
     const work = conversation.workId ? this.core.ledger.work(conversation.workId) : null;
-    if (!this.allowsFallback(settings, conversation, work)) return false;
-    const primary = this.resolveModel(settings, conversation, ghost, work);
-    if (!primary || this.resolution(settings, conversation, ghost, work).fallbacks.length === 0) return false;
+    const candidates = helper?.models ?? this.resolution(settings, conversation, ghost, work).fallbacks;
+    if (!candidates.length) return false;
     const switched = await state.pi.commit(async (tx) => {
       const live = await tx.doc(LiveDoc, state.piId);
-      if (state.aborted || live.run) return null; // Pi's own retry or another input is still running.
+      if (state.aborted || this.closing || live.run) return null; // Pi's own retry or another input is still running.
       const entries = await tx.scanEntries({ conversationId: state.piId }, 10);
       const tail = entries.items.find((entry) => entry.kind === "pi.assistant" || entry.kind === "pi.user");
       if (!tail || tail.kind !== "pi.assistant") return null;
       const message = tail.model?.find((item): item is AssistantMessage => item.role === "assistant");
-      const reason = message ? fallbackReason(message) : null;
+      const reason = message ? (helper ? quotaHit(message)?.reason ?? null : fallbackReason(message)) : null;
       if (!message || reason === null) return null;
       const fallback = await tx.doc(FallbackDoc, state.piId);
       if (fallback.lastError >= tail.id) return null;
-      const candidates = this.resolution(settings, conversation, ghost, work).fallbacks;
-      const failedIndex = candidates.findIndex((candidate) => candidate.provider === message.provider && candidate.model === message.model);
-      const next = candidates.slice(failedIndex + 1).find((candidate) => this.available(candidate, settings));
+      const route = helper ? await tx.doc(HelperRouteDoc, state.piId) : null;
+      const failedIndex = route?.index ?? candidates.findIndex((candidate) => candidate.provider === message.provider && candidate.model === message.model);
+      const nextIndex = candidates.findIndex((candidate, index) => index > failedIndex &&
+        (helper ? this.usableHelperModel(candidate, settings) : this.available(candidate, settings)));
+      const next = candidates[nextIndex];
       fallback.lastError = tail.id;
       if (!next) return null;
       let input = entries.items.find((entry) => entry.kind === "pi.user");
@@ -1199,6 +1256,11 @@ class HostEngine implements Engine, MemoryEngine {
         below = older.items.at(-1)?.id;
       }
       if (!input) return null;
+      if (route) {
+        route.index = nextIndex;
+        route.failedTurns++;
+        route.failedTokens += message.usage.totalTokens;
+      }
       const receipts = await tx.doc(FallbackReceiptsDoc, state.piId);
       await configureAgent(tx, state.piId, {
         model: { provider: next.provider, modelId: next.model },
@@ -1213,7 +1275,7 @@ class HostEngine implements Engine, MemoryEngine {
       const taskId = await tx.createTask(GenerationTask, {}, { conversationId: state.piId, ownership: { kind: "conversation" } });
       live.run = { taskId, inputs: [receipt.id], turns: 0 };
       return { from: { provider: message.provider, model: message.model }, next, reason };
-    }, ctx);
+    }, context);
     if (!switched) return false;
     this.logFallback(state, switched.from, switched.next, switched.reason);
     this.setBusy(state, true);
@@ -1589,7 +1651,7 @@ export async function createEngine(deps: EngineDeps): Promise<Engine & MemoryEng
       storage,
       {
         models: guard.models,
-        registry: memoryRegistry(registry),
+        registry: subagentRegistry(memoryRegistry(registry), core),
         settings: {
           ...deps.harnessSettings,
           followUpMode: "one-at-a-time",

@@ -71,7 +71,7 @@ export interface Engine extends Partial<MemoryEngine> {
   answer?(conversationId: string, requestId: string, signal: AbortSignal): Promise<string | null>;
   /** Fresh, deterministic background conversation; no background transcript enters the owner's thread. */
   wake?(ghostId: string, submission: Submission, options?: { slot?: string; decisionId?: string; ownerConversationId?: string; sourceConversationId?: string }): Promise<void>;
-  runSubagent?(parentId: string, input: { task: string; tools?: string[]; max_turns?: number; max_tokens?: number }, api: ToolExecutionApi, context: Context): Promise<string>;
+  runSubagent?(parentId: string, input: { task: string; agent?: string; tools?: string[]; max_turns?: number; max_tokens?: number }, api: ToolExecutionApi, context: Context): Promise<string>;
   /** Stop the current run and withdraw queued inputs. */
   abort(conversationId: string): Promise<void>;
   page(conversationId: string, before: string | null, limit: number): Promise<TranscriptPage>;

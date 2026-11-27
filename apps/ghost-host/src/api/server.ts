@@ -676,7 +676,11 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         const method = request.method;
         if (pathname === "/api/coding/models" && method === "GET") {
           core.codexCatalog.sync();
-          return json({ models: new CodingModels({ settings: () => core.ledger.settings(), secrets: core.secrets, catalog: core.catalog }).list() });
+          const models = new CodingModels({ settings: () => core.ledger.settings(), secrets: core.secrets, catalog: core.catalog });
+          const remembered = sessions instanceof CodingSessions ? sessions.piConfig.defaults() : { model: null, thinking: null };
+          const preferred = models.preferred(remembered.model);
+          const same = preferred && remembered.model?.provider === preferred.provider && remembered.model.model === preferred.model;
+          return json({ models: models.list(), last: preferred ? { ...preferred, thinking: same ? remembered.thinking : null } : null });
         }
         if (pathname === "/api/coding/sessions") {
           if (method === "GET") return json(sessions.list());

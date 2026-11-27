@@ -40,6 +40,9 @@ export const uiTerms = {
   persona: '페르소나',
   ghostSettings: 'Ghost 설정',
   settings: '설정',
+  orchestration: '오케스트레이션',
+  importHarness: '하네스 가져오기',
+  noProject: '프로젝트 없음',
 } as const;
 
 export const routeLabels = {

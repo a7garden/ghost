@@ -62,13 +62,16 @@
   .ghost-sidebar .presence-row__main[data-dimmed] .dot-avatar { filter: grayscale(.85); opacity: .6; }
   .ghost-sidebar .presence-row__name { color: var(--ghost-ink); font-size: 15px; font-weight: 560; }
   .ghost-sidebar .sidebar-count { font-size: var(--text-caption); }
-  .ghost-sidebar .sidebar-projects { display: flex; flex-direction: column; }
+  .sidebar-projects { display: flex; flex-direction: column; }
   .ghost-sidebar .sidebar-project { min-height: 28px; align-items: baseline; padding-block: 5px; }
-  .ghost-sidebar .sidebar-project > svg { align-self: center; }
+  .sidebar-project > svg { align-self: center; }
   /* Projects under a Ghost share the name's start: row inset + portrait + gap. */
   .ghost-sidebar .sidebar-project--nested { padding-inline-start: 44px; font-size: var(--text-caption); font-weight: 500; }
   .sidebar-project__paused { flex: none; margin-inline-start: auto; color: var(--ghost-ink3); font-size: var(--text-caption); }
-  .ghost-sidebar :is(.presence-row__main, .sidebar-project)[aria-current='page'] {
+  .sidebar-project__signal { flex: none; margin-inline-start: auto; }
+  .sidebar-project__signal[data-tone='amber'] { color: var(--ghost-amber-ink); }
+  .sidebar-project.sidebar-project--unscoped { color: var(--ghost-ink3); }
+  .ghost-sidebar .presence-row__main[aria-current='page'], .sidebar-project[aria-current='page'] {
     background: var(--ghost-hover2);
     box-shadow: inset 2px 0 var(--roster-state, var(--ghost-ink3));
   }
@@ -76,6 +79,6 @@
   .ghost-sidebar .presence-row__main[data-tone='working'] { --roster-state: var(--ghost-signal); }
   .ghost-sidebar :is(.presence-row__main, .sidebar-project):focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
   @media (pointer: coarse) {
-    .ghost-sidebar .sidebar-project { min-height: 44px; align-items: center; }
+    .sidebar-project { min-height: 44px; align-items: center; }
   }
 }

@@ -1,37 +1,6 @@
 import { useId, type ReactNode } from 'react';
 import type { PiSettings } from '@ghost/contract';
-import type { CodingSessionModel } from '../host/client';
 import { Input, SettingsRow, Switch } from '../ui';
-import { codingThinkingLabels, codingThinkingOptions, modelKey } from './CodingSessionModel';
-
-export function PiModelFields({ value, models, change }: {
-  value: PiSettings; models: CodingSessionModel[] | null; change(value: PiSettings): void;
-}) {
-  const id = useId();
-  const key = value.model ? modelKey(value.model) : '';
-  const model = models?.find(row => modelKey(row) === key);
-  const levels = model ? codingThinkingOptions(model) : Object.keys(codingThinkingLabels) as PiSettings['thinking'][];
-  return <>
-    <SettingsRow label="기본 모델" htmlFor={`${id}-model`}>
-      <select id={`${id}-model`} value={key} onChange={event => {
-        const next = models?.find(item => modelKey(item) === event.target.value);
-        change({ ...value, model: next ? { provider: next.provider, model: next.model } : null,
-          thinking: next && value.thinking && !codingThinkingOptions(next).includes(value.thinking) ? null : value.thinking });
-      }}>
-        <option value="">Host 기본 모델</option>
-        {value.model && !model && <option value={key}>{value.model.model} · {value.model.provider}</option>}
-        {models?.map(item => <option key={modelKey(item)} value={modelKey(item)}>{item.name} · {item.provider}</option>)}
-      </select>
-    </SettingsRow>
-    <SettingsRow label="생각 수준" htmlFor={`${id}-thinking`}>
-      <select id={`${id}-thinking`} value={value.thinking ?? ''} onChange={event => change({ ...value,
-        thinking: levels.find(level => level === event.target.value) ?? null })}>
-        <option value="">모델 기본값</option>
-        {levels.flatMap(level => level ? [<option value={level} key={level}>{codingThinkingLabels[level]}</option>] : [])}
-      </select>
-    </SettingsRow>
-  </>;
-}
 
 function Count({ label, value, change, max }: { label: string; value: number; change(value: number): void; max?: number }) {
   const id = useId();

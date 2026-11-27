@@ -35,7 +35,7 @@ for (const width of [1440, 390]) {
       });
       const launch = await openLaunch(page, api.creates);
       await launch.getByRole('region', { name: '이전 세션' }).getByRole('button', { name: new RegExp(sampleSession.title) }).click();
-      await expect(page).toHaveURL(width === 390 ? /#\/coding\?session=/ : /#\/coding$/);
+      await expect(page).toHaveURL(width === 390 ? /#\/coding\/-\?session=/ : /#\/coding\/-$/);
       const agent = page.getByRole('region', { name: `에이전트: ${sampleSession.title}`, exact: true });
       await expect(agent).toBeVisible();
       const workspace = agent.getByRole('region', { name: '내장 코딩 세션' });
@@ -141,7 +141,7 @@ test('starts from one instruction with folder, worktree and model chips, renames
   await page.getByRole('dialog', { name: '작업 폴더' }).getByRole('button', { name: '다른 폴더…' }).click();
   await page.getByRole('button', { name: '이 폴더 선택' }).click();
   await launch.getByRole('button', { name: '바로 작업' }).click();
-  await launch.getByRole('button', { name: /^모델 기본 모델/ }).click();
+  await launch.getByRole('button', { name: /^모델 Sparrow/ }).click();
   const models = page.getByRole('dialog', { name: '모델 선택' });
   await models.getByRole('button', { name: 'Atlas' }).click();
   await models.getByRole('radio', { name: '높음' }).click();

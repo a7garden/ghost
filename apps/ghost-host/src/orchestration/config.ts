@@ -29,6 +29,7 @@ export function defaultOrchestration(): OrchestrationConfig {
 type Settings = Pick<Ledger, "setting" | "putSetting">;
 export class OrchestrationStore {
   private config: OrchestrationConfig;
+  private readonly listeners = new Set<(config: OrchestrationConfig) => void>();
   constructor(private readonly ledger: Settings) { this.config = ledger.setting(KEY, defaultOrchestration()); }
   get(): OrchestrationConfig { return this.config; }
   set(input: unknown): OrchestrationConfig {
@@ -36,13 +37,19 @@ export class OrchestrationStore {
     const issue = orchestrationIssues(config)[0];
     if (issue) throw invalid(`Invalid orchestration: ${issue.name} (${issue.code}${issue.ref ? `: ${issue.ref}` : ""})`);
     this.ledger.putSetting(KEY, config);
-    return this.config = config;
+    this.config = config;
+    for (const listener of this.listeners) listener(config);
+    return config;
+  }
+  subscribe(listener: (config: OrchestrationConfig) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
   sessionEnabled(id: string): boolean { return !this.ledger.setting(SESSION_OFF + id, false); }
   setSessionEnabled(id: string, enabled: boolean): void { this.ledger.putSetting(SESSION_OFF + id, !enabled); }
 }
 
-// The API and open coding sessions share the same committed settings snapshot.
+// The API, Ghost conversations and open coding sessions share the committed settings.
 const stores = new WeakMap<Settings, OrchestrationStore>();
 export function orchestrationStore(ledger: Settings): OrchestrationStore {
   let store = stores.get(ledger);

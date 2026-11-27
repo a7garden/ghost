@@ -172,6 +172,8 @@ export type MailSendCommand = CommandOf<'mail.send'>;
 export type MailUpdateCommand = CommandOf<'mail.update'>;
 
 export type CodingSessionModel = CodingSession['model'] & { name: string; thinking: string[] };
+/** The model a new agent starts on: the owner's last choice, with its level when that was recorded. */
+export type CodingLastModel = CodingSession['model'] & { thinking: CodingSession['thinking'] | null };
 export type CodingSessionPatch = Partial<Pick<CodingSession, 'title' | 'model' | 'thinking'>>;
 export type PiGlobalConfig = { settings: PiSettings; canManagePackages: boolean; imageResizeAvailable: boolean };
 export type PiSessionView = PiSessionConfig & { canManagePackages: boolean };
@@ -365,7 +367,7 @@ export class HostClient {
     return this.json(`${codingSessionPath(id)}/changes`, { signal });
   }
 
-  codingModels(signal?: AbortSignal): Promise<{ models: CodingSessionModel[] }> {
+  codingModels(signal?: AbortSignal): Promise<{ models: CodingSessionModel[]; last: CodingLastModel | null }> {
     return this.json('/api/coding/models', { signal });
   }
 

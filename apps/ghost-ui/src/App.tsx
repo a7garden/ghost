@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BriefcaseBusiness, ChartColumn, CircleAlert, Clock3, Gauge, History, KeyRound, Layers, ListChecks, Mic, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Smartphone, Bot, Users, Wifi, Wrench } from 'lucide-react';
+import { BriefcaseBusiness, ChartColumn, CircleAlert, Clock3, Gauge, History, Import, KeyRound, Layers, ListChecks, Mic, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Smartphone, Bot, Users, Wifi, Workflow, Wrench } from 'lucide-react';
 import { DutySwitch } from './components/DutySwitch';
 import { DutySettings } from './features/DutySettings';
 import { Banner, Button, EmptyState, ScrollRails, Skeleton, type CommandItem } from './ui';
@@ -32,7 +32,9 @@ import { InboxView } from './features/Inbox';
 import { HostView } from './features/HostView';
 import { PiConfigSettings } from './features/PiConfig';
 import { Workbench } from './features/Workbench';
-import { Orchestration, orchestrationPath } from './features/Orchestration';
+import { Orchestration } from './features/Orchestration';
+import { workbenchPath, workbenchScope } from './features/workbenchRoute';
+import type { Attention } from './features/WorkbenchAttention';
 import { GhostSettings } from './features/GhostSettings';
 import { MobilePairing } from './features/MobilePairing';
 import { VaultView } from './features/VaultView';
@@ -88,6 +90,7 @@ function Shell() {
   const compact = useCompact();
   const [route, setRoute] = useState(currentRoute);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [projectSignals, setProjectSignals] = useState<ReadonlyMap<string | null, Attention | undefined>>();
   const [desktopError, setDesktopError] = useState('');
   // The shell owns whether the desktop Ghost is shown; mirror it into the shared preference once.
   useEffect(() => {
@@ -182,7 +185,7 @@ function Shell() {
   const [path, query = ''] = route.split('?');
   const params = new URLSearchParams(query);
   const section = path.split('/')[1]?.split('?')[0] || 'home';
-  const orchestrationOpen = path === orchestrationPath;
+  const orchestrationOpen = path === '/settings/orchestration';
   useEffect(() => {
     if (section !== 'workspace' || currentRoute() !== route) return;
     const next = compact ? `/conversations${query ? `?${query}` : ''}` : '/';
@@ -208,9 +211,13 @@ function Shell() {
   const switchGhost = (id: string) => navigate(`/ghosts/${encodeURIComponent(id)}`);
 
   const selectedScope = section === 'scopes' && path.split('/')[2] ? decodeURIComponent(path.split('/')[2]!) : undefined;
-  const embeddedSessionId = section === 'coding' ? params.get('session') : null;
-  // On a phone an agent or the launch pad is a screen of its own; /coding itself is the roster.
-  const codingDetail = embeddedSessionId !== null || (section === 'coding' && params.has('launch'));
+  const codingScopeId = section === 'coding' ? workbenchScope(path.split('/')[2]) : undefined;
+  const codingOpen = section === 'coding' && path.split('/').length <= 3
+    && (codingScopeId == null || Boolean(state?.scopes.some(scope => scope.id === codingScopeId)));
+  const codingBack = codingScopeId === undefined ? '/coding' : workbenchPath(codingScopeId);
+  const embeddedSessionId = codingOpen ? params.get('session') : null;
+  // On a phone an agent or the launch pad is a screen of its own; the project route is the roster.
+  const codingDetail = embeddedSessionId !== null || (codingOpen && params.has('launch'));
   const projectOpen = section === 'scopes' && selectedScope !== undefined && !params.has('new') && Boolean(state?.scopes.some(scope => scope.id === selectedScope));
   const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'mail' || section === 'coding' || projectOpen;
 
@@ -231,7 +238,6 @@ function Shell() {
   const commandItems: CommandItem[] = state ? [
     { id: 'new-work', label: '일 맡기기', group: '실행', onSelect: go('/work?new=1') },
     { id: 'new-ghost', label: '새 Ghost', group: '실행', onSelect: go('/settings?tab=team&new=1') },
-    { id: 'new-space', label: '새 프로젝트', group: '실행', onSelect: go('/scopes?new=1') },
     { id: 'home', label: routeLabels.home, group: '이동', onSelect: go('/') },
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },
@@ -254,6 +260,8 @@ function Shell() {
     ...[{ id: 'rules', label: uiTerms.rules }, { id: 'history', label: uiTerms.configHistory }, { id: 'limits', label: uiTerms.limits }, { id: 'metrics', label: uiTerms.metrics }, { id: 'slots', label: uiTerms.modelCombos }, { id: 'mcp', label: uiTerms.mcp }].map(item => ({ ...item, group: uiTerms.advanced, onSelect: go(`/settings?tab=${item.id}`) })),
     { id: 'host', label: uiTerms.connectionStatus, group: '설정', onSelect: go('/settings?tab=host') },
     { id: 'update', label: '업데이트', group: '설정', onSelect: go('/settings?tab=update') },
+    { id: 'orchestration', label: uiTerms.orchestration, group: uiTerms.settings, onSelect: go('/settings/orchestration') },
+    { id: 'import-harness', label: uiTerms.importHarness, group: uiTerms.settings, onSelect: go('/settings/orchestration?import=1') },
     { id: 'settings', label: uiTerms.settings, group: '설정', onSelect: go('/settings') },
   ] : [];
 
@@ -278,6 +286,8 @@ function Shell() {
     { id: 'metrics', label: uiTerms.metrics, icon: ChartColumn, content: <ScopeMetrics/> },
     { id: 'host', label: uiTerms.connectionStatus, icon: Wifi, content: <HostView/> },
     { id: 'coding', label: '코딩', icon: Bot, content: <PiConfigSettings/> },
+    { id: 'orchestration', label: uiTerms.orchestration, icon: Workflow, path: '/settings/orchestration' },
+    { id: 'import-harness', label: uiTerms.importHarness, icon: Import, path: '/settings/orchestration?import=1' },
     { id: 'voice', label: '음성', icon: Mic, content: <VoiceSettings/> },
     { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
@@ -291,7 +301,8 @@ function Shell() {
 
   const runtimeDown = Boolean(state && !state.runtime.ready);
   const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null}
-    selectedScope={params.has('new') ? undefined : selectedScope} attentionCount={attentionCount}
+    selectedScope={codingOpen ? codingScopeId : params.has('new') ? undefined : selectedScope}
+    projectSignals={codingOpen ? projectSignals : undefined} attentionCount={attentionCount}
     status={status} navigate={navigate} openGhost={switchGhost}/>;
 
   return <div className="ghost-root">
@@ -302,11 +313,12 @@ function Shell() {
           section={section} attentionCount={attentionCount} navigate={navigate}
           hideDock={orchestrationOpen || codingDetail || section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
           location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
-            compactBack={section === 'settings' && params.has('tab') ? (params.get('tab') === 'team' && params.has('ghost') ? '/settings?tab=team' : '/settings')
+            compactBack={orchestrationOpen ? '/settings'
+              : section === 'settings' && params.has('tab') ? (params.get('tab') === 'team' && params.has('ghost') ? '/settings?tab=team' : '/settings')
               : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? '/conversations'
               : section === 'goals' || section === 'mail' ? '/conversations'
               : section === 'work' && path.split('/')[2] ? '/work'
-              : codingDetail ? '/coding'
+              : codingDetail ? codingBack
               : section === 'scopes' && selectedScope ? '/conversations' : undefined}
             onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
@@ -327,9 +339,9 @@ function Shell() {
             {section === 'conversations' && (compact || !mainChatPath) && <Conversations state={state} navigate={navigate} openGhost={switchGhost}/>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
-            {orchestrationOpen && <Orchestration/>}
-            {section === 'coding' && !orchestrationOpen && <Workbench scopes={state.scopes} works={state.works} ghosts={state.ghosts} compact={compact}
-              detail={codingDetail} sessionId={embeddedSessionId} navigate={navigate}/>}
+            {orchestrationOpen && <Orchestration importRequested={params.get('import') === '1'} onImportOpened={() => navigate('/settings/orchestration', { replace: true })}/>}
+            {codingOpen && <Workbench scopes={state.scopes} works={state.works} ghosts={state.ghosts} compact={compact}
+              scopeId={codingScopeId} onProjectSignals={setProjectSignals} detail={codingDetail} sessionId={embeddedSessionId} navigate={navigate}/>}
             {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>
@@ -345,8 +357,8 @@ function Shell() {
                 history.replaceState(history.state, '', `#${next}`);
                 setRoute(next);
               }}/>}
-            {section === 'settings' && <Settings route={route} navigate={navigate} preferences={preferences} updatePreferences={updatePreferences} storageError={storageError} sections={settingsSections}/>}
-            {!knownSections[section] && <EmptyState icon={<CircleAlert/>} title="이 화면을 찾을 수 없습니다" description="주소가 이동했거나 잘못되었을 수 있습니다."
+            {section === 'settings' && !orchestrationOpen && <Settings route={route} navigate={navigate} preferences={preferences} updatePreferences={updatePreferences} storageError={storageError} sections={settingsSections}/>}
+            {(!knownSections[section] || (section === 'coding' && !codingOpen)) && <EmptyState icon={<CircleAlert/>} title="이 화면을 찾을 수 없습니다" description="주소가 이동했거나 잘못되었을 수 있습니다."
               action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>}
           </>}
         </AppFrame>

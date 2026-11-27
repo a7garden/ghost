@@ -1,21 +1,19 @@
 import { useState, type MouseEvent } from 'react';
-import { Box, Columns2, Folder, FolderOpen, Minus, PanelLeftClose, Pencil, Pin, Plus, Settings2, Trash2 } from 'lucide-react';
+import { Box, Columns2, Folder, Minus, PanelLeftClose, Pencil, Pin, Plus, Settings2, Trash2 } from 'lucide-react';
 import type { CodingSession as Session, Scope } from '@ghost/contract';
-import { FolderPicker } from '../components/FolderPicker';
-import { Button, ContextMenu, ContextMenuAction, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Input } from '../ui';
+import { Button, ContextMenu, ContextMenuAction, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui';
 import { shortcut } from '../ui/keys';
-import { directoryName } from './CodingModel';
+import { uiTerms } from '../uiText';
 import type { Attention } from './WorkbenchAttention';
-import { AgentRowBody, AgentState, AttentionMark, InlineName } from './WorkbenchPane';
+import { AgentRowBody, AgentState, InlineName } from './WorkbenchPane';
 import type { ProjectAgent } from './workbenchProjects';
 
 export const AGENT_DRAG = 'application/x-ghost-agent';
 
-export type RailProject = { id: string | null; scope: Scope | null; signal?: Attention };
-
-export type RailProps = {
-  projects: readonly RailProject[];
-  selected: string | null;
+type RailProps = {
+  scope: Scope | undefined;
+  navigate(path: string): void;
+  projectPicker?: React.ReactNode;
   rows: readonly ProjectAgent[];
   folded: ReadonlySet<string>;
   activeId: string | null;
@@ -27,14 +25,11 @@ export type RailProps = {
   busy: boolean;
   /** Wide screens split panes; the phone shows one agent at a time. */
   canSplit: boolean;
-  selectProject(id: string | null): void;
   openAgent(id: string, split: boolean): void;
   newAgent(split: boolean): void;
   renameAgent(id: string, title: string): Promise<unknown>;
   removeAgent(id: string): void;
   pinAgent(id: string): void;
-  createProject(name: string, folder: string | null): Promise<unknown>;
-  openProjectSettings(id: string): void;
   onCollapse?(): void;
   attentionAction?: React.ReactNode;
   footer?: React.ReactNode;
@@ -42,37 +37,32 @@ export type RailProps = {
 
 const wantsSplit = (event: MouseEvent) => event.metaKey || event.ctrlKey;
 
-/** Projects, and under the one on screen its agents: the owner's and the ones its Ghosts started. */
+/** One project's agents: the owner's and the ones its Ghosts started. */
 export function WorkbenchRail(props: RailProps) {
-  const { projects, selected, busy, onCollapse } = props;
-  const [drafting, setDrafting] = useState(false);
+  const { scope, busy, onCollapse, navigate } = props;
+  const project = scope ? `/scopes/${encodeURIComponent(scope.id)}` : undefined;
   const addAgent = <button type="button" className="workbench-agent-add" data-selected={props.launching || undefined} disabled={busy}
     onClick={event => props.newAgent(props.canSplit && wantsSplit(event))}><Plus size={16} aria-hidden="true"/>새 에이전트</button>;
   return <>
     {props.attentionAction}
     <div className="workbench-rail-head">
-      <h2>프로젝트</h2>
-      <Button variant="ghost" size="icon" type="button" disabled={busy} aria-label="새 프로젝트" title="새 프로젝트" onClick={() => setDrafting(true)}><Plus aria-hidden="true"/></Button>
+      <h2>{project ? <a href={`#${project}`} onClick={event => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault(); navigate(project);
+      }}><Folder size={16} aria-hidden="true"/><span>{scope?.name}</span></a> : <><Box size={16} aria-hidden="true"/><span>{uiTerms.noProject}</span></>}</h2>
+      {props.projectPicker}
+      {project && <Button asChild variant="ghost" size="icon"><a href={`#${project}?view=settings`} aria-label="프로젝트 설정" title="프로젝트 설정"
+        onClick={event => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault(); navigate(`${project}?view=settings`);
+        }}><Settings2 aria-hidden="true"/></a></Button>}
       {onCollapse && <Button variant="ghost" size="icon" type="button" aria-label="목록 접기" title={`목록 접기 · ${shortcut('B')}`} onClick={onCollapse}><PanelLeftClose aria-hidden="true"/></Button>}
     </div>
-    <nav className="workbench-spaces" aria-label="프로젝트">
-      {drafting && <ProjectDraft onCancel={() => setDrafting(false)} onCreate={(name, folder) => props.createProject(name, folder).then(() => setDrafting(false))}/>}
+    <div className="workbench-agent-list">
       {!props.canSplit && addAgent}
-      {projects.map(project => {
-        const current = project.id === selected;
-        const name = project.scope?.name ?? '프로젝트 없음';
-        return <div key={project.id ?? 'none'} className="workbench-project" data-selected={current || undefined}>
-          <div className="workbench-space-row" data-selected={current || undefined}>
-            <button type="button" aria-current={current ? 'true' : undefined} aria-expanded={current} title={project.scope?.paths[0] ?? name} onClick={() => props.selectProject(project.id)}>
-              {project.scope ? <Folder size={16} aria-hidden="true"/> : <Box size={16} aria-hidden="true"/>}<span>{name}</span>
-              {!current && <AttentionMark signal={project.signal}/>}
-            </button>
-            {project.scope && <Button variant="ghost" size="icon" type="button" aria-label={`${name} 프로젝트 설정`} title="프로젝트 설정" onClick={() => props.openProjectSettings(project.id!)}><Settings2 aria-hidden="true"/></Button>}
-          </div>
-          {current && <><AgentList {...props}/>{props.canSplit && addAgent}</>}
-        </div>;
-      })}
-    </nav>
+      <AgentList key={scope?.id ?? ''} {...props}/>
+      {props.canSplit && addAgent}
+    </div>
     {props.footer}
   </>;
 }
@@ -112,24 +102,3 @@ function AgentList(props: RailProps) {
   </ul>;
 }
 
-/** A new project starts from one line: a name, or just a folder that names it. */
-function ProjectDraft({ onCreate, onCancel }: { onCreate(name: string, folder: string | null): Promise<unknown>; onCancel(): void }) {
-  const [name, setName] = useState('');
-  const [folder, setFolder] = useState<string | null>(null);
-  const [picking, setPicking] = useState(false);
-  const [pending, setPending] = useState(false);
-  const label = name.trim() || (folder ? directoryName(folder).slice(0, 128) : '');
-  return <form className="workbench-project-draft" onSubmit={event => {
-    event.preventDefault();
-    if (!label || pending) return;
-    setPending(true);
-    void onCreate(label, folder).finally(() => setPending(false));
-  }} onKeyDown={event => { if (event.key === 'Escape') onCancel(); }}>
-    <Input autoFocus aria-label="새 프로젝트 이름" placeholder={folder ? directoryName(folder) : '새 프로젝트'} value={name} maxLength={128} disabled={pending}
-      onChange={event => setName(event.target.value)}/>
-    <Button variant="ghost" size="icon" type="button" disabled={pending} aria-label={folder ? `폴더: ${folder}` : '폴더 선택'} title={folder ?? '폴더 선택'}
-      aria-pressed={Boolean(folder)} onClick={() => setPicking(true)}><FolderOpen aria-hidden="true"/></Button>
-    <button type="submit" hidden aria-hidden="true" tabIndex={-1}/>
-    {picking && <FolderPicker title="프로젝트 폴더" onClose={() => setPicking(false)} onPick={path => { setPicking(false); setFolder(path); }}/>}
-  </form>;
-}

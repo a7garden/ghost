@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
@@ -10,6 +11,8 @@ import { mockWorkbench } from './workbench-mock';
 
 const DAY = 24 * 60 * 60 * 1000;
 const agentPane = (page: Page, title: string) => page.getByRole('region', { name: `에이전트: ${title}`, exact: true });
+const rail = (page: Page) => page.getByRole('complementary', { name: '작업대 탐색' });
+const sidebar = (page: Page) => page.getByRole('complementary', { name: '작업실 탐색' });
 
 for (const width of [1440, 390]) {
   test.describe(`${width}px 작업대`, () => {
@@ -26,18 +29,16 @@ for (const width of [1440, 390]) {
         prepare: page => page.clock.setFixedTime(new Date(sampleSession.updatedAt + 60_000)),
       }, 'light');
       const existing = agentPane(page, sampleSession.title);
-      const projects = page.getByRole('navigation', { name: '프로젝트', exact: true });
       const dock = page.getByRole('navigation', { name: '주요 화면' });
-      // The list lives in the rail on a desktop; on a phone it is /coding itself, with the tab bar under it and no agent open.
       const list = async () => {
-        if (phone && !await projects.isVisible()) await page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true }).click();
-        return projects;
+        if (phone && !await rail(page).isVisible()) await page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true }).click();
+        return rail(page);
       };
       if (phone) {
         await expect(dock).toBeVisible();
         await expect(existing).toBeHidden();
         await expect(page.getByRole('textbox', { name: '코딩 지시' })).toHaveCount(0);
-        await projects.getByTitle(sampleSession.title, { exact: true }).click();
+        await rail(page).getByTitle(sampleSession.title, { exact: true }).click();
         await expect(dock).toBeHidden();
       }
       await expect(existing).toBeVisible();
@@ -81,7 +82,7 @@ for (const width of [1440, 390]) {
 
       if (!phone) {
         // ⌘/Ctrl-click opens beside; the border resizes from the keyboard.
-        await page.getByRole('navigation', { name: '프로젝트', exact: true }).getByTitle('새 작업 트리', { exact: true }).click({ modifiers: ['ControlOrMeta'] });
+        await rail(page).getByTitle('새 작업 트리', { exact: true }).click({ modifiers: ['ControlOrMeta'] });
         await expect(existing).toBeVisible();
         await expect(created).toBeVisible();
         const border = page.getByRole('separator', { name: '패널 너비' });
@@ -89,19 +90,27 @@ for (const width of [1440, 390]) {
         await border.focus();
         await page.keyboard.press('ArrowRight');
         await expect(border).toHaveAttribute('aria-valuenow', '55');
-        // The project list folds to a strip of state marks and back.
+        // The agent list folds to a strip of state marks and back.
         await page.keyboard.press('ControlOrMeta+b');
-        await expect(page.getByRole('navigation', { name: '프로젝트', exact: true })).toHaveCount(0);
-        const strip = page.getByRole('complementary', { name: '작업대 탐색' });
+        const strip = rail(page);
+        await expect(strip.getByRole('list', { name: '에이전트' })).toHaveCount(0);
         await expect(strip.getByRole('button', { name: sampleSession.title })).toBeVisible();
         if (evidence) await page.screenshot({ path: join(evidence, `folded-${width}.png`), animations: 'disabled', caret: 'hide' });
         await strip.getByRole('button', { name: '목록 펼치기' }).click();
-        await expect(page.getByRole('navigation', { name: '프로젝트', exact: true })).toBeVisible();
+        await expect(rail(page).getByRole('list', { name: '에이전트' })).toBeVisible();
+        await page.keyboard.press('ControlOrMeta+\\');
+        await expect(sidebar(page)).toBeHidden();
+        await expect(rail(page).getByRole('list', { name: '에이전트' })).toBeVisible();
+        await page.keyboard.press('ControlOrMeta+\\');
+        await expect(sidebar(page)).toBeVisible();
       }
 
       await page.reload();
       await expect(existing).toBeVisible();
-      if (!phone) await expect(created).toBeVisible();
+      if (!phone) {
+        await expect(created).toBeVisible();
+        await expect(page.getByRole('separator', { name: '패널 너비' })).toHaveAttribute('aria-valuenow', '55');
+      }
       if (evidence) await page.screenshot({ path: join(evidence, `workbench-${width}.png`), animations: 'disabled', caret: 'hide' });
     });
   });
@@ -118,25 +127,51 @@ test('opens an agent that needs attention even from another project', async ({ p
   await openScreen(page, { name: 'workbench attention', route: () => '/coding', waits: () => ['새 에이전트'] }, 'light');
   await page.getByRole('complementary', { name: '작업대 탐색' }).getByRole('button', { name: /^확인 필요 1$/ }).click();
   await expect(agentPane(page, sampleSession.title)).toBeVisible();
+  await expect(page).toHaveURL(url => url.hash === `#/coding/${scopeId}?session=${sampleSession.id}`);
   await expect.poll(() => service.read().focus).toEqual({ scopeId, sessionId: sampleSession.id });
 });
 
-test('a new project starts from one line and a chosen folder names it', async ({ page }) => {
-  await mockWorkbench(page);
-  const commands: Record<string, unknown>[] = [];
-  await page.route('**/api/commands', async route => {
-    const { command } = route.request().postDataJSON() as { command: Record<string, unknown> };
-    if (command.type !== 'scope.create') return route.fallback();
-    commands.push(command);
-    await route.fulfill({ json: { ok: true, result: { scopeId: 'fresh-project' } } });
-  });
-  await page.route('**/api/folders**', route => route.fulfill({ json: { path: tmpdir(), parent: null, home: tmpdir(), shortcuts: [], truncated: false, entries: [] } }));
-  await openScreen(page, { name: 'workbench project', route: () => '/coding', waits: () => ['새 에이전트'] }, 'light');
-  await page.getByRole('complementary', { name: '작업대 탐색' }).getByRole('button', { name: '새 프로젝트', exact: true }).click();
-  await page.getByRole('button', { name: '폴더 선택' }).click();
-  await page.getByRole('button', { name: '이 폴더 선택' }).click();
-  await page.getByRole('textbox', { name: '새 프로젝트 이름' }).press('Enter');
-  await expect.poll(() => commands[0]).toMatchObject({ type: 'scope.create', name: tmpdir().split('/').pop(), paths: [tmpdir()] });
+test('switches projects from the sidebar and lists a newly created project without another setup', async ({ page, request }) => {
+  const coding = await mockCodingSessions(page);
+  const { service } = await mockWorkbench(page, coding.creates);
+  const { baseUrl, scopeId } = readRunState();
+  const { token } = JSON.parse(readFileSync(join(process.env.GHOST_VISUAL_RUN_ROOT!, 'primary/host/host.json'), 'utf8')) as { token: string };
+  service.addAgent({ version: 0, sessionId: sampleSession.id, scopeId });
+  await openScreen(page, { name: 'workbench project', route: () => '/coding', waits: () => [sampleSession.title] }, 'light');
+  const projects = sidebar(page);
+  await expect(projects.getByRole('button', { name: '비행 기록', exact: true })).toHaveCount(1);
+  await expect(rail(page).getByRole('link', { name: '비행 기록' })).toHaveAttribute('href', `#/scopes/${scopeId}`);
+  await expect(rail(page).getByRole('link', { name: '프로젝트 설정' })).toHaveAttribute('href', `#/scopes/${scopeId}?view=settings`);
+  await expect(rail(page).getByRole('button', { name: 'git 변경' })).toBeVisible();
+  for (const name of ['오케스트레이션', '하네스 가져오기', '새 프로젝트', '프로젝트 목록']) {
+    await expect(rail(page).getByText(name, { exact: true })).toHaveCount(0);
+  }
+  await projects.getByRole('button', { name: '새 프로젝트', exact: true }).click();
+  await expect(page).toHaveURL(/#\/scopes\?new=1$/);
+  await page.getByRole('textbox', { name: '프로젝트 이름' }).fill('새 작업대 프로젝트');
+  const created = page.waitForResponse(response => response.url().endsWith('/api/commands') && response.request().postDataJSON()?.command?.type === 'scope.create');
+  await page.getByRole('form', { name: '새 프로젝트' }).getByRole('button', { name: '저장', exact: true }).click();
+  const result = await (await created).json();
+  expect(result.ok).toBe(true);
+  const newId = result.result.scopeId as string;
+  try {
+    await expect(page).toHaveURL(url => url.hash === `#/scopes/${newId}`);
+    await projects.getByRole('button', { name: '코딩', exact: true }).click();
+    await expect(page).toHaveURL(url => url.hash === `#/coding/${scopeId}`);
+    await projects.getByRole('button', { name: '새 작업대 프로젝트', exact: true }).click();
+    await expect(page).toHaveURL(url => url.hash === `#/coding/${newId}`);
+    await expect(rail(page).getByRole('link', { name: '새 작업대 프로젝트' })).toBeVisible();
+    await expect(rail(page).getByTitle(sampleSession.title, { exact: true })).toHaveCount(0);
+    await expect.poll(() => service.read().focus?.scopeId).toBe(newId);
+    await projects.getByRole('button', { name: '비행 기록', exact: true }).click();
+    await expect(agentPane(page, sampleSession.title)).toBeVisible();
+  } finally {
+    const cleanup = await request.post(`${baseUrl}/api/commands`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { requestId: randomUUID(), command: { type: 'scope.delete', scopeId: newId } },
+    });
+    expect(cleanup.ok()).toBe(true);
+  }
 });
 
 test('folds agents idle for days and lists them on request', async ({ page }) => {
@@ -184,7 +219,8 @@ test('a Ghost’s agent shows with its face and can be opened without listing it
     ? route.fulfill({ json: [sampleSession, ghostSession] }) : route.fallback());
   const { service } = await mockWorkbench(page);
   await openScreen(page, { name: 'workbench ghost', route: () => '/coding', waits: () => ['새 에이전트'] }, 'light');
-  await page.getByRole('navigation', { name: '프로젝트', exact: true }).getByRole('button', { name: '프로젝트 없음' }).click();
+  await sidebar(page).getByRole('button', { name: '프로젝트 없음', exact: true }).click();
+  await expect(page).toHaveURL(/#\/coding\/-$/);
   const row = page.getByRole('list', { name: '에이전트' }).getByRole('listitem').filter({ hasText: ghostSession.title });
   await expect(row.locator('.workbench-ghost')).toBeVisible();
   await row.getByTitle(ghostSession.title, { exact: true }).click();
@@ -204,7 +240,7 @@ for (const width of [1440, 390]) {
       const { service } = await mockWorkbench(page, coding.creates);
       service.addAgent({ version: 0, sessionId: sampleSession.id, scopeId: null });
       await openScreen(page, { name: 'workbench terminal', route: () => '/coding', waits: () => [sampleSession.title] }, 'light');
-      if (phone) await page.getByRole('navigation', { name: '프로젝트', exact: true }).getByTitle(sampleSession.title, { exact: true }).click();
+      if (phone) await rail(page).getByTitle(sampleSession.title, { exact: true }).click();
       const terminal = page.locator('section.workbench-terminal');
       await expect(terminal).toHaveCount(0);
       const toggle = page.getByRole('button', { name: '터미널', exact: true }).filter({ visible: true }).first();

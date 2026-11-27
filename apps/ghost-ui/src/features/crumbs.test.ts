@@ -45,3 +45,9 @@ it('names every owner settings destination in the compact title bar', () => {
     ]);
   }
 });
+
+it('places orchestration under Settings, including when opening the import panel', () => {
+  expect(crumbsFor('/settings/orchestration?import=1', state)).toEqual([
+    { label: '설정', path: '/settings' }, { label: '오케스트레이션', path: null },
+  ]);
+});

@@ -1,9 +1,12 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
-import { Bot, Compass, Folder, Home, Inbox, LayoutList, Mail, Plus, Settings2 } from 'lucide-react';
+import { Bot, Box, Compass, Folder, Home, Inbox, LayoutList, Mail, Plus, Settings2 } from 'lucide-react';
 import { Navigation, NavigationGroup, NavigationItem, ScrollRail } from '../ui';
 import type { Ghost, Scope, State } from '@ghost/contract';
 import { ghostPresence, idlePresence, liveWork, visibleGhosts } from '../features/ghostState';
 import { useSidebarPreferences } from '../features/sidebarPreferences';
+import type { Attention } from '../features/WorkbenchAttention';
+import { AttentionMark } from '../features/WorkbenchPane';
+import { workbenchPath } from '../features/workbenchRoute';
 import { PresenceAvatar } from './agent';
 import { RosterGhostMenu } from './RosterGhostMenu';
 import { routeLabels, uiTerms } from '../uiText';
@@ -18,13 +21,14 @@ const FOLD_LIMIT = 8;
  * and pins lead one roster. On long rosters only the pool folds, leaving active Ghosts,
  * the open conversation, and project receivers in view. Projects sit under their receiver.
  */
-export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, attentionCount, status, navigate, openGhost }: {
+export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, projectSignals, attentionCount, status, navigate, openGhost }: {
   state: State | null;
   section: string;
   /** Ghost whose conversation is on screen; null on workspace pages. */
   openGhostId: string | null;
-  /** Project on screen; null while the create form is open. */
-  selectedScope?: string;
+  /** Project on screen: null is the unscoped workbench, undefined means no selected project. */
+  selectedScope?: string | null;
+  projectSignals?: ReadonlyMap<string | null, Attention | undefined>;
   attentionCount: number;
   status: HostStatus;
   navigate(path: string): void;
@@ -96,25 +100,19 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
     </RosterGhostMenu>;
   };
 
-  const projectItem = (scope: Scope, nested: boolean) => <NavigationItem key={scope.id} className={nested ? 'sidebar-project sidebar-project--nested' : 'sidebar-project'}
-    current={section === 'scopes' && scope.id === selectedScope}
-    onClick={() => navigate(`/scopes/${encodeURIComponent(scope.id)}`)}>
-    {!nested && <Folder/>}<span className="truncate">{scope.name}</span>
-    {scope.state === 'paused' && <span className="sidebar-project__paused">일시 중지</span>}
-  </NavigationItem>;
+  const projectList = { selectedScope, signals: projectSignals, coding: section === 'coding', navigate };
   /** A Ghost row followed by the projects it receives. */
   const entry = (ghost: Ghost) => {
     const owned = byGhost.get(ghost.id);
     return <div key={ghost.id} className="sidebar-entry">
       {row(ghost)}
-      {owned && <div className="sidebar-projects" role="group" aria-label={`${ghost.name}의 프로젝트`}>{owned.map(scope => projectItem(scope, true))}</div>}
+      {owned && <SidebarProjectList {...projectList} scopes={owned} receiver={ghost.name}/>}
     </div>;
   };
 
-  const projects = <NavigationGroup label={routeLabels.scopes}
-    action={<button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/scopes?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>}>
-    {orphans.map(scope => projectItem(scope, false))}
-  </NavigationGroup>;
+  const projects = <SidebarProjectGroup navigate={navigate}>
+    <SidebarProjectList {...projectList} scopes={orphans} showUnscoped/>
+  </SidebarProjectGroup>;
 
   return <>
     <Navigation label="작업실" className="ghost-sidebar min-h-0 flex-1">
@@ -172,6 +170,38 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, a
       </NavigationItem>
     </div>
   </>;
+}
+
+export function SidebarProjectGroup({ navigate, children }: { navigate(path: string): void; children: React.ReactNode }) {
+  return <NavigationGroup label={routeLabels.scopes}
+    action={<button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/scopes?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>}>
+    {children}
+  </NavigationGroup>;
+}
+
+/** The project's navigation rows are shared by the workspace sidebar and the phone's project sheet. */
+export function SidebarProjectList({ scopes, receiver, coding, selectedScope, signals, showUnscoped, navigate }: {
+  scopes: readonly Scope[];
+  receiver?: string;
+  coding: boolean;
+  selectedScope?: string | null;
+  signals?: ReadonlyMap<string | null, Attention | undefined>;
+  showUnscoped?: boolean;
+  navigate(path: string): void;
+}) {
+  return <div className="sidebar-projects" role={receiver ? 'group' : undefined} aria-label={receiver ? `${receiver}의 프로젝트` : undefined}>
+    {scopes.map(scope => <NavigationItem key={scope.id} className={receiver ? 'sidebar-project sidebar-project--nested' : 'sidebar-project'}
+      current={scope.id === selectedScope} onClick={() => navigate(coding ? workbenchPath(scope.id) : `/scopes/${encodeURIComponent(scope.id)}`)}>
+      {!receiver && <Folder/>}<span className="truncate">{scope.name}</span>
+      {scope.state === 'paused' && <span className="sidebar-project__paused">일시 중지</span>}
+      {scope.id !== selectedScope && <AttentionMark signal={signals?.get(scope.id)}/>}
+    </NavigationItem>)}
+    {showUnscoped && coding && signals?.has(null) && <NavigationItem className="sidebar-project sidebar-project--unscoped"
+      current={selectedScope === null} onClick={() => navigate(workbenchPath(null))}>
+      <Box/><span>{uiTerms.noProject}</span>
+      {selectedScope !== null && <AttentionMark signal={signals.get(null)}/>}
+    </NavigationItem>}
+  </div>;
 }
 
 /**

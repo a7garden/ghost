@@ -17,7 +17,10 @@ import { blurTouchSearchOnEnter, useCompact } from '../ui/adaptive';
 import { uiTerms } from '../uiText';
 import '../ui/settings-frame.css';
 
-export interface SettingsSection { id: string; label: string; icon: LucideIcon; content: ReactNode; wide?: boolean }
+export type SettingsSection = { id: string; label: string; icon: LucideIcon } & (
+  | { content: ReactNode; wide?: boolean; path?: never }
+  | { path: string; content?: never; wide?: never }
+);
 
 type SettingsStatus = { glyph: GlyphState; label: string; count?: number };
 type SettingsItem = Pick<SettingsSection, 'id' | 'label' | 'icon'> & { status?: SettingsStatus; value?: string };
@@ -33,7 +36,7 @@ const themes: { value: Preferences['theme']; label: string }[] = [
 
 /** Daily settings first; the machinery a person rarely needs sits behind one 「고급」 fold. */
 const settingsGroups: { label: string; folded?: boolean; ids: string[] }[] = [
-  { label: 'Ghost와 일', ids: ['team', 'models', 'approvals', 'duty', 'schedules', 'activities', 'voice'] },
+  { label: 'Ghost와 일', ids: ['team', 'models', 'approvals', 'duty', 'schedules', 'activities', 'orchestration', 'import-harness', 'voice'] },
   { label: '연결과 기기', ids: ['connections', 'vault', 'devices', 'coding'] },
   { label: '앱', ids: ['appearance', 'desktop', 'host', 'update'] },
   { label: uiTerms.advanced, folded: true, ids: ['rules', 'history', 'limits', 'metrics', 'slots', 'mcp'] },
@@ -153,7 +156,8 @@ export function Settings({ route, navigate, preferences, updatePreferences, stor
   const requested = params.get('tab');
   const tab = items.some(item => item.id === requested) ? requested! : items[0].id;
   const ghost = params.get('ghost');
-  const changeTab = (next: string) => navigate(`/settings?tab=${next}${ghost && next === 'team' ? `&ghost=${encodeURIComponent(ghost)}` : ''}`);
+  const changeTab = (next: string) => navigate(sections.find(section => section.id === next)?.path
+    ?? `/settings?tab=${next}${ghost && next === 'team' ? `&ghost=${encodeURIComponent(ghost)}` : ''}`);
   const shellSection = sections.find(section => section.id === tab);
   if (compact && !requested) return <SettingsIndex items={indexItems} select={changeTab}/>;
   return <SettingsLayout className="ghost-settings--frame" pageTitle={items.find(item => item.id === tab)?.label}

@@ -18,6 +18,7 @@ import { createEngine } from "../src/engine/index.ts";
 import { modelResolution } from "../src/engine/resolution.ts";
 import type { SandboxEnvFactory } from "../src/integrations/ports.ts";
 import type { McpPort } from "../src/integrations/mcp.ts";
+import { defaultOrchestration, orchestrationStore } from "../src/orchestration/config.ts";
 import { createToolSet } from "../src/tools/index.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { createSubagentTools } from "../src/tools/subagent.ts";
@@ -51,11 +52,11 @@ async function fixture(extra?: (core: Core) => Extension[], factory?: (core: Cor
   const secrets = new MemorySecrets();
   const core = new Core({ ledger, secrets, artifacts: new MemoryArtifacts(), sandbox: noSandbox, log() {} });
   ledger.tx(() => {
-    ledger.putProvider({ id: "faux", kind: "openai_compatible", name: "Faux", baseUrl: null, models: [{ id: "faux-1", name: "Faux" }, { id: "faux-2", name: "Alternate Faux" }] });
+    ledger.putProvider({ id: "faux", kind: "openai_compatible", name: "Faux", baseUrl: null, models: [{ id: "faux-1", name: "Faux" }, { id: "faux-2", name: "Alternate Faux", reasoning: true }] });
     ledger.putSetting("defaultModel", { provider: "faux", model: "faux-1" });
   });
   secrets.put("faux", "fixture-key");
-  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux" }, { id: "faux-2", name: "Alternate Faux" }] });
+  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux" }, { id: "faux-2", name: "Alternate Faux", reasoning: true }] });
   const models = createModels();
   models.setProvider(faux.provider);
   let reads = 0;
@@ -67,7 +68,10 @@ async function fixture(extra?: (core: Core) => Extension[], factory?: (core: Cor
     },
   })] });
   const extensions = [createSubagentTools(core), read, ...(extra?.(core) ?? [])];
-  const tools: ToolSet = factory?.(core) ?? { all: () => extensions, extensionsFor: () => extensions, instructionsFor: () => "Use only the supplied task and tools." };
+  const tools: ToolSet = factory?.(core) ?? {
+    all: () => extensions, extensionsFor: () => extensions,
+    instructionsFor: createToolSet({ core, sandbox, memory: null, documents: null, skills: null }).instructionsFor,
+  };
   const open = async () => {
     const engine = await createEngine({ core, storagePath: join(root, "pi.db"), sandbox, models, tools, log() {} });
     core.attach(engine);
@@ -77,7 +81,7 @@ async function fixture(extra?: (core: Core) => Extension[], factory?: (core: Cor
   const ghost = core.createGhost({ name: "Researcher", persona: "Be exact.", tools: ["host_read", "subagent_run"] });
   await core.idle();
   return {
-    root, ledger, core, ghost, faux, reads: () => reads, get engine() { return engine; },
+    root, ledger, core, ghost, faux, models, reads: () => reads, get engine() { return engine; },
     async reopen() { await engine.close(); engine = await open(); return engine; },
     async close() { core.stop(); await core.idle(); await engine.close(); ledger.close(); rmSync(root, { recursive: true, force: true }); },
   };
@@ -156,6 +160,214 @@ test("read-only helper calls are actually parallel and create no Work or effect"
   } finally { release.resolve(); await f.close(); }
 }, 10000);
 
+function scoutConfig() {
+  const config = defaultOrchestration();
+  const scout = config.agents.find(agent => agent.name === "scout")!;
+  scout.description = "Trace fixture evidence";
+  scout.instructions = "SCOUT_ROLE: Confirm the evidence before answering.";
+  scout.modelRole = "research";
+  config.modelRoles.research = { provider: "faux", model: "faux-2", thinking: "low" };
+  config.fallbackChains.research = [{ provider: "faux", model: "faux-1", thinking: "off" }];
+  return config;
+}
+
+test("a named Ghost scout uses its live role, then continues a quota failure after the committed read", async () => {
+  const f = await fixture();
+  try {
+    orchestrationStore(f.ledger).set(scoutConfig());
+    let description: string | undefined;
+    let system = "";
+    let tools: string[] = [];
+    let fallbackContext: unknown;
+    const models: string[] = [];
+    f.faux.setResponses([
+      context => {
+        description = getCurrentTools(context.messages).find(tool => tool.name === "subagent_run")?.description;
+        return fauxAssistantMessage(fauxToolCall("subagent_run", { agent: "scout", task: "Read evidence", tools: ["host_read"] }), { stopReason: "toolUse" });
+      },
+      (context, options, _state, model) => {
+        models.push(`${model.id}:${options?.reasoning}`);
+        system = getCurrentSystemPrompt(context.messages);
+        tools = getCurrentTools(context.messages).map(tool => tool.name);
+        return fauxAssistantMessage(fauxToolCall("host_read", {}), { stopReason: "toolUse" });
+      },
+      (_context, options, _state, model) => {
+        models.push(`${model.id}:${options?.reasoning}`);
+        return fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 rate limit; retry in 60s" });
+      },
+      (context, _options, _state, model) => {
+        models.push(model.id);
+        fallbackContext = context.messages.filter(message => message.role === "user" || message.role === "toolResult");
+        return fauxAssistantMessage("Fallback researched evidence.");
+      },
+      fauxAssistantMessage("Scout joined."),
+    ]);
+    const id = f.ghost.directConversationId;
+    const done = message(f.engine, id, m => m.text === "Scout joined.");
+    await f.engine.submit(id, { text: "Run the scout", origin: "owner", requestId: "named-scout" });
+    await done;
+    expect(description).toContain("scout: Trace fixture evidence");
+    expect(description).not.toContain("worker");
+    expect(system).toContain("SCOUT_ROLE");
+    expect(system).toContain("never authority");
+    expect(system).toContain("Context economy.");
+    expect(system).not.toContain("Be exact.");
+    expect(tools).toEqual(["host_read"]);
+    expect(models).toEqual(["faux-2:low", "faux-2:low", "faux-1"]);
+    expect(fallbackContext).toMatchObject([{ role: "user" }, { role: "toolResult", content: [{ text: "READ_EVIDENCE" }] }]);
+    expect(f.reads()).toBe(1);
+    const helpers = f.ledger.conversations().filter(c => c.kind === "subagent");
+    expect(helpers).toHaveLength(1);
+    const page = await f.engine.page(helpers[0]!.id, null, 50);
+    expect(page.messages.filter(m => m.role === "user")).toHaveLength(1);
+    expect(page.messages.filter(m => m.role === "tool")).toHaveLength(1);
+    expect((await f.engine.page(id, null, 50)).messages.find(m => m.role === "tool")?.text).toBe("Fallback researched evidence.");
+  } finally { await f.close(); }
+});
+
+test("global orchestration disable hides the tool in an open conversation and refuses a stale call", async () => {
+  const f = await fixture();
+  try {
+    const store = orchestrationStore(f.ledger);
+    const id = f.ghost.directConversationId;
+    store.setSessionEnabled(id, false); // Session flags apply only to coding.
+    const offered: boolean[] = [];
+    f.faux.setResponses([
+      context => {
+        offered.push(getCurrentTools(context.messages).some(tool => tool.name === "subagent_run"));
+        store.set({ ...store.get(), enabled: false });
+        return fauxAssistantMessage(fauxToolCall("subagent_run", { task: "Stale research call" }), { stopReason: "toolUse" });
+      },
+      context => {
+        offered.push(getCurrentTools(context.messages).some(tool => tool.name === "subagent_run"));
+        return fauxAssistantMessage("Orchestration disabled.");
+      },
+    ]);
+    const done = message(f.engine, id, m => m.text === "Orchestration disabled.");
+    await f.engine.submit(id, { text: "Check tool access", origin: "owner", requestId: "disable-helpers" });
+    await done;
+    expect(offered).toEqual([true, false]);
+    expect((await f.engine.page(id, null, 50)).messages.find(m => m.role === "tool")?.tool?.isError).toBe(true);
+    const stale = createSubagentTools(f.core).tools![0]!;
+    const api = { conversationId: Number(f.ledger.piConversationId(id)) } as ToolExecutionApi;
+    expect(await stale.execute({ task: "Disabled" }, api, BACKGROUND_CONTEXT)).toMatchObject({
+      isError: true, output: [{ text: "subagent orchestration is disabled" }],
+    });
+    expect(f.ledger.conversations().filter(c => c.kind === "subagent")).toHaveLength(0);
+  } finally { await f.close(); }
+});
+
+test("Ghost refuses write agents and roles with no usable model", async () => {
+  const f = await fixture();
+  try {
+    const config = scoutConfig();
+    config.modelRoles.research = { provider: "missing", model: "unavailable", thinking: null };
+    config.fallbackChains.research = [{ provider: "faux", model: "unknown-model", thinking: null }];
+    orchestrationStore(f.ledger).set(config);
+    f.faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("subagent_run", { agent: "worker", task: "Make an edit" }, { id: "writer" }),
+        fauxToolCall("subagent_run", { agent: "scout", task: "Use the unavailable role" }, { id: "unavailable" }),
+      ], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Both calls refused."),
+    ]);
+    const id = f.ghost.directConversationId;
+    const done = message(f.engine, id, m => m.text === "Both calls refused.");
+    await f.engine.submit(id, { text: "Check invalid helpers", origin: "owner", requestId: "refuse-helpers" });
+    await done;
+    const results = (await f.engine.page(id, null, 50)).messages.filter(m => m.role === "tool");
+    expect(results).toHaveLength(2);
+    expect(results.every(m => m.tool?.isError)).toBe(true);
+    expect(results.find(m => m.tool?.callId === "writer")?.text).toBe("orchestration agent worker is not read-only");
+    expect(results.find(m => m.tool?.callId === "unavailable")?.text).toBe("no usable model for orchestration role research");
+    expect(f.ledger.conversations().filter(c => c.kind === "subagent")).toHaveLength(0);
+  } finally { await f.close(); }
+});
+
+test("a configured model without credentials is skipped and an exhausted role returns a tool error", async () => {
+  const f = await fixture();
+  try {
+    const keyless = fauxProvider({ provider: "keyless", models: [{ id: "keyless-1", name: "No key" }] });
+    f.models.setProvider(keyless.provider);
+    f.ledger.putProvider({ id: "keyless", kind: "openai_compatible", name: "No key", baseUrl: null, models: [{ id: "keyless-1", name: "No key" }] });
+    const config = scoutConfig();
+    config.modelRoles.research = { provider: "keyless", model: "keyless-1", thinking: null };
+    config.fallbackChains.research = [{ provider: "faux", model: "faux-2", thinking: "off" }];
+    orchestrationStore(f.ledger).set(config);
+    const models: string[] = [];
+    f.faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("subagent_run", { agent: "scout", task: "Try models in order" }), { stopReason: "toolUse" }),
+      (_context, _options, _state, model) => {
+        models.push(model.id);
+        return fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 rate limit" });
+      },
+      fauxAssistantMessage("Role exhausted."),
+    ]);
+    const id = f.ghost.directConversationId;
+    const done = message(f.engine, id, m => m.text === "Role exhausted.");
+    await f.engine.submit(id, { text: "Check credentials", origin: "owner", requestId: "scout-credentials" });
+    await done;
+    expect(keyless.state.callCount).toBe(0);
+    expect(models).toEqual(["faux-2"]);
+    expect((await f.engine.page(id, null, 50)).messages.find(m => m.role === "tool")).toMatchObject({
+      text: "no remaining usable model for orchestration role research: 429 rate limit", tool: { isError: true },
+    });
+  } finally { await f.close(); }
+});
+
+test("the configured concurrency limit refuses a second Ghost helper but releases the slot", async () => {
+  const f = await fixture();
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  try {
+    const config = scoutConfig();
+    config.limits.maxConcurrency = 1;
+    orchestrationStore(f.ledger).set(config);
+    f.faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("subagent_run", { task: "First", tools: [] }, { id: "helper-slot-one" }),
+        fauxToolCall("subagent_run", { task: "Second", tools: [] }, { id: "helper-slot-two" }),
+      ], { stopReason: "toolUse" }),
+      async () => { started.resolve(); await release.promise; return fauxAssistantMessage("First helper finished."); },
+      fauxAssistantMessage(fauxToolCall("subagent_run", { task: "After the first", tools: [] }, { id: "helper-after" }), { stopReason: "toolUse" }),
+      fauxAssistantMessage("Slot reused."),
+      fauxAssistantMessage("Helpers joined."),
+    ]);
+    const id = f.ghost.directConversationId;
+    const refused = message(f.engine, id, m => m.role === "tool" && m.text === "subagent concurrency limit reached");
+    const done = message(f.engine, id, m => m.text === "Helpers joined.");
+    await f.engine.submit(id, { text: "Check helper slots", origin: "owner", requestId: "helper-cap" });
+    const [error] = await Promise.all([refused, started.promise]);
+    expect(error.tool?.isError).toBe(true);
+    expect(f.ledger.conversations().filter(c => c.kind === "subagent")).toHaveLength(1);
+    release.resolve();
+    await done;
+    expect(f.ledger.conversations().filter(c => c.kind === "subagent")).toHaveLength(2);
+  } finally { release.resolve(); await f.close(); }
+});
+
+test("quota failures count toward the named helper's turn bound", async () => {
+  const f = await fixture();
+  try {
+    orchestrationStore(f.ledger).set(scoutConfig());
+    const models: string[] = [];
+    f.faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("subagent_run", { agent: "scout", task: "One attempt", tools: [], max_turns: 1 }), { stopReason: "toolUse" }),
+      (_context, _options, _state, model) => {
+        models.push(model.id);
+        return fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 rate limit" });
+      },
+      (_context, _options, _state, model) => { models.push(model.id); return fauxAssistantMessage("Bounded scout joined."); },
+    ]);
+    const id = f.ghost.directConversationId;
+    const done = message(f.engine, id, m => m.text === "Bounded scout joined.");
+    await f.engine.submit(id, { text: "Bound the scout", origin: "owner", requestId: "scout-attempt-bound" });
+    await done;
+    expect(models).toEqual(["faux-2", "faux-1"]);
+    expect((await f.engine.page(id, null, 50)).messages.find(m => m.role === "tool")?.text).toContain("turn or token bound");
+  } finally { await f.close(); }
+});
+
 test("helper read authorization rejects a stale parent grant", async () => {
   const f = await fixture();
   try {
@@ -209,7 +421,7 @@ test("cancelling the parent stops its task-owned helper", async () => {
   let cancelled = false;
   try {
     f.faux.setResponses([
-      fauxAssistantMessage(fauxToolCall("subagent_run", { task: "Long research", tools: [] }), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxToolCall("subagent_run", { agent: "scout", task: "Long research", tools: [] }), { stopReason: "toolUse" }),
       async (_context, options) => {
         started.resolve();
         const aborted = Promise.withResolvers<void>();

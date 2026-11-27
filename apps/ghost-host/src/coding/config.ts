@@ -2,7 +2,7 @@ import { statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
-import type { CodingSession, PiContextUsage, PiSettings, PiSettingsOverrides } from "@ghost/contract";
+import type { CodingSession, CodingThinking, PiContextUsage, PiSettings, PiSettingsOverrides } from "@ghost/contract";
 import { invalid } from "../core/errors.ts";
 import type { Ledger } from "../ledger/ledger.ts";
 import type { CodingModels } from "./models.ts";
@@ -66,12 +66,17 @@ export class PiConfig {
     if (enabled && !this.imageResizeAvailable) throw invalid("이 Host에서는 이미지를 자동 축소할 수 없습니다.");
   }
 
+  /** `model` and `thinking` are the owner's last choice, written only by `remember`; an edit of the other defaults keeps them. */
   async saveDefaults(settings: PiSettings): Promise<PiSettings> {
     this.assertImageResize(settings.imageAutoResize);
-    // A null model delegates to the Host default, which may be unset during initial setup.
-    if (settings.model) await this.models.use(settings.model, settings.thinking ?? undefined);
-    this.ledger.putSetting("pi.settings", settings);
-    return settings;
+    const { model, thinking } = this.defaults();
+    const saved = { ...settings, model, thinking };
+    this.ledger.putSetting("pi.settings", saved);
+    return saved;
+  }
+
+  remember(model: NonNullable<PiSettings["model"]>, thinking: CodingThinking): void {
+    this.ledger.putSetting("pi.settings", { ...this.ledger.setting<PiSettingsOverrides>("pi.settings", {}), model, thinking });
   }
 
   saveOverrides(id: string, overrides: PiSettingsOverrides): void {
@@ -80,8 +85,9 @@ export class PiConfig {
   async selection(model?: PiSettings["model"], thinking?: PiSettings["thinking"], strict = false) {
     // An unsupported inherited level falls back to that model's default; an
     // explicit override is rejected by the same validation as session creation.
-    if (strict) return this.models.use(model ?? undefined, thinking ?? undefined);
-    const selected = await this.models.use(model ?? undefined);
+    const remembered = this.defaults().model;
+    if (strict) return this.models.use(model ?? undefined, thinking ?? undefined, remembered);
+    const selected = await this.models.use(model ?? undefined, undefined, remembered);
     if (thinking && getSupportedThinkingLevels(selected.model).includes(thinking)) selected.thinking = thinking;
     return selected;
   }

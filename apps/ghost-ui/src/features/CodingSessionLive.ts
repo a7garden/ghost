@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useState } from 'react';
 import type { CodingItem, CodingSession } from '@ghost/contract';
-import { HostError, type CodingSessionModel, type HostClient } from '../host/client';
+import { HostError, type CodingLastModel, type CodingSessionModel, type HostClient } from '../host/client';
 import { useHost } from '../host/context';
 import { codingError, mergeCodingItems, upsertCodingItem } from './CodingSessionModel';
 
@@ -96,19 +96,21 @@ export function useCodingSessionLive(id: string) {
 export function useEmbeddedModels(enabled: boolean) {
   const { client } = useHost();
   const [models, setModels] = useState<CodingSessionModel[] | null>(null);
+  const [last, setLast] = useState<CodingLastModel | null>(null);
   const [error, setError] = useState('');
   const [attempt, reload] = useReducer((value: number) => value + 1, 0);
   useEffect(() => {
     if (!enabled) return;
     const request = new AbortController();
-    void client.codingModels(request.signal).then(({ models }) => {
+    void client.codingModels(request.signal).then(({ models, last }) => {
       if (request.signal.aborted) return;
       setModels(models);
+      setLast(last);
       setError('');
     }, reason => {
       if (!request.signal.aborted) setError(codingError(reason, '모델을 불러오지 못했습니다.'));
     });
     return () => request.abort();
   }, [client, enabled, attempt]);
-  return { models, error, reload };
+  return { models, last, error, reload };
 }

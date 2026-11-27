@@ -61,7 +61,7 @@ export function CodingSession({ id, onUpdate, changesRevision: onChangesRevision
         onAnswer={answer => client.answerCodingSession(id, dialog.id, answer)}/>}
       {empty && <p className="embedded-muted embedded-start">아직 지시가 없습니다.</p>}
       <CodingSessionComposer state={session.state} disabled={!ready || !connected} stopping={pending}
-        model={<CodingModelChip allowDefault={false} value={{ model: session.model, thinking: session.thinking }} disabled={!connected || pending}
+        model={<CodingModelChip value={{ model: session.model, thinking: session.thinking }} disabled={!connected || pending}
           onChange={next => void patch({ ...(next.model && { model: next.model }), ...(next.thinking && { thinking: next.thinking }) })}
           extra={<PiSessionSettings key={`${session.id}:${session.model.provider}:${session.model.model}:${session.thinking}`} session={session} disabled={!connected || pending}/>}/>}
         onAbort={() => void command(session, () => client.abortCodingSession(id), '작업을 중단하지 못했습니다.')}

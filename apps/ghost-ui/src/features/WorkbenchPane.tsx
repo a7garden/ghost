@@ -27,7 +27,7 @@ export function AgentState({ state, attention, withCopy = false }: { state?: Ses
 
 export function AttentionMark({ signal }: { signal?: Attention }) {
   if (!signal) return null;
-  return <StateGlyph className="workbench-project-signal" size={14} state={signal === 'waiting' ? 'attention' : signal}
+  return <StateGlyph className="sidebar-project__signal" size={14} state={signal === 'waiting' ? 'attention' : signal}
     accessibleLabel={signal === 'waiting' ? agentStates.waiting.label : undefined}/>;
 }
 

@@ -1,25 +1,29 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { GitBranch, GitCompare, Import, PanelLeftOpen, Plus, SquareTerminal, Workflow, X } from 'lucide-react';
+import { FolderTree, GitBranch, GitCompare, PanelLeftOpen, Plus, SquareTerminal, X } from 'lucide-react';
 import type { CodingSession as Session, CodingSessionCreate, Ghost, Scope, Work, WorkbenchState } from '@ghost/contract';
+import { projectsByReceiver, SidebarProjectGroup, SidebarProjectList } from '../components/WorkspaceSidebar';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { StateGlyph } from '../components/agent';
 import { HostError } from '../host/client';
 import { useHost } from '../host/context';
-import { Button, InlineError } from '../ui';
+import { Button, Dialog, DialogContent, DialogTitle, InlineError, Navigation, NavigationGroup } from '../ui';
 import { shortcut } from '../ui/keys';
+import { uiTerms } from '../uiText';
 import { AgentLaunch, type Launch } from './AgentLaunch';
 import { CodingSession } from './CodingSession';
 import { CodingSessionChanges } from './CodingSessionChanges';
-import { codingError, embeddedSessionPath } from './CodingSessionModel';
+import { codingError } from './CodingSessionModel';
 import { useWorkbenchAttention, type Attention } from './WorkbenchAttention';
+import { visibleGhosts } from './ghostState';
 import { WorkbenchChanges } from './WorkbenchChanges';
 import { AgentState, PaneHead, type PaneActions } from './WorkbenchPane';
-import { AGENT_DRAG, WorkbenchRail, type RailProject } from './WorkbenchRail';
+import { AGENT_DRAG, WorkbenchRail } from './WorkbenchRail';
 import { WorkbenchTerminal } from './WorkbenchTerminal';
 import { useNow } from './time';
 import { foldedAgents, STALE_MS } from './workbenchFold';
 import { close, emptyLayout, LAUNCH, loadLayout, prune, resize, saveLayout, show, split, type Layout } from './workbenchLayout';
 import { projectAgents, sessionProject, type ProjectAgent } from './workbenchProjects';
+import { workbenchPath, workbenchSessionPath } from './workbenchRoute';
 import { resolveSessionLink } from './workbenchSessionLink';
 import './Workbench.css';
 import './CodingSession.css';
@@ -33,8 +37,10 @@ const ATTENTION_PRIORITY: Record<Attention, number> = { done: 1, failed: 2, wait
 const RAIL_KEY = 'ghost.workbench.rail';
 const layoutKey = (scopeId: string | null) => scopeId ?? '';
 
-export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, navigate }: {
+export function Workbench({ scopes, works, ghosts, compact, scopeId, detail, sessionId, navigate, onProjectSignals }: {
   scopes: readonly Scope[]; works: readonly Work[]; ghosts: readonly Ghost[]; compact: boolean;
+  scopeId: string | null | undefined;
+  onProjectSignals(signals: ReadonlyMap<string | null, Attention | undefined>): void;
   /** Phone: an agent or the launch pad is on screen; otherwise the roster is. */
   detail: boolean; sessionId: string | null; navigate(path: string, options?: { replace?: boolean }): void;
 }) {
@@ -43,11 +49,13 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
   const latest = useRef<WorkbenchState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [sessionLink, setSessionLink] = useState<{ id: string; error: string } | null>(null);
+  const [sessionLink, setSessionLink] = useState<{ id: string; scopeId?: string | null; error?: string } | null>(null);
   const [revision, reload] = useState(0);
   const [queued, setQueued] = useState(0);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [projectSheetOpen, setProjectSheetOpen] = useState(false);
+  const projectSheetTrigger = useRef<HTMLButtonElement>(null);
   const [terminalRequest, setTerminalRequest] = useState<{ paneId: string; scopeId: string | null } | null>(null);
   const [railHidden, setRailHidden] = useState(() => { try { return localStorage.getItem(RAIL_KEY) === 'hidden'; } catch { return false; } });
   const [layouts, setLayouts] = useState<Record<string, Layout>>({});
@@ -55,25 +63,29 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
   const [dropHint, setDropHint] = useState<{ index: number; side: 'split' | 'replace' } | null>(null);
   const panesRef = useRef<HTMLDivElement>(null);
   const rosterRef = useRef<HTMLElement>(null);
-  const rosterScroll = useRef(0);
+  const rosterScroll = useRef(new Map<string | null, number>());
   const [folders, setFolders] = useState<{ scopeId: string; paths: string[] } | null>(null);
   const busy = queued > 0;
   const now = useNow();
   const loaded = state !== null;
   const roster = compact && !detail;
   const compactLaunch = compact && detail && sessionId === null;
-  useLayoutEffect(() => {
-    if (roster && loaded && rosterRef.current) rosterRef.current.scrollTop = rosterScroll.current;
-  }, [roster, loaded]);
 
-  const selected = state?.focus ? state.focus.scopeId : scopes[0]?.id ?? null;
+  const selected = scopeId !== undefined ? scopeId : state?.focus ? state.focus.scopeId : scopes[0]?.id ?? null;
+  const linked = sessionId !== null && sessionLink?.id === sessionId && sessionLink.scopeId === selected && !sessionLink.error;
+  const loadingLink = sessionId !== null && !linked && (sessionLink?.id !== sessionId || !sessionLink.error);
+  const settleEntry = useEffectEvent(() => navigate(workbenchPath(selected, detail ? 'launch=1' : ''), { replace: true }));
+  useEffect(() => { if (loaded && scopeId === undefined && sessionId === null) settleEntry(); }, [loaded, scopeId, sessionId]);
+  useLayoutEffect(() => {
+    if (roster && loaded && rosterRef.current) rosterRef.current.scrollTop = rosterScroll.current.get(selected) ?? 0;
+  }, [roster, loaded, selected]);
   const scope = scopes.find(item => item.id === selected);
   const workMap = useMemo(() => new Map(works.map(work => [work.id, work])), [works]);
   const ghostMap = useMemo(() => new Map(ghosts.map(ghost => [ghost.id, { id: ghost.id, name: ghost.name }])), [ghosts]);
 
   const layout = layouts[layoutKey(selected)] ?? emptyLayout;
   const activeId = layout.panes[layout.active] ?? null;
-  const displayedId = compact && detail ? compactLaunch ? LAUNCH : activeId ?? sessionId ?? LAUNCH : activeId;
+  const displayedId = compact && detail ? compactLaunch ? LAUNCH : linked ? sessionId : null : activeId;
   const activeSession = activeId && activeId !== LAUNCH ? activeId : null;
   const { sessions, attention, observer, listed: sessionsListed, setShowPicker } = useWorkbenchAttention(state?.agents ?? null, activeSession);
   // The session list feeds Ghost-started agents and the project's earlier sessions.
@@ -94,25 +106,26 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
     return session && !session.repo && (session.state === 'working' || session.state === 'waiting') ? [session.cwd] : [];
   }));
 
-  const signals = new Map<string | null, Attention>();
-  let firstWaiting: ProjectAgent | undefined;
-  let firstFailed: ProjectAgent | undefined;
-  let attentionCount = 0;
-  for (const row of rows) {
-    const phase = sessions.get(row.sessionId)?.state;
-    if (phase === 'waiting' || phase === 'failed') {
-      attentionCount++;
-      if (phase === 'waiting') firstWaiting ??= row;
-      else firstFailed ??= row;
+  const { signals, firstAttention, attentionCount } = useMemo(() => {
+    const signals = new Map<string | null, Attention | undefined>();
+    let firstWaiting: ProjectAgent | undefined;
+    let firstFailed: ProjectAgent | undefined;
+    let attentionCount = 0;
+    for (const row of rows) {
+      const phase = sessions.get(row.sessionId)?.state;
+      if (phase === 'waiting' || phase === 'failed') {
+        attentionCount++;
+        if (phase === 'waiting') firstWaiting ??= row;
+        else firstFailed ??= row;
+      }
+      const signal = phase === 'waiting' || phase === 'failed' ? phase
+        : phase === 'idle' && attention.get(row.sessionId) === 'done' ? 'done' : undefined;
+      const prior = signals.get(row.scopeId);
+      if (!prior || (signal && ATTENTION_PRIORITY[signal] > ATTENTION_PRIORITY[prior])) signals.set(row.scopeId, signal);
     }
-    const signal = phase === 'waiting' || phase === 'failed' ? phase
-      : phase === 'idle' && attention.get(row.sessionId) === 'done' ? 'done' : undefined;
-    const prior = signals.get(row.scopeId);
-    if (signal && (!prior || ATTENTION_PRIORITY[signal] > ATTENTION_PRIORITY[prior])) signals.set(row.scopeId, signal);
-  }
-  const firstAttention = firstWaiting ?? firstFailed;
-  const projects: RailProject[] = scopes.map(item => ({ id: item.id, scope: item, signal: signals.get(item.id) }));
-  if (!scopes.length || selected === null || rows.some(row => row.scopeId === null)) projects.push({ id: null, scope: null, signal: signals.get(null) });
+    return { signals, firstAttention: firstWaiting ?? firstFailed, attentionCount };
+  }, [rows, sessions, attention]);
+  useEffect(() => { if (loaded) onProjectSignals(signals); }, [loaded, onProjectSignals, signals]);
 
   // Every unfolded agent of the project stays mounted, so a draft and the live stream survive switching panes.
   const mounted = new Set([...projectRows.filter(row => !folded.has(row.sessionId)).map(row => row.sessionId), ...layout.panes]);
@@ -144,7 +157,7 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
       const first = projectRows.find(row => !folded.has(row.sessionId));
       restored = show(restored, first?.sessionId ?? LAUNCH);
     }
-    setLayouts(all => ({ ...all, [key]: restored }));
+    setLayouts(all => all[key] ? all : { ...all, [key]: restored });
   }, [state, selected, layouts, projectRows, folded]);
 
   useEffect(() => { if (layouts[layoutKey(selected)]) saveLayout(selected, layout); }, [selected, layout, layouts]);
@@ -155,19 +168,19 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
     setLayout(current => prune(current, id => sessions.has(id)));
   }, [sessionsListed, sessions, selected]);
 
-  // The active agent is the Host's focus, so the phone and the Mac return to the same place.
-  const syncFocus = useEffectEvent((id: string) => {
-    const focus = latest.current?.focus;
-    if (!latest.current || (focus?.scopeId === selected && focus.sessionId === id)) return;
-    showFailure(mutate('focus', 'POST', { scopeId: selected, sessionId: id }));
+  // The route owns project selection; the Host remembers the project and its active agent for next time.
+  const syncFocus = useEffectEvent((id: string | null) => {
+    showFailure(enqueue(async () => {
+      const focus = latest.current?.focus;
+      if (focus?.scopeId === selected && (!id || focus.sessionId === id)) return;
+      await change('focus', 'POST', { scopeId: selected, ...(id ? { sessionId: id } : {}) });
+    }));
   });
-  useEffect(() => { if (activeSession && sessions.has(activeSession)) syncFocus(activeSession); }, [activeSession, sessions.size > 0]);
-
-  // A focus that arrives from elsewhere (a link from 맡긴 일, another device) shows in the active pane.
-  const hostFocus = state?.focus?.sessionId ?? null;
+  const activeKnown = activeSession !== null && sessions.has(activeSession);
   useEffect(() => {
-    if (hostFocus && layouts[layoutKey(selected)]) setLayout(current => current.panes.includes(hostFocus) ? current : show(current, hostFocus));
-  }, [hostFocus]);
+    if (!loaded || scopeId === undefined || loadingLink) return;
+    syncFocus(activeKnown ? activeSession : null);
+  }, [loaded, scopeId, loadingLink, activeKnown, activeSession]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -193,13 +206,19 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
   const launchFolders = folders?.scopeId === selected ? folders.paths : scope?.paths ?? [];
 
   const activateSession = useEffectEvent((id: string, signal: AbortSignal) => {
-    setSessionLink(null);
+    if (linked) return;
     void enqueue(async () => {
       if (signal.aborted) return;
       const session = await client.codingSession(id, signal);
-      const action = latest.current && resolveSessionLink(latest.current, session, sessionProject(session, workMap, scopes));
-      if (action && !signal.aborted) await change(action.path, 'POST', action.fields);
-      if (!signal.aborted) setSessionLink({ id, error: '' });
+      if (signal.aborted) return;
+      const action = resolveSessionLink(latest.current!, session, sessionProject(session, workMap, scopes));
+      if (action) await change(action.path, 'POST', action.fields);
+      if (signal.aborted) return;
+      const destination = latest.current!.focus!.scopeId;
+      observer(session);
+      setLayout(current => show(current === emptyLayout ? loadLayout(destination) : current, id), destination);
+      setSessionLink({ id, scopeId: destination });
+      if (scopeId !== destination) navigate(workbenchSessionPath(destination, id), { replace: true });
     }).catch(reason => {
       if (signal.aborted) return;
       setSessionLink({ id, error: reason instanceof HostError && reason.code === 'not_found'
@@ -207,11 +226,12 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
     });
   });
   useEffect(() => {
-    if (!loaded || sessionId === null) return;
+    if (sessionId === null) { setSessionLink(null); return; }
+    if (!loaded) return;
     const controller = new AbortController();
     activateSession(sessionId, controller.signal);
     return () => controller.abort();
-  }, [client, loaded, sessionId]);
+  }, [client, loaded, scopeId, sessionId]);
 
   useEffect(() => {
     if (compact) return;
@@ -265,14 +285,10 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
     void result.catch(reason => setError(codingError(reason, '작업대를 바꾸지 못했습니다.')));
   }
 
-  function selectProject(id: string | null) {
-    if (latest.current?.focus?.scopeId === id && latest.current.focus !== null) return;
-    showFailure(mutate('focus', 'POST', { scopeId: id }));
-  }
-
   function openAgent(id: string, beside = false) {
     setLayout(current => beside ? split(current, id) : show(current, id));
-    if (compact) navigate(embeddedSessionPath(id));
+    if (compact) navigate(workbenchSessionPath(selected, id));
+    else if (sessionId) navigate(workbenchPath(selected), { replace: true });
   }
 
   function openAttention(target: ProjectAgent) {
@@ -280,16 +296,13 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
       openAgent(target.sessionId);
       return;
     }
-    showFailure(enqueue(async () => {
-      await change('focus', 'POST', { scopeId: target.scopeId, sessionId: target.sessionId });
-      setLayout(current => show(current === emptyLayout ? loadLayout(target.scopeId) : current, target.sessionId), target.scopeId);
-      if (compact) navigate(embeddedSessionPath(target.sessionId));
-    }));
+    navigate(workbenchSessionPath(target.scopeId, target.sessionId));
   }
 
   function newAgent(beside = false) {
     setLayout(current => beside ? split(current, LAUNCH) : show(current, LAUNCH));
-    if (compact) navigate('/coding?launch=1');
+    if (compact) navigate(workbenchPath(selected, 'launch=1'));
+    else if (sessionId) navigate(workbenchPath(selected), { replace: true });
   }
 
   // A launch pad gives way to the agent it started; on a phone that screen replaces the pad in history, so Back lands on the roster.
@@ -302,7 +315,7 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
       panes[at] = id;
       return { ...current, panes, active: at };
     });
-    if (compact) navigate(embeddedSessionPath(id), { replace: true });
+    if (compact) navigate(workbenchSessionPath(selected, id), { replace: true });
   };
 
   async function launch({ prompt, place, choice }: Launch) {
@@ -336,11 +349,7 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
       return next;
     }, key || null);
     // The agent on a phone screen is gone: the roster is what is left to show.
-    if (compact && detail && id === activeSession) navigate('/coding', { replace: true });
-  }
-
-  function removeAgent(id: string) {
-    showFailure(mutate(`agents/${encodeURIComponent(id)}`, 'DELETE').then(() => dropPanes(id)));
+    if (detail && id === sessionId) navigate(workbenchPath(selected), { replace: true });
   }
 
   function pinAgent(id: string) {
@@ -352,16 +361,6 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
     const listed = state?.agents.some(agent => agent.sessionId === id);
     const result = listed ? mutate(`agents/${encodeURIComponent(id)}`, 'PATCH', { scopeId }) : mutate('agents', 'POST', { sessionId: id, scopeId });
     showFailure(result.then(() => dropPanes(id)));
-  }
-
-  async function createProject(name: string, folder: string | null) {
-    try {
-      const { scopeId } = await client.send<{ scopeId: string }>({ type: 'scope.create', name, ghostId: null, paths: folder ? [folder] : [], vaultPath: null, state: 'active', attachments: [], limits: {} });
-      await mutate('focus', 'POST', { scopeId });
-    } catch (reason) {
-      setError(codingError(reason, '프로젝트를 만들지 못했습니다.'));
-      throw reason;
-    }
   }
 
   function startResize(index: number, event: ReactPointerEvent<HTMLDivElement>) {
@@ -420,20 +419,24 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
     <StateGlyph state="attention" accessibleLabel=""/>
     <span className="workbench-review__label">확인 필요</span>{' '}<span className="workbench-review__count">{attentionCount}</span>
   </button>;
-  const rail = <WorkbenchRail projects={projects} selected={selected} rows={projectRows} folded={folded} activeId={activeId}
+  const rail = <WorkbenchRail scope={scope} navigate={navigate} rows={projectRows} folded={folded} activeId={activeId}
     launching={!compact && layout.panes.includes(LAUNCH)} sessions={sessions} attention={attention} ghosts={ghostMap} now={now} busy={busy || !state} canSplit={!compact}
-    selectProject={selectProject} openAgent={openAgent} newAgent={newAgent}
+    openAgent={openAgent} newAgent={newAgent}
     renameAgent={renameAgent} removeAgent={id => setDialog({ type: 'deleteAgent', sessionId: id, title: sessions.get(id)?.title ?? '에이전트' })} pinAgent={pinAgent}
-    createProject={createProject} openProjectSettings={id => navigate(`/scopes/${encodeURIComponent(id)}?view=settings`)}
+    projectPicker={compact && <Button ref={projectSheetTrigger} variant="ghost" size="icon" type="button" aria-label="프로젝트 목록"
+      aria-haspopup="dialog" aria-expanded={projectSheetOpen} title="프로젝트 목록"
+      onClick={() => setProjectSheetOpen(true)}><FolderTree aria-hidden="true"/></Button>}
     onCollapse={compact ? undefined : toggleRail} attentionAction={attentionAction}
-    footer={<nav className="workbench-tools" aria-label="코딩 메뉴">
-      <h2>도구</h2>
-      <ul>
-        {scope?.paths[0] && <li><button type="button" onClick={() => setDialog({ type: 'folderChanges', root: scope.paths[0]! })}><GitBranch size={16} aria-hidden="true"/>git 변경</button></li>}
-        <li><a href="#/coding/orchestration" onClick={event => { event.preventDefault(); navigate('/coding/orchestration'); }}><Workflow size={16} aria-hidden="true"/>오케스트레이션</a></li>
-        <li><a href="#/coding/orchestration?import=1" onClick={event => { event.preventDefault(); navigate('/coding/orchestration?import=1'); }}><Import size={16} aria-hidden="true"/>하네스 가져오기</a></li>
-      </ul>
-    </nav>}/>;
+    footer={scope?.paths[0] && <button type="button" className="workbench-git" onClick={() => setDialog({ type: 'folderChanges', root: scope.paths[0]! })}>
+      <GitBranch size={16} aria-hidden="true"/>git 변경
+    </button>}/>;
+
+  const projectRoster = compact && projectSheetOpen ? visibleGhosts(ghosts) : [];
+  const { byGhost, orphans } = projectsByReceiver(projectSheetOpen ? scopes : [], projectRoster);
+  const sheetProjectList = {
+    coding: true, selectedScope: selected, signals,
+    navigate: (path: string) => { setProjectSheetOpen(false); navigate(path); },
+  };
 
   const paneBody = (id: string) => id === LAUNCH
     // A launch pad belongs to its project: folder and model picks never carry over to another one.
@@ -470,7 +473,7 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
     const session = sessions.get(id);
     const ghost = session?.ghostId ? ghostMap.get(session.ghostId) ?? { id: session.ghostId, name: 'Ghost' } : undefined;
     return <PaneHead key={id} session={session} ghost={ghost} attention={attention.get(id)} projects={scopes} currentScopeId={scopeOf(id)}
-      fallbackContext={compact ? scope?.name ?? '프로젝트 없음' : undefined} onClosePane={closePane}
+      fallbackContext={compact ? scope?.name ?? uiTerms.noProject : undefined} onClosePane={closePane}
       actions={agentActions(id)}>{terminalToggle(id)}</PaneHead>;
   };
 
@@ -491,12 +494,11 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
     <div className="workbench-main">
       {error && <div className="workbench-error"><InlineError onRetry={!state ? () => reload(value => value + 1) : undefined} retryLabel="다시 불러오기">{error}</InlineError></div>}
       {loading && !state && <p className="workbench-empty" role="status">작업대를 불러오는 중…</p>}
-      {loaded && sessionId !== null && (sessionLink?.id !== sessionId
-        ? <p className="workbench-error" role="status">에이전트를 여는 중…</p>
-        : sessionLink.error && <div className="workbench-error"><InlineError>{sessionLink.error}</InlineError></div>)}
+      {loaded && loadingLink && <p className="workbench-error" role="status">에이전트를 여는 중…</p>}
+      {sessionId !== null && sessionLink?.id === sessionId && sessionLink.error && <div className="workbench-error"><InlineError>{sessionLink.error}</InlineError></div>}
       {roster && state && <aside ref={rosterRef} className="workbench-rail" aria-label="작업대 탐색"
-        onScroll={event => { rosterScroll.current = event.currentTarget.scrollTop; }}>{rail}</aside>}
-      {state && <div ref={panesRef} className="workbench-panes" data-covered={(roster || (compact && activeTerminal !== null)) || undefined}
+        onScroll={event => { rosterScroll.current.set(selected, event.currentTarget.scrollTop); }}>{rail}</aside>}
+      {state && <div ref={panesRef} className="workbench-panes" data-covered={(roster || loadingLink || (compact && activeTerminal !== null)) || undefined}
         onDragOver={event => {
           if (compact || !event.dataTransfer.types.includes(AGENT_DRAG)) return;
           event.preventDefault();
@@ -514,7 +516,7 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
         }}>
         {[...mounted].map(id => {
           const index = layout.panes.indexOf(id);
-          const visible = compact ? detail && (compactLaunch ? id === LAUNCH : index === layout.active) : index >= 0;
+          const visible = compact ? detail && id === displayedId : index >= 0;
           const style = { order: index * 2, flexGrow: layout.sizes[index] ?? 1 } as CSSProperties;
           return <section key={id} className="workbench-pane" data-pane-index={visible ? index : undefined} hidden={!visible} style={style}
             data-active={(!compact && layout.panes.length > 1 && index === layout.active) || undefined} data-drop={dropHint?.index === index ? dropHint.side : undefined}
@@ -538,5 +540,22 @@ export function Workbench({ scopes, works, ghosts, compact, detail, sessionId, n
       {activeTerminal?.cwd && !roster && <WorkbenchTerminal key={activeTerminal.cwd} cwd={activeTerminal.cwd} onHide={() => setTerminalRequest(null)}/>}
     </div>
     {sheet}
+    {compact && <Dialog open={projectSheetOpen} onOpenChange={setProjectSheetOpen}>
+      <DialogContent closeLabel="닫기" aria-describedby={undefined} className="workbench-project-sheet"
+        onCloseAutoFocus={event => { event.preventDefault(); projectSheetTrigger.current?.focus(); }}>
+        <DialogTitle className="sr-only">프로젝트</DialogTitle>
+        <Navigation label="프로젝트">
+          <SidebarProjectGroup navigate={sheetProjectList.navigate}>
+            {projectRoster.map(ghost => {
+              const owned = byGhost.get(ghost.id);
+              return owned && <NavigationGroup key={ghost.id} label={ghost.name}>
+                <SidebarProjectList {...sheetProjectList} scopes={owned} receiver={ghost.name}/>
+              </NavigationGroup>;
+            })}
+            <SidebarProjectList {...sheetProjectList} scopes={orphans} showUnscoped/>
+          </SidebarProjectGroup>
+        </Navigation>
+      </DialogContent>
+    </Dialog>}
   </div>;
 }

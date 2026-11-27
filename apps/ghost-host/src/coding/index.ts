@@ -145,7 +145,7 @@ export class CodingSessions implements CodingSessionsPort {
 
   private async createOne(id: string, input: CodingSessionCreate, requester: CodingRequester): Promise<CodingSession> {
     const settings = this.piConfig.defaults();
-    const { model, thinking } = await this.piConfig.selection(input.model ?? settings.model, input.thinking ?? settings.thinking, input.thinking !== undefined);
+    const { model, thinking } = await this.piConfig.selection(input.model, input.thinking ?? (input.model ? undefined : settings.thinking), input.thinking !== undefined);
     if (this.stopping) throw conflict("coding sessions are shutting down");
     if (input.prompt !== undefined && !input.prompt.trim()) throw invalid("initial coding prompt needs text");
     const authorize = requester.kind === "ghost" ? () => this.options.authorizeGhost(requester, id) : undefined;
@@ -165,10 +165,9 @@ export class CodingSessions implements CodingSessionsPort {
     };
     const record: CodingSessionRecord = { session, requester, active: null, pending: [], reports: [], interrupted: [] };
     this.options.ledger.putCodingSession(record);
-    this.piConfig.saveOverrides(id, {
-      ...(input.model !== undefined && { model: input.model }),
-      ...(input.thinking !== undefined && { thinking: input.thinking }),
-    });
+    // The session keeps the model it started on; the owner's last choice only seeds the next agent.
+    this.piConfig.saveOverrides(id, { model: session.model, thinking });
+    if (requester.kind === "owner") this.piConfig.remember(session.model, thinking);
     const handle = this.makeHandle(record);
     this.handles.set(id, handle);
     if (input.prompt !== undefined) await this.admitPrompt(handle, { text: input.prompt }, authorize);
@@ -309,12 +308,6 @@ export class CodingSessions implements CodingSessionsPort {
     await Promise.all([...this.handles.values()].map(handle => this.serial(handle, async () => {
       if (handle.record.session.state === "closed") return;
       if (handle.agent) this.applyPiSettings(handle.agent, this.piConfig.effective(handle.record.session.id));
-      // Existing sessions keep their current model if the provider is now unavailable.
-      // Resolve the new default again before the next turn.
-      try {
-        const selected = await this.piSelection(handle);
-        await this.applyPiModel(handle, selected);
-      } catch (error) { this.options.log("coding model default could not be applied", error); }
     })));
     return saved;
   }
@@ -356,9 +349,9 @@ export class CodingSessions implements CodingSessionsPort {
   }
 
   private piSelection(handle: SessionHandle, overrides = this.piConfig.overrides(handle.record.session.id)) {
-    const defaults = this.piConfig.defaults();
-    return this.piConfig.selection(overrides.model === undefined ? defaults.model : overrides.model,
-      overrides.thinking === undefined ? defaults.thinking : overrides.thinking, overrides.thinking != null);
+    // A session follows its own model; an override that names none leaves it where it is.
+    const { model, thinking } = handle.record.session;
+    return this.piConfig.selection(overrides.model ?? model, overrides.thinking ?? thinking, overrides.thinking != null);
   }
 
   private async reconfigurePi(handle: SessionHandle, overrides: PiSettingsOverrides, update?: Partial<CodingSession>): Promise<CodingSession> {
@@ -368,7 +361,12 @@ export class CodingSessions implements CodingSessionsPort {
     if (before.model?.provider !== overrides.model?.provider || before.model?.model !== overrides.model?.model ||
       (before.model === null) !== (overrides.model === null) || before.thinking !== overrides.thinking) {
       const selected = await this.piSelection(handle, overrides);
+      const { model: from, thinking: level } = handle.record.session;
+      const changed = selected.model.provider !== from.provider || selected.model.id !== from.model || selected.thinking !== level;
       await this.applyPiModel(handle, selected);
+      const model = { provider: selected.model.provider, model: selected.model.id };
+      if (changed && handle.record.requester.kind === "owner") this.piConfig.remember(model, selected.thinking);
+      overrides = { ...overrides, model, thinking: selected.thinking };
     }
     this.piConfig.saveOverrides(handle.record.session.id, overrides);
     if (handle.agent) this.applyPiSettings(handle.agent, this.piConfig.effective(handle.record.session.id));

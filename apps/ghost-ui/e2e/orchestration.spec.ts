@@ -43,7 +43,9 @@ for (const width of [1440, 390]) {
         : route.fulfill({ json: previewFor(route.request().postDataJSON().source as string) }));
       try {
         expect((await write(seeded)).ok()).toBe(true);
-        await page.goto(`${baseUrl}/#/coding/orchestration`);
+        await page.goto(`${baseUrl}/#/settings`);
+        await page.getByRole(width === 390 ? 'button' : 'tab', { name: '오케스트레이션', exact: true }).click();
+        await expect(page).toHaveURL(/#\/settings\/orchestration$/);
         await expect(page.getByRole('heading', { name: '오케스트레이션' })).toBeVisible();
         await sessions.patch({ state: 'working' });
         await sessions.item(active);
@@ -115,7 +117,7 @@ for (const width of [1440, 390]) {
       } finally { await write(original); }
     });
 
-    test('opens the import panel from the ?import=1 query and closes it in place', async ({ page }) => {
+    test('opens the import panel from Settings and consumes the ?import=1 query', async ({ page }) => {
       const { baseUrl } = readRunState();
       const imported = { name: 'omp-auditor', description: 'omp 검토', modelRole: 'session', instructions: '', tools: ['read' as const], readOnly: true, canDelegateTo: [] };
       await page.route('**/api/orchestration/import', route => route.request().method() === 'GET'
@@ -124,13 +126,19 @@ for (const width of [1440, 390]) {
             enabled: true, modelRoles: { session: { provider: null, model: null, thinking: null } }, fallbackChains: {},
             limits: { maxConcurrency: 4, maxDepth: 1 }, agents: [imported], positions: { agents: {}, roles: {} },
           }, unmappable: [], issues: [] } }));
-      await page.goto(`${baseUrl}/#/coding/orchestration?import=1`);
+      await page.goto(`${baseUrl}/#/settings`);
+      await page.getByRole(width === 390 ? 'button' : 'tab', { name: '하네스 가져오기', exact: true }).click();
       const panel = page.getByRole('region', { name: '하네스 가져오기' });
       await expect(panel).toBeVisible();
       await expect(panel.getByRole('radio', { name: 'omp · 에이전트 2개' })).toBeChecked();
       await panel.getByRole('button', { name: '닫기' }).click();
       await expect(panel).toBeHidden();
-      await expect(page).toHaveURL(/#\/coding\/orchestration$/);
+      await expect(page).toHaveURL(/#\/settings\/orchestration$/);
+      await page.getByRole('link', { name: '설정으로', exact: true }).click();
+      await expect(page).toHaveURL(/#\/settings$/);
+      await page.goto(`${baseUrl}/#/coding/orchestration`);
+      await expect(page.getByText('이 화면을 찾을 수 없습니다', { exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '오케스트레이션', exact: true })).toHaveCount(0);
     });
   });
 }

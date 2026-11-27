@@ -117,7 +117,7 @@ export async function mockCodingSessions(page: Page) {
     if (notify) await emit(id, { type: 'item', item });
   };
 
-  await page.route('**/api/coding/models', route => route.fulfill({ json: { models } }));
+  await page.route('**/api/coding/models', route => route.fulfill({ json: { models, last: { provider: 'sample', model: 'sparrow', thinking: null } } }));
   await page.route('**/api/coding/sessions', async route => {
     if (route.request().method() === 'GET') return route.fulfill({ json: [...sessions.values()] });
     const input = route.request().postDataJSON() as CodingSessionCreate;

@@ -92,8 +92,40 @@ test('opens an embedded coding session when the owner taps its native notificati
     window.dispatchEvent(new CustomEvent('ghost-shell', { detail: { type: 'notification.open', notificationId } }));
   }, id);
   expect((await read).postDataJSON().command.notificationIds).toEqual([id]);
-  await expect(page).toHaveURL(url => url.hash === `#/coding?session=${sampleSession.id}`);
+  await expect(page).toHaveURL(url => url.hash === `#/coding/-?session=${sampleSession.id}`);
   await expect(page.getByRole('region', { name: `에이전트: ${sampleSession.title}`, exact: true })).toBeVisible();
+});
+
+test('switches the coding workbench through the phone project sheet', async ({ page }) => {
+  const coding = await mockCodingSessions(page);
+  const { service } = await mockWorkbench(page, coding.creates);
+  service.addAgent({ version: 0, sessionId: sampleSession.id, scopeId: null });
+  const { scopeId } = await openScreen(page, { name: 'mobile workbench', route: () => '/', waits: () => ['최근 끝난 일'] }, 'light');
+  const dock = page.getByRole('navigation', { name: '주요 화면' });
+  await dock.getByRole('button', { name: '코딩', exact: true }).tap();
+  await expect(page).toHaveURL(/#\/coding\/-$/);
+  const rail = page.getByRole('complementary', { name: '작업대 탐색' });
+  const picker = rail.getByRole('button', { name: '프로젝트 목록' });
+  const sheet = page.getByRole('dialog', { name: '프로젝트', exact: true });
+  await expect(rail.getByTitle(sampleSession.title, { exact: true })).toBeVisible();
+  await expect(rail.getByRole('navigation', { name: '프로젝트' })).toHaveCount(0);
+  await picker.tap();
+  await expect(sheet.getByRole('button', { name: '프로젝트 없음', exact: true })).toHaveAttribute('aria-current', 'page');
+  const evidence = process.env.GHOST_WORKBENCH_EVIDENCE_DIR;
+  if (evidence) await page.screenshot({ path: `${evidence}/project-sheet-390.png`, animations: 'disabled', caret: 'hide' });
+  await sheet.getByRole('button', { name: '비행 기록', exact: true }).tap();
+  await expect(page).toHaveURL(url => url.hash === `#/coding/${scopeId}`);
+  await expect(sheet).toBeHidden();
+  await expect(rail.getByTitle(sampleSession.title, { exact: true })).toHaveCount(0);
+  await expect(rail.getByRole('link', { name: '비행 기록' })).toBeVisible();
+  if (evidence) await page.screenshot({ path: `${evidence}/project-roster-390.png`, animations: 'disabled', caret: 'hide' });
+  await expect.poll(() => service.read().focus?.scopeId).toBe(scopeId);
+  await dock.getByRole('button', { name: '홈', exact: true }).tap();
+  await dock.getByRole('button', { name: '코딩', exact: true }).tap();
+  await expect(page).toHaveURL(url => url.hash === `#/coding/${scopeId}`);
+  await picker.tap();
+  await sheet.getByRole('button', { name: '프로젝트 없음', exact: true }).tap();
+  await expect(rail.getByTitle(sampleSession.title, { exact: true })).toBeVisible();
 });
 
 test('keeps the long chat draft and its actions within the keyboard viewport', async ({ page }) => {

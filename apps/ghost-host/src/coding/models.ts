@@ -38,10 +38,19 @@ export class CodingModels {
       ({ provider: model.provider, model: model.id, name: model.name, thinking: THINKING.filter(level => getSupportedThinkingLevels(model).includes(level)) })));
   }
 
-  async use(requested?: ModelRef, thinking?: CodingThinking): Promise<CodingModelSelection> {
+  /** The model a new agent starts on: the one the owner used last, else the Host default, else the first configured. */
+  preferred(remembered?: ModelRef | null): ModelRef | undefined {
+    const listed = this.list();
+    const usable = (ref: ModelRef | null | undefined): ref is NonNullable<ModelRef> => !!ref && listed.some(item => item.provider === ref.provider && item.model === ref.model);
+    const fallback = this.source.settings().defaultModel;
+    if (usable(remembered)) return { provider: remembered.provider, model: remembered.model };
+    if (usable(fallback)) return { provider: fallback.provider, model: fallback.model };
+    return listed[0] && { provider: listed[0].provider, model: listed[0].model };
+  }
+
+  async use(requested?: ModelRef, thinking?: CodingThinking, remembered?: ModelRef | null): Promise<CodingModelSelection> {
     const providers = this.providers();
-    const first = providers.find(item => item.getModels().length > 0)?.getModels()[0];
-    const ref = requested ?? this.source.settings().defaultModel ?? (first && { provider: first.provider, model: first.id });
+    const ref = requested ?? this.preferred(remembered);
     if (!ref) throw new CommandError("unavailable", "no configured coding model with credentials");
     const provider = providers.find(item => item.id === ref.provider);
     const model = provider?.getModels().find(item => item.id === ref.model);

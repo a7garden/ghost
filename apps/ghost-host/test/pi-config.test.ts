@@ -82,7 +82,7 @@ test("changing compaction settings affects a running Pi and persists real compac
     expect(compaction).toHaveLength(1);
     expect(compaction[0]).toMatchObject({ summary: expect.stringContaining("summary of the older turns") });
     expect(f.sessions.items(session.id)).toContainEqual(expect.objectContaining({ kind: "notice", text: "맥락을 압축했습니다." }));
-    expect(f.ledger.setting<unknown>(`pi.session.settings:${session.id}`, null)).toEqual(overrides);
+    expect(f.ledger.setting<unknown>(`pi.session.settings:${session.id}`, null)).toEqual({ ...overrides, model: { provider: "faux", model: "faux-1" }, thinking: "medium" });
 
     overrides.compaction.enabled = false;
     expect((await f.request(route, "PUT", { overrides })).status).toBe(200);
@@ -96,17 +96,24 @@ test("changing compaction settings affects a running Pi and persists real compac
   } finally { await f.close(); }
 });
 
-test("Pi model defaults and tool allowlist apply to subsequent turns; explicit session choices override defaults", async () => {
+test("the owner's last model seeds the next agent while every session keeps its own; tool allowlist defaults apply to subsequent turns", async () => {
   const f = setup();
   try {
     const route = "/settings";
     const current = await (await f.request(route)).json() as { settings: PiSettings };
+    expect(current.settings).toMatchObject({ model: null, thinking: null });
+    // Defaults edit everything but the remembered model: a stale form cannot overwrite the owner's last choice.
+    const saved = await (await f.request(route, "PUT", { ...current.settings, model: { provider: "faux", model: "faux-2" }, thinking: "high", toolAllowlist: ["ls", "powershell"] })).json() as PiSettings;
+    expect(saved).toMatchObject({ model: null, thinking: null, toolAllowlist: ["ls", "powershell"] });
+
     const ref = { provider: "faux", model: "faux-2" };
-    const settings = { ...current.settings, model: ref, thinking: "high", toolAllowlist: ["ls", "powershell"] };
-    expect((await f.request(route, "PUT", settings)).status).toBe(200);
-    expect(f.ledger.setting<unknown>("pi.settings", null)).toEqual(settings);
-    const session = await f.sessions.create({ cwd: f.cwd }, owner);
-    expect(session).toMatchObject({ model: ref, thinking: "high" });
+    const first = await f.sessions.create({ cwd: f.cwd, model: ref, thinking: "high" }, owner);
+    expect(first).toMatchObject({ model: ref, thinking: "high" });
+    const second = await f.sessions.create({ cwd: f.cwd }, owner);
+    expect(second).toMatchObject({ model: ref, thinking: "high" });
+    const models = await (await fetch(`http://127.0.0.1:${f.hostPort}/api/coding/models`, { headers: { authorization: "Bearer owner-test" } })).json() as { last: unknown };
+    expect(models.last).toEqual({ ...ref, thinking: "high" });
+
     f.faux.setResponses([(context, _options, _state, model) => {
       expect(model.id).toBe("faux-2");
       expect(getCurrentTools(context.messages).map(tool => tool.name)).toEqual(["ls"]);
@@ -116,11 +123,15 @@ test("Pi model defaults and tool allowlist apply to subsequent turns; explicit s
       expect(getCurrentTools(context.messages).map(tool => tool.name)).toEqual([]);
       return fauxAssistantMessage("second");
     }]);
-    await f.execute(session.id, "first");
+    await f.execute(first.id, "first");
     const overrides = { model: { provider: "faux", model: "faux-1" }, thinking: "off", toolAllowlist: [] };
-    expect((await f.request(`/sessions/${session.id}`, "PUT", { overrides })).status).toBe(200);
-    expect(f.sessions.get(session.id)).toMatchObject({ model: overrides.model, thinking: "off" });
-    await f.execute(session.id, "second");
+    expect((await f.request(`/sessions/${first.id}`, "PUT", { overrides })).status).toBe(200);
+    expect(f.sessions.get(first.id)).toMatchObject({ model: overrides.model, thinking: "off" });
+    // Switching one session's model becomes the last choice but never moves another session.
+    expect(f.sessions.piConfig.defaults()).toMatchObject({ model: overrides.model, thinking: "off" });
+    expect(f.sessions.get(second.id)).toMatchObject({ model: ref, thinking: "high" });
+    expect(await f.sessions.create({ cwd: f.cwd }, owner)).toMatchObject({ model: overrides.model, thinking: "off" });
+    await f.execute(first.id, "second");
   } finally { await f.close(); }
 });
 

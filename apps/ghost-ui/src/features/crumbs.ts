@@ -76,6 +76,7 @@ export function crumbsFor(route: string, state: State | null): Crumb[] {
       return space ? [{ label: routeLabels.scopes, path: '/scopes' }, { label: space.name, path: null }] : [{ label: routeLabels.scopes, path: null }];
     }
     case 'settings': {
+      if (id === 'orchestration') return [{ label: uiTerms.settings, path: '/settings' }, { label: uiTerms.orchestration, path: null }];
       const tab = params.get('tab');
       const ghost = tab === 'team' && params.get('ghost') ? state?.ghosts.find(item => item.id === params.get('ghost')) : undefined;
       if (!tab || !settingsTabs[tab]) return [{ label: uiTerms.settings, path: null }];
