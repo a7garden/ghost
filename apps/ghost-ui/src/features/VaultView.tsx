@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { FileUp, KeyRound, LockKeyhole, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Contact, FileUp, KeyRound, LockKeyhole, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Badge, Button, InlineError, SkeletonRows } from '../ui';
 import type { Ghost, VaultItem, VaultItemKind } from '@ghost/contract';
 import type { VaultItemWrite } from '../host/client';
@@ -11,6 +11,7 @@ import { absoluteTime } from './time';
 import { ShadeSettings } from './ShadeSettings';
 import { previewVaultCsv, vaultCsvByteLimit, type CsvPreview } from './vaultCsvPreview';
 import './vault.css';
+import './SettingsLists.css';
 
 const kindLabels: Record<VaultItemKind, string> = { login: '로그인', card: '카드', contact: '연락처', secret: '비밀', api: 'API 키' };
 
@@ -138,7 +139,7 @@ export function vaultRowDetail(item: VaultItem): string {
   return parts.join(' · ');
 }
 
-/** Whom the item serves, for the row description; the 일회용 badge already says the kind of expiry. Pure; tests pin the wording. */
+/** Whom the item serves and when temporary access ends. */
 export function vaultGrantsLabel(item: VaultItem, ghostName: (id: string) => string): string {
   const names = item.ghostIds.map(ghostName);
   const expiry = item.expiresAt ? `${absoluteTime(item.expiresAt)}에 삭제` : '';
@@ -197,18 +198,18 @@ export function VaultView() {
     }
   };
 
-  return <section className="flex min-w-0 flex-col gap-6" aria-label="금고">
-    <div className="settings-section-header flex flex-wrap items-center justify-between gap-3">
-      <h2 className="section-title">금고</h2>
-      <span className="flex items-center gap-2">
+  return <section className="settings-list-page" aria-label="금고">
+    <div className="settings-list__lead">
+      {!loadError && items && <p className="settings-list__verdict">{items.length ? `항목 ${items.length}개` : '금고 항목 없음'}</p>}
+      <div className="settings-list__actions">
         <Button variant="outline" type="button" disabled={!state || active !== null} onClick={event => open('import', event.currentTarget)}><FileUp size={15}/>CSV 가져오기</Button>
         <Button type="button" disabled={!state || active !== null} onClick={event => open('new', event.currentTarget)}><Plus size={15}/>새 항목</Button>
-      </span>
+      </div>
     </div>
-    {loadError && <InlineError>{loadError}</InlineError>}
+    {loadError && <InlineError onRetry={() => void reload()} retryLabel="다시 불러오기">{loadError}</InlineError>}
     {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
     {items === null && active === null && !loadError && <SkeletonRows label="금고를 불러오는 중…" rows={4}/>}
-    {(active !== null || !!items?.length) && <ul className="vault-list" aria-label="금고 항목" role="list">
+    {(active !== null || !!items?.length) && <ul className="vault-list settings-list" aria-label="금고 항목" role="list">
       {active === 'new' && <li key="new"><VaultCardEditor ghosts={ghosts} onClose={() => setActive(null)} onSave={saveItem}/></li>}
       {active === 'import' && <li key="import"><VaultCsvPreview onClose={() => setActive(null)} onImport={async csv => {
         const result = await client.vaultImportCsv(csv);
@@ -216,10 +217,10 @@ export function VaultView() {
         await reload();
         setActive(null);
       }}/></li>}
-      {items?.map(item => <li key={item.id}>
+      {items?.map(item => <li key={item.id} data-selected={(typeof active === 'object' && active?.itemId === item.id) || undefined}>
         {typeof active === 'object' && active?.itemId === item.id
           ? <VaultCardEditor item={item} ghosts={ghosts} onClose={() => setActive(null)} onSave={saveItem}/>
-          : <VaultCard item={item} ghostName={ghostName} actions={<>
+          : <VaultRow item={item} ghostName={ghostName} actions={<>
             <Button variant="ghost" size="sm" type="button" disabled={active !== null} data-vault-edit
               onClick={event => open({ itemId: item.id }, event.currentTarget.closest('li') ?? event.currentTarget)}><Pencil size={14}/>고치기</Button>
             <Button variant="ghost" size="icon" type="button" disabled={active !== null} aria-label="금고 항목 삭제"
@@ -227,9 +228,7 @@ export function VaultView() {
           </>}/>}
       </li>)}
     </ul>}
-    {items?.length === 0 && active === null && <div className="calm"><KeyRound size={16} aria-hidden="true"/><p>금고 항목 없음</p></div>}
     <ShadeSettings/>
-    {error && <InlineError>{error}</InlineError>}
     {removing && <Modal title="금고 항목 삭제" onClose={() => setRemoving(undefined)}>
       <p className="m-0">이 항목과 저장된 이전 값을 모두 삭제할까요? 다시 볼 수 없습니다.</p>
       {error && <div className="mt-3"><InlineError>{error}</InlineError></div>}
@@ -241,7 +240,7 @@ export function VaultView() {
   </section>;
 }
 
-/** Identity, sealed values, and who may use them stay in the same places in both card states. */
+/** A draft keeps the item’s own frame; stored secret values never reach this face. */
 function CredentialFace({ kind, title, facts, sealed, notes, grants, actions, expires }: {
   kind: ReactNode; title: ReactNode; facts?: ReactNode; sealed?: ReactNode; notes?: ReactNode;
   grants: ReactNode; actions: ReactNode; expires?: boolean;
@@ -262,22 +261,23 @@ function CredentialFace({ kind, title, facts, sealed, notes, grants, actions, ex
   </>;
 }
 
-function VaultCard({ item, ghostName, actions }: {
+function VaultRow({ item, ghostName, actions }: {
   item: VaultItem; ghostName(id: string): string; actions: ReactNode;
 }) {
   const sealed = item.kind === 'card' ? '카드 번호' : item.kind === 'login'
     ? [item.hasPassword && '비밀번호', item.hasTotp && '일회용 코드 시드'].filter(Boolean).join(' · ')
     : item.kind === 'api' ? '비밀 키' : item.kind === 'secret' ? '비밀 값' : '';
-  return <article className="vault-card" aria-label={item.title}>
-    <CredentialFace kind={kindLabels[item.kind]} title={<h3 className="vault-card__title">{item.title}</h3>}
-      expires={!!item.expiresAt}
-      facts={item.kind === 'card' ? item.cardExpiry : vaultRowDetail(item)}
-      sealed={sealed && <><span>{sealed}</span>
-        <span className="vault-card__mask" aria-hidden="true">{item.cardLast4 ? `•••• ${item.cardLast4}` : '••••••••'}</span>
-        <span className="sr-only">저장됨{item.cardLast4 && ` · 끝 네 자리 ${item.cardLast4}`}</span>
-      </>}
-      notes={item.hints && <p className="vault-card__notes">{item.hints}</p>}
-      grants={<span className="vault-card__grant-note">{vaultGrantsLabel(item, ghostName)}</span>} actions={actions}/>
+  const detail = vaultRowDetail(item);
+  return <article className="settings-list__row" aria-label={item.title}>
+    <span className="settings-list__mark">
+      {sealed ? <LockKeyhole size={16} aria-hidden="true"/> : item.kind === 'contact' ? <Contact size={16} aria-hidden="true"/> : <KeyRound size={16} aria-hidden="true"/>}
+    </span>
+    <div className="settings-list__copy">
+      <h3 className="settings-list__title">{item.title}</h3>
+      <p className="settings-list__meta">{kindLabels[item.kind]}{sealed && ` · ${sealed} 저장됨`}{!!item.expiresAt && ' · 일회용'} · {vaultGrantsLabel(item, ghostName)}</p>
+      {(detail || item.hints) && <p className="settings-list__meta vault-row__details">{detail}{detail && item.hints && ' · '}{item.hints}</p>}
+    </div>
+    <div className="settings-list__actions">{actions}</div>
   </article>;
 }
 

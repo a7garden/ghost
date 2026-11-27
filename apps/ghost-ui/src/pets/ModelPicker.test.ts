@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { Settings } from '@ghost/contract';
-import { modelDisplayName, modelFromKey, modelSelectOptions, usableProviders, NO_MODEL } from './ModelPicker';
+import { modelDisplayName, modelFromKey, modelSelectOptions, modelShortName, usableProviders, NO_MODEL } from './ModelPicker';
 
 const settings: Settings = {
   defaultModel: { provider: 'zai', model: 'glm-5.3' },
@@ -23,6 +23,9 @@ it('labels models with the stored provider and model names', () => {
   expect(modelDisplayName(settings, { provider: 'gone', model: 'x' })).toBe('x');
   expect(modelDisplayName(settings, null)).toBe('기본 모델');
   expect(modelDisplayName(undefined, { provider: 'zai', model: 'glm-5.3' })).toBe('glm-5.3');
+  expect(modelShortName(settings, { provider: 'zai', model: 'glm-5.3' })).toBe('GLM-5.3');
+  expect(modelShortName(settings, { provider: 'openai', model: 'gpt-o' })).toBe('gpt-o');
+  expect(modelShortName(settings, { provider: 'gone', model: 'x' })).toBe('x');
 });
 
 it('builds and validates select values', () => {

@@ -1,7 +1,7 @@
 // App-owned UI. Retained-source notices: ./LICENSE.
 import type { ReactNode, KeyboardEvent } from "react"
-import { Fragment, useEffect, useId, useRef, useState } from "react"
-import { ChevronDown } from "lucide-react"
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react"
+import { Plus } from "lucide-react"
 import "./settings.css"
 
 export interface SettingsLayoutSection {
@@ -12,6 +12,8 @@ export interface SettingsLayoutSection {
   group?: string
   /** Rare, technical sections: hidden behind one toggle until opened or selected. */
   folded?: boolean
+  /** A reported state or count alongside the section label. */
+  status?: ReactNode
 }
 
 export interface SettingsLayoutProps {
@@ -27,6 +29,8 @@ export interface SettingsLayoutProps {
   }
   className?: string
   compactDetail?: boolean
+  /** Use the wider settings measure for pages that place a list beside its detail. */
+  wide?: boolean
   /** Label of the toggle that opens the `folded` sections. */
   foldedLabel?: string
 }
@@ -58,11 +62,14 @@ export function SettingsLayout({
   strings,
   className,
   compactDetail = false,
+  wide = false,
   foldedLabel,
 }: SettingsLayoutProps) {
   const instanceId = useId()
   const panelId = `${instanceId}-panel`
   const settingsRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLElement>(null)
+  const previousSection = useRef(activeSection)
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const [horizontalNavigation, setHorizontalNavigation] = useState(false)
   const [foldedOpen, setFoldedOpen] = useState(false)
@@ -81,6 +88,12 @@ export function SettingsLayout({
   // Keyboard and deep-link selection can land outside the visible rail; bring it back.
   useEffect(() => {
     tabRefs.current.get(activeSection)?.scrollIntoView({ block: "nearest", inline: "nearest" })
+  }, [activeSection])
+
+  useLayoutEffect(() => {
+    if (previousSection.current === activeSection) return
+    previousSection.current = activeSection
+    if (contentRef.current) contentRef.current.scrollTop = 0
   }, [activeSection])
 
   const tabId = (sectionId: string) => `${instanceId}-tab-${sectionId}`
@@ -109,7 +122,7 @@ export function SettingsLayout({
   }
 
   return (
-    <div ref={settingsRef} className={["ghost-settings", className].filter(Boolean).join(" ")} data-compact-detail={compactDetail || undefined}>
+    <div ref={settingsRef} className={["ghost-settings", className].filter(Boolean).join(" ")} data-compact-detail={compactDetail || undefined} data-wide={wide || undefined}>
       <div className="ghost-settings__layout">
         <nav className="ghost-settings__navigation" aria-label={strings.navigationLabel}>
           {title && <h1 className="ghost-settings__title">{title}</h1>}
@@ -123,6 +136,7 @@ export function SettingsLayout({
               const isSelected = activeSection === section.id
               const previous = shown[index - 1]
               const startsFold = Boolean(section.folded) && !previous?.folded
+              const statusId = section.status ? `${tabId(section.id)}-status` : undefined
               const heading = !section.folded && section.group && section.group !== previous?.group ? section.group : null
               return (
                 <Fragment key={section.id}>
@@ -138,26 +152,30 @@ export function SettingsLayout({
                     type="button"
                     role="tab"
                     aria-selected={isSelected}
+                    aria-label={statusId ? section.label : undefined}
+                    aria-describedby={statusId}
                     aria-controls={panelId}
                     tabIndex={isSelected || (!selectedSection && section === shown[0]) ? 0 : -1}
                     onClick={() => onSectionChange(section.id)}
                     onKeyDown={(event) => onTabKeyDown(event, section.id)}
                   >
                     {section.icon && <span className="ghost-settings__section-icon" aria-hidden="true">{section.icon}</span>}
-                    <span>{section.label}</span>
+                    <span className="ghost-settings__section-label">{section.label}</span>
+                    {statusId && <span className="ghost-settings__section-status" id={statusId}>{section.status}</span>}
                   </button>
                 </Fragment>
               )
             })}
             {foldedLabel && !foldedVisible && sections.some((section) => section.folded) && (
               <button type="button" className="ghost-settings__fold ghost-navigation-item" aria-expanded="false" onClick={() => setFoldedOpen(true)}>
-                <span className="ghost-settings__section-icon" aria-hidden="true"><ChevronDown /></span>
+                <span className="ghost-settings__section-icon" aria-hidden="true"><Plus /></span>
                 <span>{foldedLabel}</span>
               </button>
             )}
           </div>
         </nav>
         <section
+          ref={contentRef}
           id={panelId}
           className="ghost-settings__content"
           role="tabpanel"

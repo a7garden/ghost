@@ -153,10 +153,8 @@ test('goals show chronology, proposals, inline evidence and owner settlement', a
     const dock = page.getByRole('navigation', { name: '주요 화면' });
     await expect(dock.getByRole('button')).toHaveCount(4);
     await dock.getByRole('button', { name: '대화', exact: true }).click();
-    await page.getByRole('button', { name: '작업실 메뉴', exact: true }).click();
-    await page.getByRole('dialog', { name: '작업실 메뉴' }).getByRole('button', { name: '작업실', exact: true }).click();
-    await expect(page).toHaveURL(/#\/workspace$/);
-    await page.locator('.workspace-page').getByRole('button', { name: '목표', exact: true }).click();
+    const roster = page.getByRole('region', { name: '대화', exact: true });
+    await roster.getByRole('link', { name: '목표', exact: true }).click();
     await expect(page.locator('.goals-page')).toBeVisible();
   }
   expect(await page.evaluate(() => document.scrollingElement!.scrollWidth === document.scrollingElement!.clientWidth)).toBe(true);

@@ -1,4 +1,5 @@
 import { useId, useState } from 'react';
+import { CircleAlert, Mic } from 'lucide-react';
 import { DEFAULT_VOICE, type CallEngine, type VoiceSettings as VoicePreference } from '@ghost/contract';
 import { useHost } from '../../host/context';
 import { useHostState } from '../../host/store';
@@ -7,6 +8,7 @@ import { useCallActions } from './CallProvider';
 import { engineLabel } from './call-state';
 import { errorMessage } from './media';
 import { VoicePicker } from './VoicePicker';
+import '../SettingsLists.css';
 
 const engines = [
   { value: 'realtime', label: engineLabel.realtime },
@@ -46,15 +48,17 @@ export function VoiceSettings() {
   };
 
   return <SettingsGroup title="통화">
-    <SettingsRow label="통화 방식" htmlFor={engineId}>
+    <SettingsRow label={<span className="settings-list__title inline-flex items-center gap-2"><Mic size={16} aria-hidden="true"/>통화 방식</span>}
+      description={reason && <span id={availabilityId} className="settings-list__meta inline-flex items-start gap-1 text-danger">
+        <CircleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true"/>{reason}
+      </span>} htmlFor={engineId}>
       <SelectField id={engineId} label="통화 방식" options={engines} value={engine} disabled={Boolean(pending)}
         aria-describedby={reason ? availabilityId : undefined} onValueChange={value => {
           const choice = engines.find(option => option.value === value);
           if (choice && choice.value !== engine) save({ engine: choice.value, voice: DEFAULT_VOICE.voice });
         }}/>
     </SettingsRow>
-    {reason && <InlineError id={availabilityId}>{reason}</InlineError>}
-    <SettingsRow className="voice-settings-row" label={<span id={voiceId}>목소리</span>}>
+    <SettingsRow className="voice-settings-row" label={<span id={voiceId} className="settings-list__title">목소리</span>}>
       <VoicePicker labelledBy={voiceId} scope={engine} voices={voices} value={voice} disabled={Boolean(pending)}
         onChange={value => { if (value !== voice) save({ voice: value }); }}
         load={(sample, signal) => client.previewVoice(engine, sample, signal)}/>

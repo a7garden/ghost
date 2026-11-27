@@ -204,7 +204,7 @@ test('scope, document, slot, MCP, policy and conflict-aware history use the real
   await expect.poll(async () => (await snapshot(page)).policyRules.some(rule => rule.tool === 'conn.smoke')).toBe(false);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${host.baseUrl}/#/scopes/${scope.id}?view=metrics`);
-  await expect(page.getByRole('heading', { name: '성과와 비용', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: '성과와 비용', exact: true })).toBeVisible();
   await expect(page.getByRole('status').filter({ hasText: '불러오는 중' })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.screenshot({ path: info.outputPath('infrastructure-phone.png'), fullPage: true });

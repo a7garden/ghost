@@ -370,6 +370,7 @@ test('mail empty-state opens the shared account setup, where an address brings i
   await openMail(page);
   await page.getByRole('button', { name: '메일 계정 연결', exact: true }).click();
   await expect(page).toHaveURL(/#\/settings\?tab=connections$/);
+  await page.getByRole('textbox', { name: '서비스 추가', exact: true }).fill('Gmail');
   await page.getByRole('button', { name: 'Gmail 연결', exact: true }).click();
   const setup = page.getByRole('region', { name: '이메일 연결', exact: true });
   await expect(page.getByRole('dialog', { name: '이메일 연결', exact: true })).toHaveCount(0);

@@ -2,16 +2,20 @@ import { toDataURL } from 'qrcode';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Download, KeyRound, QrCode, RefreshCw } from 'lucide-react';
 import type { UpdateStatus } from '@ghost/contract';
-import { Badge, Button, InlineError, Input, SettingsGroup, SettingsRow, Switch } from '../ui';
+import { Button, InlineError, Input, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { shell as iosShell } from '../host/shell';
 import { isDesktopShell, shellVersion } from '../host/desktop';
+import { StateGlyph } from '../components/agent/StateGlyph';
+import { useHost } from '../host/context';
+import { useHostState } from '../host/store';
 import { supportsIosInstall, updatePollingPhase, type UpdateMonitor } from './update/useUpdate';
 import { relativeTime, useNow } from './time';
+import './SettingsPages.css';
 
 const phaseLabel: Record<'checking' | 'downloading' | 'waiting' | 'installing', string> = {
   checking: '확인 중',
   downloading: '받는 중',
-  waiting: '대화와 코딩 작업이 끝나면 설치합니다',
+  waiting: '설치 대기 중',
   installing: '설치하고 다시 시작하는 중',
 };
 
@@ -30,6 +34,8 @@ function lastResultLabel(result: NonNullable<UpdateStatus['lastResult']>): { var
 /** 설정 → 업데이트: the host's own release, the desktop shell's app, and the GitHub credential. */
 export function UpdateSettings({ monitor }: { monitor: UpdateMonitor }) {
   const { status, shell, error, pending } = useSyncExternalStore(monitor.subscribe, monitor.get, monitor.get);
+  const { store } = useHost();
+  const { state: host, connection } = useHostState(store);
   const now = useNow();
   const desktop = isDesktopShell();
   const [appVersion, setAppVersion] = useState('');
@@ -49,7 +55,23 @@ export function UpdateSettings({ monitor }: { monitor: UpdateMonitor }) {
   const disabled = status && !status.enabled && status.disabledReason ? disabledLabel[status.disabledReason] : null;
   const hasCredential = status?.hasCredential ?? false;
   const tokenField = !hasCredential || tokenEditing;
-  const lastResult = status?.lastResult ? lastResultLabel(status.lastResult) : null;
+  const previous = status?.lastResult;
+  const lastResult = previous ? lastResultLabel(previous) : null;
+  const issue = status?.error ?? error;
+  const phaseText = phase && phase !== 'idle' && phase !== 'error' ? phaseLabel[phase] : null;
+  const canCancel = phase === 'downloading' || phase === 'waiting';
+  const canInstall = !!latest && !phaseText && !disabled;
+  const showCheckInVerdict = !canInstall && !phaseText;
+  const busyConversations = phase === 'waiting' && connection === 'live'
+    ? host?.conversations.filter(conversation => conversation.busy).length ?? 0
+    : 0;
+  const verdict = phaseText
+    ? `${phaseText}${latest ? ` · ${latest.version}` : ''}`
+    : issue || phase === 'error' ? '업데이트를 완료하지 못했습니다'
+      : disabled ? '업데이트할 수 없습니다'
+        : latest ? `${latest.version} 설치 가능`
+          : status?.checkedAt ? '최신 버전입니다'
+            : status ? '새 버전을 확인하지 않았습니다' : '업데이트 상태 확인 중';
 
   const saveToken = () => {
     const token = tokenDraft.trim();
@@ -57,63 +79,49 @@ export function UpdateSettings({ monitor }: { monitor: UpdateMonitor }) {
     void monitor.save({ token }).then(() => { setTokenDraft(''); setTokenEditing(false); });
   };
 
-  return <div className="grid gap-6">
-    <SettingsGroup title="버전">
-      <SettingsRow label="현재 버전" description={appVersion ? `앱 ${appVersion}` : undefined}>
-        <span className="text-ui text-ink">{status ? status.current.version : '—'}</span>
-      </SettingsRow>
-      {status && <SettingsRow label="최신 버전" description={latest?.notes}>
-        {phase && phase !== 'idle' && phase !== 'error' && (latest || phase === 'checking')
-          ? <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2" aria-live="polite">
-              {latest && <span className="text-ui text-ink">{latest.version}</span>}
-              <span className="text-caption text-ink-2">{phaseLabel[phase]}</span>
-              {(phase === 'downloading' || phase === 'waiting') &&
-                <Button variant="outline" size="sm" disabled={pending} onClick={() => void monitor.cancel()}>취소</Button>}
-            </span>
-          : latest
-            ? <span className="flex min-w-0 items-center gap-2">
-                <span className="text-ui text-ink">{latest.version}</span>
-                <Button variant="outline" disabled={busy} onClick={() => void monitor.install(latest.version)}>
-                  <Download aria-hidden="true"/>설치
-                </Button>
-              </span>
-            : disabled
-              ? <span className="text-caption text-ink-2">{disabled}</span>
-              : status.checkedAt
-                ? <span className="text-caption text-ink-2">최신 버전입니다</span>
-                : <span className="text-caption text-ink-2">—</span>}
-      </SettingsRow>}
-      <SettingsRow label="지금 확인"
-        description={status?.checkedAt
-          ? <><time dateTime={new Date(status.checkedAt).toISOString()}>{relativeTime(status.checkedAt, now)}</time> 확인</>
-          : undefined}>
-        <Button variant="outline" disabled={!status?.enabled || phase === 'checking' || pending} onClick={() => void monitor.check()}>
-          <RefreshCw aria-hidden="true"/>지금 확인
-        </Button>
-      </SettingsRow>
-      {(status?.error || error) && <SettingsRow label="오류">
-        <InlineError className="max-w-[28rem]">{status?.error ?? error}</InlineError>
-      </SettingsRow>}
-      {lastResult && <SettingsRow label="마지막 결과">
-        <Badge variant={lastResult.variant}>{lastResult.text}</Badge>
-      </SettingsRow>}
-      {desktop && <SettingsRow label="앱 업데이트" description={shell?.notes}>
-        {shell
-          ? <span className="flex min-w-0 items-center gap-2">
-              <span className="text-ui text-ink">{shell.version}</span>
-              <Button variant="outline" disabled={pending} onClick={() => void monitor.installShell()}>
-                <Download aria-hidden="true"/>앱 업데이트
-              </Button>
-            </span>
-          : appVersion ? <span className="text-caption text-ink-2">최신 버전입니다</span> : null}
-      </SettingsRow>}
-      {status?.ios && iosShell && supportsIosInstall(iosShell) && <SettingsRow label="앱 업데이트" description={`현재 ${iosShell.version} · ${status.ios.notes}`}>
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="text-ui text-ink">{status.ios.version} ({status.ios.build})</span>
-          <Button variant="outline" disabled={pending || status.ios.build <= Number(iosShell.version)} onClick={() => void monitor.installIos()}>
-            <Download aria-hidden="true"/>앱 업데이트
-          </Button>
+  const check = <Button variant="outline" disabled={!status?.enabled || phase === 'checking' || pending} onClick={() => void monitor.check()}>
+    <RefreshCw size={15} aria-hidden="true"/>지금 확인
+  </Button>;
+  const tone = phase === 'waiting' || disabled ? 'warning' : !phaseText && issue ? 'danger' : undefined;
+  return <div className="settings-ledger update-settings">
+    <div className="settings-verdict" data-tone={tone}>
+      <span aria-hidden="true"><StateGlyph state={
+        tone === 'danger' ? 'failed' : phase === 'waiting' ? 'waiting' : disabled ? 'attention'
+          : phaseText ? 'running' : latest || !status?.checkedAt ? 'queued' : 'done'
+      } size={20}/></span>
+      <div className="settings-verdict__copy" role="status">
+        <strong>{verdict}</strong>
+        {status && <small>Host {status.current.version}{status.checkedAt && <> · <time dateTime={new Date(status.checkedAt).toISOString()}>{relativeTime(status.checkedAt, now)}</time> 확인</>}</small>}
+        {phase === 'waiting' && <small>{busyConversations > 0
+          ? `진행 중인 대화 ${busyConversations}개가 끝날 때까지 설치할 수 없습니다.`
+          : '진행 중인 작업을 마치면 설치를 시도합니다.'}</small>}
+        {disabled && <small>{disabled}</small>}
+      </div>
+      {canCancel ? <Button variant="outline" disabled={pending} onClick={() => void monitor.cancel()}>취소</Button>
+        : canInstall && latest ? <Button disabled={busy} onClick={() => void monitor.install(latest.version)}><Download aria-hidden="true"/>설치</Button>
+          : showCheckInVerdict ? check : null}
+    </div>
+    {issue && <InlineError>{issue}</InlineError>}
+    {(!showCheckInVerdict || latest?.notes || lastResult || desktop || status?.ios) &&
+    <SettingsGroup title={<span className="sr-only">버전</span>} className="settings-ledger__group settings-ledger__group--unheaded">
+      {latest?.notes && <SettingsRow className="settings-ledger__notes-row" label="릴리스 노트" description={latest.notes}>{null}</SettingsRow>}
+      {!showCheckInVerdict && <SettingsRow label="새 버전 확인">{check}</SettingsRow>}
+      {lastResult && previous && <SettingsRow label="마지막 설치">
+        <span className="settings-ledger__value" data-tone={lastResult.variant}>
+          {previous.outcome === 'installed' && previous.to === status?.current.version ? '설치됨' : lastResult.text}
+          {' · '}<time dateTime={new Date(previous.at).toISOString()}>{relativeTime(previous.at, now)}</time>
         </span>
+      </SettingsRow>}
+      {desktop && <SettingsRow label="Mac 앱" description={[appVersion && `현재 ${appVersion}`, shell && `새 버전 ${shell.version}`, shell?.notes].filter(Boolean).join(' · ')}>
+        {shell && <Button variant="outline" disabled={pending} onClick={() => void monitor.installShell()}>
+          <Download aria-hidden="true"/>앱 업데이트
+        </Button>}
+      </SettingsRow>}
+      {status?.ios && iosShell && supportsIosInstall(iosShell) && <SettingsRow label="iPhone 앱"
+        description={`현재 빌드 ${iosShell.version} · ${status.ios.version} (${status.ios.build})${status.ios.notes ? ` · ${status.ios.notes}` : ''}`}>
+        <Button variant="outline" disabled={pending || status.ios.build <= Number(iosShell.version)} onClick={() => void monitor.installIos()}>
+          <Download aria-hidden="true"/>앱 업데이트
+        </Button>
       </SettingsRow>}
       {status?.ios && (!iosShell || !supportsIosInstall(iosShell)) && <SettingsRow label="iPhone 앱" description={`${status.ios.version} (${status.ios.build})`}>
         <Button variant="outline" disabled={iosPending} onClick={() => {
@@ -123,31 +131,30 @@ export function UpdateSettings({ monitor }: { monitor: UpdateMonitor }) {
             .finally(() => setIosPending(false));
         }}><QrCode aria-hidden="true"/>QR 코드</Button>
       </SettingsRow>}
-      {iosQr && (!iosShell || !supportsIosInstall(iosShell)) && <SettingsRow label="QR 코드">
-        <span className="grid justify-items-center gap-2">
+      {iosQr && (!iosShell || !supportsIosInstall(iosShell)) && <SettingsRow className="settings-ledger__wide-value" label="설치 링크" description="QR 코드는 15분 동안 쓸 수 있습니다.">
+        <span className="grid justify-items-center">
           <img src={iosQr} alt="iPhone 앱 설치 QR 코드" width={240} height={240} className="rounded-lg bg-canvas p-2"/>
-          <span className="text-caption text-ink-2">15분 동안 쓸 수 있습니다</span>
         </span>
       </SettingsRow>}
-      {iosError && <SettingsRow label="오류"><InlineError>{iosError}</InlineError></SettingsRow>}
-    </SettingsGroup>
-    <SettingsGroup title="자동 업데이트">
+    </SettingsGroup>}
+    {iosError && <InlineError>{iosError}</InlineError>}
+    <SettingsGroup title="자동 업데이트" className="settings-ledger__group">
       <SettingsRow label="새 버전 자동 설치" htmlFor="update-auto-check">
         <Switch id="update-auto-check" checked={status?.autoCheck ?? false}
           disabled={!status?.enabled || pending}
           onCheckedChange={autoCheck => void monitor.save({ autoCheck })}/>
       </SettingsRow>
-      <SettingsRow label="GitHub 토큰" htmlFor={tokenField ? 'update-token' : undefined}
-        description={hasCredential ? '비공개 저장소 릴리스를 내려받을 때 씁니다.' : undefined}>
+      <SettingsRow className="settings-ledger__wide-value" label="GitHub 토큰" htmlFor={tokenField ? 'update-token' : undefined}
+        description={tokenField ? '비공개 저장소의 릴리스를 받을 때 사용합니다.' : undefined}>
         {tokenField
-          ? <span className="flex min-w-0 items-center gap-2">
+          ? <span className="update-settings__token">
               <Input id="update-token" type="password" value={tokenDraft} maxLength={512} autoComplete="off"
-                className="w-56" placeholder="GitHub 개인 액세스 토큰"
+                placeholder="개인 액세스 토큰"
                 onChange={event => setTokenDraft(event.target.value)}/>
               <Button variant="outline" disabled={!tokenDraft.trim() || pending} onClick={saveToken}>저장</Button>
             </span>
-          : <span className="flex min-w-0 items-center gap-2">
-              <Badge variant="success"><KeyRound size={10} aria-hidden="true"/>저장됨</Badge>
+          : <span className="settings-ledger__actions">
+              <span className="settings-ledger__value inline-flex items-center gap-1"><KeyRound size={13} aria-hidden="true"/>저장됨</span>
               <Button variant="outline" size="sm" disabled={pending} onClick={() => setTokenEditing(true)}>바꾸기</Button>
               <Button variant="ghost" size="sm" disabled={pending}
                 onClick={() => { setTokenEditing(false); void monitor.save({ token: null }); }}>지우기</Button>

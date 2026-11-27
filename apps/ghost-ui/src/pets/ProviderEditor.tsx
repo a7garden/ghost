@@ -25,18 +25,19 @@ export interface ProviderDraft { id: string; kind: ProviderKind; name: string; b
 export interface ProviderSave { draft: ProviderDraft; apiKey?: string | null; login?: boolean }
 export const providerKindLabel = (kind: ProviderKind) => KINDS.find(item => item.value === kind)?.label ?? kind;
 
-export function ProviderEditor({ initial, presets, providerIds, busy, onClose, onSave }: {
+export function ProviderEditor({ initial, presets, providerIds, busy, onClose, onSave, onDelete }: {
   initial?: Provider;
   presets: ProviderPreset[];
   providerIds: string[];
   busy: boolean;
   onClose(): void;
+  onDelete?(): void;
   onSave(save: ProviderSave): Promise<void>;
 }) {
   const [preset, setPreset] = useState<ProviderPreset>();
   const [query, setQuery] = useState('');
   const visible = presets.filter(item => `${item.name} ${providerKindLabel(item.kind)}`.toLowerCase().includes(query.trim().toLowerCase()));
-  if (initial) return <ProviderForm initial={initial} presets={presets} providerIds={providerIds} busy={busy} onClose={onClose} onSave={onSave}/>;
+  if (initial) return <ProviderForm initial={initial} presets={presets} providerIds={providerIds} busy={busy} onClose={onClose} onSave={onSave} onDelete={onDelete}/>;
   return <section className="provider-enrollment" aria-label="제공자 추가"
     onKeyDown={event => { if (!preset && event.key === 'Escape' && !event.nativeEvent.isComposing && !busy) onClose(); }}>
     {!preset && <div className="provider-enrollment__tools">
@@ -64,9 +65,9 @@ export function ProviderEditor({ initial, presets, providerIds, busy, onClose, o
   </section>;
 }
 
-function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, onBack, onSave }: {
+function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, onBack, onSave, onDelete }: {
   initial?: Provider; preset?: ProviderPreset; presets: ProviderPreset[]; providerIds: string[]; busy: boolean;
-  onClose(): void; onBack?: () => void; onSave(save: ProviderSave): Promise<void>;
+  onClose(): void; onBack?: () => void; onSave(save: ProviderSave): Promise<void>; onDelete?: () => void;
 }) {
   const [method, setMethod] = useState<'api_key' | 'oauth'>(initial ? initial.authType === 'oauth' ? 'oauth' : 'api_key' : preset !== undefined && OAUTH_KINDS.has(preset.kind) ? 'oauth' : 'api_key');
   const [value, setValue] = useState<ProviderDraft>(() => {
@@ -126,19 +127,19 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
         options={[{ value: 'oauth', label: `${oauthName(value.kind)} 구독`, disabled: locked }, { value: 'api_key', label: 'API 키', disabled: locked }]}/>}
       {value.kind === 'openai_compatible' && <FormField label="서버 주소">{control => <Input {...control} type="url" value={value.baseUrl ?? ''} placeholder="https://api.example.com/v1" required disabled={locked} onChange={event => patch({ baseUrl: event.target.value.trim() || null })}/>}</FormField>}
       {effectiveMethod === 'oauth'
-        ? initial?.authType === 'oauth' && <p className="m-0 text-caption text-ink-2">저장된 {oauthName(value.kind)} 인증을 사용합니다.</p>
-        : <div className="setup-route__credential"><FormField label={initial?.hasCredential ? '새 API 키' : 'API 키'} description={initial?.hasCredential && initial.authType !== 'oauth' ? '비워 두면 저장된 인증 정보를 유지합니다.' : undefined}>
+        ? null
+        : <div className="setup-route__credential"><FormField label={initial?.hasCredential && initial.authType !== 'oauth' ? '새 API 키' : 'API 키'} description={initial?.hasCredential && initial.authType !== 'oauth' ? '비워 두면 저장된 API 키를 유지합니다.' : undefined}>
           {control => <Input {...control} type="password" value={apiKey} maxLength={4096} autoComplete="new-password" disabled={locked || removeKey} onChange={event => setApiKey(event.target.value)}/>}
           </FormField>
           {currentPreset?.credentialUrl && <ExternalAnchor href={currentPreset.credentialUrl} target="_blank" rel="noopener noreferrer" className="setup-route__link">API 키 발급<ExternalLink size={12} aria-hidden="true"/></ExternalAnchor>}
         </div>}
       {automatic ? <details>
-        <summary className="connection-advanced">모델 목록<span aria-hidden="true" className="fold-mark"/></summary>
+        <summary className="connection-advanced">모델 목록</summary>
         <ProviderModels catalog={catalog} selected={value.models} automatic disabled={locked} onChange={models => patch({ models })}/>
         <p className="m-0 text-caption text-ink-3">모델 목록은 자동으로 갱신됩니다. 사용 가능 여부는 계정의 권한을 따릅니다.</p>
       </details> : <ProviderModels catalog={catalog} selected={value.models} disabled={locked} onChange={models => patch({ models })}/>}
-      <details className="border-t border-dashed border-line-strong pt-3">
-        <summary className="connection-advanced">고급 설정<span aria-hidden="true" className="fold-mark"/></summary>
+      <details className="model-provider__advanced">
+        <summary className="connection-advanced">고급 설정</summary>
         <div className="mt-3 flex min-w-0 flex-col gap-3">
           <div className="setup-route__pair">
             <FormField label="이름">{control => <Input {...control} value={value.name} maxLength={128} disabled={locked} onChange={event => patch({ name: event.target.value })}/>}</FormField>
@@ -151,6 +152,7 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
       </details>
       {error && <InlineError>{error}</InlineError>}
       <div className="setup-route__actions">
+        {initial && onDelete && <Button variant="ghost" size="sm" type="button" className="mr-auto text-destructive" aria-label={`${initial.name} 제공자 삭제`} disabled={locked} onClick={onDelete}>제공자 삭제</Button>}
         {onBack && <Button variant="ghost" size="sm" type="button" className="mr-auto" disabled={locked} onClick={onBack}><ArrowLeft size={14}/>다른 제공자</Button>}
         <Button variant="ghost" type="button" disabled={locked} onClick={onClose}>취소</Button>
         <Button type="submit" disabled={locked}>{saving ? '저장 중…' : effectiveMethod === 'oauth' && initial?.authType !== 'oauth' && !removeKey ? `${oauthName(value.kind)}로 로그인` : '저장'}</Button>

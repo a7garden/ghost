@@ -89,10 +89,8 @@ function interceptAuthTests(page: Page): Posted[] {
 }
 
 async function openService(page: Page, query: string, serviceName: string): Promise<void> {
-  await page.getByRole('textbox', { name: '서비스 검색', exact: true }).fill(query);
-  const tile = page.locator('.service-tile', { hasText: serviceName });
-  await expect(tile).toHaveCount(1);
-  await tile.getByRole('button', { name: new RegExp(`${serviceName} (연결|계정 추가)`) }).click();
+  await page.getByRole('textbox', { name: '서비스 추가', exact: true }).fill(query);
+  await page.getByRole('region', { name: '서비스 연결', exact: true }).getByRole('button', { name: new RegExp(`${serviceName} (연결|계정 추가)`) }).click();
   await expect(page.getByRole('region', { name: `${serviceName} 연결`, exact: true })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 }
@@ -222,13 +220,10 @@ test('mail connects by address; host-resolved servers stay hidden until they are
   await expect(gmailAccount.locator('.connection-tile__status')).toHaveAttribute('data-phase', 'ok');
   await waitForConnection(page, `Gmail · ${gmailAddress}`);
 
-  // The connected service reads as connected, keeps its account, and still admits another.
-  const gmailTile = page.locator('.service-tile', { hasText: 'Gmail' });
-  await expect(gmailTile.locator('.service-state')).toHaveText('연결됨');
-  await expect(gmailTile.getByRole('button', { name: 'Gmail 계정 추가', exact: true })).toBeVisible();
-
-  // A provider tile seeds its own row: only the local part is left to type.
-  await gmailTile.getByRole('button', { name: 'Gmail 계정 추가', exact: true }).click();
+  // The catalog can add another account without hiding the saved ones.
+  const search = page.getByRole('textbox', { name: '서비스 추가', exact: true });
+  await search.fill('Gmail');
+  await page.getByRole('button', { name: 'Gmail 계정 추가', exact: true }).click();
   const seeded = page.getByRole('region', { name: '이메일 연결', exact: true });
   const seededAddress = seeded.getByRole('textbox', { name: '이메일 주소', exact: true });
   await expect(seededAddress).toHaveAttribute('placeholder', '이름@gmail.com');
@@ -238,7 +233,6 @@ test('mail connects by address; host-resolved servers stay hidden until they are
   await seeded.getByRole('button', { name: '연결하고 확인', exact: true }).click();
   await expect(seeded).toHaveCount(0);
   await waitForConnection(page, 'Gmail · second@gmail.com');
-  await expect(gmailTile.locator('.service-state')).toHaveText('연결됨 2');
 
   // An address the Host cannot resolve opens the server disclosure by itself.
   await page.setViewportSize({ width: 390, height: 844 });
@@ -266,10 +260,9 @@ test('mail connects by address; host-resolved servers stay hidden until they are
   expect(stateText).not.toContain('e2e-gmail-app-password-2');
   expect(stateText).not.toContain('e2e-self-password-3');
 
-  // Accounts live under their service; the provider icon is said once, by the service row, and the name already carries the address.
-  await expect(gmailTile.locator('img[src="/service-icons/gmail.svg"]')).toBeVisible();
-  await expect(gmailAccount.locator('.connection-tile__identity h3')).toHaveText(`Gmail · ${gmailAddress}`);
-  await expect(gmailAccount.locator('.connection-tile__identity p')).toHaveCount(0);
+  // The saved account owns its bundled icon.
+  await expect(gmailAccount.locator('img[src="/service-icons/gmail.svg"]')).toBeVisible();
+  await expect(gmailAccount.getByRole('heading', { name: `Gmail · ${gmailAddress}`, exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await expect.poll(() => gmailAccount.evaluate(row => row.scrollWidth <= row.clientWidth)).toBe(true);
 });
@@ -288,8 +281,8 @@ test('an oauth mail domain offers login only, with the address as the username',
     } });
   });
 
-  const outlookTile = page.locator('.service-tile', { hasText: 'Outlook' });
-  await outlookTile.getByRole('button', { name: 'Outlook 연결', exact: true }).click();
+  await page.getByRole('textbox', { name: '서비스 추가', exact: true }).fill('Outlook');
+  await page.getByRole('button', { name: 'Outlook 연결', exact: true }).click();
   const setup = page.getByRole('region', { name: '이메일 연결', exact: true });
   await setup.getByRole('textbox', { name: '이메일 주소', exact: true }).fill('me@outlook.com');
   await expect(setup.locator('.mail-provider')).toHaveText(/Outlook/);
@@ -317,7 +310,6 @@ test('a github account already signed in on this mac connects with one click', a
 
   await row.getByRole('button', { name: '이 Mac의 계정 사용', exact: true }).click();
   await expect(row.locator('.connection-tile__status')).toHaveAttribute('data-phase', 'ok');
-  await expect(row.locator('.service-state')).toHaveText('연결됨');
   expect(connect).toEqual([{ source: 'gh', login: 'e2e-gardener' }]);
 
   // The calm note leaves once every Mac account is connected.
@@ -346,7 +338,7 @@ test('gitea authentication test succeeds and fails against the real endpoint', a
     expect(storedOk.config).toMatchObject({ kind: 'gitea', baseUrl: `http://127.0.0.1:${port}/api/v1` });
     expect(storedOk.hasCredential).toBe(true);
 
-    // A rejected token surfaces as a failed account test under its service.
+    // A rejected token surfaces on the account itself and rises to the top.
     await openService(page, 'gitea', 'Gitea');
     await setup.getByRole('textbox', { name: '이름', exact: true }).fill('CI 저장소 실패');
     await setup.getByRole('textbox', { name: '서버 주소', exact: true }).fill(`http://127.0.0.1:${port}`);
@@ -355,6 +347,7 @@ test('gitea authentication test succeeds and fails against the real endpoint', a
     await expect(setup).toHaveCount(0);
     const badTile = page.locator('.connection-account', { hasText: 'CI 저장소 실패' });
     await expect(badTile.locator('.connection-tile__status')).toHaveAttribute('data-phase', 'error');
+    await expect(page.getByRole('list', { name: '연결 계정', exact: true }).locator('.connection-account').first()).toHaveAttribute('data-tone', 'danger');
     expect(apiRequests.some(request => request.authorization === `token ${badToken}`)).toBe(true);
     await waitForConnection(page, 'CI 저장소 실패');
 
@@ -439,8 +432,8 @@ test('server validation failure keeps typed values and a fresh form starts witho
   await page.goto(`${run.baseUrl}/#/settings?tab=connections`);
 
   // Catalog search without a match offers the custom service escape hatch.
-  await page.getByRole('textbox', { name: '서비스 검색', exact: true }).fill('존재하지 않는 서비스 zzz');
-  await expect(page.locator('.service-tile')).toHaveCount(0);
+  await page.getByRole('textbox', { name: '서비스 추가', exact: true }).fill('존재하지 않는 서비스 zzz');
+  await expect(page.getByRole('region', { name: '서비스 연결', exact: true }).getByRole('list')).toHaveCount(0);
   await page.getByRole('button', { name: '다른 서비스 연결', exact: true }).click();
   const setup = page.getByRole('region', { name: '다른 서비스 연결', exact: true });
   await expect(setup).toBeVisible();
@@ -495,6 +488,7 @@ test('ghost assist targets the main direct conversation and navigates to it at t
     return route.continue();
   });
   await page.goto(`${run.baseUrl}/#/settings?tab=connections`);
+  await page.getByRole('textbox', { name: '서비스 추가', exact: true }).fill('존재하지 않는 서비스 zzz');
   await page.getByRole('button', { name: '다른 서비스 연결', exact: true }).click();
   const setup = page.getByRole('region', { name: '다른 서비스 연결', exact: true });
   const apiKey = 'test-only-must-not-reach-chat';

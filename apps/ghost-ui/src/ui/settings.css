@@ -5,12 +5,13 @@
 
 @layer components {
 
-/* Scoped tokens: a slim secondary rail, an editor-width reading column and a calmer
-   top rhythm. The root tokens in theme.css stay untouched for other surfaces. */
+/* A slim secondary rail. Keep the shared settings measure unless a page needs a second pane. */
 .ghost-settings {
   --ghost-layout-settings-nav: 164px;
-  --ghost-layout-settings-max: var(--ghost-layout-content-max);
   --ghost-layout-settings-top-padding: 48px;
+}
+.ghost-settings[data-wide] .ghost-settings__content-inner {
+  width: min(100%, max(var(--ghost-layout-settings-max), var(--ghost-layout-content-max)));
 }
 
 /* Section selection reads as a quiet tint, not a second raised card, so group bodies

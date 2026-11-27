@@ -1,23 +1,24 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Pencil, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { ArrowLeft, ArrowRight, CircleSlash2, Crown, Lock, MessageCircle, Pause, Pencil, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
 import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, CODE_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, GHOST_TOOLS, HOST_TOOLS, MAIL_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
-import { Button, InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
+import { Button, InlineError, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { DotAvatar } from '../components/DotAvatar';
+import { StateGlyph } from '../components/agent/StateGlyph';
 import { Modal } from '../components/Modal';
 import { GhostDesignEditor } from './GhostDesign';
 import { GhostMemory } from './GhostMemory';
 import { toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
-import { usableProviders } from '../pets/ModelPicker';
 import { uiTerms } from '../uiText';
 import './ghost-settings.css';
-import { blurTouchSearchOnEnter } from '../ui/adaptive';
+import { blurTouchSearchOnEnter, useCompact } from '../ui/adaptive';
 import { FallbackSteps, ModelChoice, editFallbacks, modelName, type FallbackAction } from './fallbacks';
 import { toolLabels } from './toolLabels';
 import { PatternGrants } from './PatternGrants';
 import { GhostAttachments } from './GhostAttachments';
+import './GhostSettings.css';
 
 export { MAX_FALLBACKS, editFallbacks, type FallbackAction } from './fallbacks';
 
@@ -44,12 +45,26 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
 ];
 /** 대화 종류에 따라 항상 쓰는 도구. 선택 목록에 없고 끌 수 없다. */
 const alwaysTools = ['소유자에게 묻기', '위임한 Ghost에게 묻기', '자식 일에 답하기', '일 완료 보고', '일 상태 보고', '결과물 읽기', '실행 기록 보기', '관측 근거 읽기', '검토 판정'];
-const states: { value: GhostState; label: string }[] = [{ value: 'active', label: '활성' }, { value: 'paused', label: '일시정지' }, { value: 'retired', label: '은퇴' }];
+const states = [
+  { value: 'active', label: '활성', icon: Power },
+  { value: 'paused', label: '일시정지', icon: Pause },
+  { value: 'retired', label: '은퇴', icon: CircleSlash2 },
+] as const;
+const ghostSplitQuery = '(min-width: 64rem)';
+const ghostRosterRoute = '/settings?tab=team';
+type RosterPosition = { scroll: number; query: string; row: string };
+type GhostSettingsHistory = { ghostSettingsRoster?: RosterPosition; ghostSettingsFromRoster?: boolean };
 
-/**
- * Ghost 설정: 위쪽 초상 줄에서 Ghost를 고르고, 아래에서 그 Ghost의 이름·페르소나·모델·환경 적응·도구·상태·메인 지정·샌드박스를 고친다.
- * 모습은 초상을 눌러 여는 꾸미기가 맡는다. 모든 변경은 ghost.update · ghost.adapt · ghost.set_default · sandbox.control로 바로 저장된다.
- */
+function subscribeGhostSplit(listener: () => void) {
+  const media = matchMedia(ghostSplitQuery);
+  media.addEventListener('change', listener);
+  return () => media.removeEventListener('change', listener);
+}
+
+function GhostStateWord({ state }: { state: GhostState }) {
+  const { label, icon: Icon } = states.find(item => item.value === state)!;
+  return <span className="ghost-state-word" data-state={state}><Icon aria-hidden="true"/>{label}</span>;
+}
 /** The settings roster: deleted Ghosts leave it, the main Ghost leads, then oldest first. Pure; tests pin it. */
 export function settingsRoster(ghosts: readonly Ghost[]): Ghost[] {
   return ghosts.filter(ghost => ghost.deletedAt === null)
@@ -65,35 +80,91 @@ export function GhostSettings({ onChat, onSelect, selectedGhostId, createRequest
 }) {
   const { store } = useHost();
   const { state } = useHostState(store);
+  const split = useSyncExternalStore(subscribeGhostSplit, () => matchMedia(ghostSplitQuery).matches, () => false);
+  const compact = useCompact();
   const ghosts = settingsRoster(state?.ghosts ?? []);
-  const [creating, setCreating] = useState(createRequested);
-  useEffect(() => { if (createRequested) setCreating(true); }, [createRequested]);
-  const closeCreator = () => { setCreating(false); if (createRequested) onCreateClosed?.(); };
-  const [query, setQuery] = useState('');
-  const shown = ghosts.filter(ghost => ghost.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
-  const selected = creating ? null : ghosts.find(ghost => ghost.id === selectedGhostId) ?? ghosts[0] ?? null;
-  return <section className="ghost-settings-page" aria-label={uiTerms.ghostSettings}>
-    <div className="roster-picker">
-      {(ghosts.length >= 8 || query) && <label className="roster-search">
+  const [query, setQuery] = useState(() => typeof history === 'undefined' ? '' : (history.state as GhostSettingsHistory | null)?.ghostSettingsRoster?.query ?? '');
+  const needle = query.trim().toLocaleLowerCase();
+  const shown = needle ? ghosts.filter(ghost => ghost.name.toLocaleLowerCase().includes(needle)) : ghosts;
+  const selected = ghosts.find(ghost => ghost.id === selectedGhostId) ?? (split ? ghosts[0] : undefined);
+  const showingDetail = createRequested || selectedGhostId !== undefined;
+  const root = useRef<HTMLElement>(null);
+  const detail = useRef<HTMLDivElement>(null);
+  const didShowDetail = useRef(showingDetail);
+
+  useLayoutEffect(() => {
+    const scroller = root.current?.closest('.ghost-settings__content');
+    if (!scroller) return;
+    if (!split && !showingDetail) {
+      const saved = (history.state as GhostSettingsHistory | null)?.ghostSettingsRoster;
+      scroller.scrollTop = saved?.scroll ?? 0;
+      if (saved) document.getElementById(saved.row)?.focus({ preventScroll: true });
+    } else {
+      scroller.scrollTop = 0;
+      if (!split && !didShowDetail.current && !createRequested) detail.current?.focus({ preventScroll: true });
+    }
+    didShowDetail.current = showingDetail;
+  }, [split, showingDetail, selected?.id, createRequested]);
+
+  const rememberRoster = (row: string) => {
+    if (split) return;
+    const scroll = root.current?.closest('.ghost-settings__content')?.scrollTop ?? 0;
+    history.replaceState({ ...history.state, ghostSettingsRoster: { scroll, query, row } }, '');
+  };
+  const select = (id: string) => {
+    if (split && !createRequested && id === selectedGhostId) return;
+    if (createRequested) onCreateClosed?.();
+    rememberRoster(`settings-ghost-${id}`);
+    onSelect(id);
+    if (!split) history.replaceState({ ...history.state, ghostSettingsFromRoster: true }, '');
+  };
+  const beginCreate = () => {
+    rememberRoster('settings-new-ghost');
+    location.hash = `${ghostRosterRoute}${selectedGhostId ? `&ghost=${encodeURIComponent(selectedGhostId)}` : ''}&new=1`;
+  };
+
+  return <section ref={root} className="ghost-settings-page" aria-label={uiTerms.ghostSettings} data-split={split || undefined}>
+    {(split || !showingDetail) && <div className="roster-picker">
+      {(ghosts.length >= 8 || query) && <div className="roster-search">
         <Search aria-hidden="true"/>
         <input type="text" enterKeyHint="search" aria-label="설정할 Ghost 찾기" placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={blurTouchSearchOnEnter}/>
         {query && <button type="button" aria-label="Ghost 검색 지우기" onClick={() => setQuery('')}><X aria-hidden="true"/></button>}
-      </label>}
-      <div className="roster" aria-label="설정할 Ghost">
-        {shown.map(ghost => <button key={ghost.id} type="button" aria-pressed={!creating && ghost.id === selected?.id} className="roster__ghost"
-          title={ghost.name} data-state={ghost.state} onClick={() => { closeCreator(); onSelect(ghost.id); }}>
-          <span className="roster__portrait"><DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={30}/></span>
-          <span className="roster__name">{ghost.name}</span>
-          {ghost.isDefault && <Crown className="roster__crown" aria-label="메인"/>}
-        </button>)}
-        {!shown.length && <span className="roster__empty">일치하는 Ghost가 없습니다.</span>}
-        <button type="button" aria-pressed={creating} className="roster__ghost roster__new" disabled={!state} onClick={() => setCreating(true)}>
-          <Plus aria-hidden="true"/><span>새 Ghost</span>
-        </button>
-      </div>
-    </div>
-    {creating ? <GhostCreator onCancel={closeCreator} onCreated={id => { closeCreator(); onSelect(id); }}/>
-      : selected && <GhostSheet key={selected.id} ghost={selected} onChat={() => onChat(selected.id)}/>}
+      </div>}
+      <ul className="ghost-config-roster" aria-label="설정할 Ghost">
+        {shown.map(ghost => <li key={ghost.id}>
+          <button type="button" id={`settings-ghost-${ghost.id}`} aria-label={ghost.name}
+            aria-describedby={`settings-ghost-${ghost.id}-state`}
+            aria-pressed={split ? !createRequested && ghost.id === selected?.id : undefined} className="roster__ghost"
+            title={ghost.name} data-state={ghost.state} onClick={() => select(ghost.id)}>
+            <span className="roster__portrait"><DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={32}/></span>
+            <span className="roster__copy">
+              <span className="roster__name">{ghost.name}</span>
+              <span id={`settings-ghost-${ghost.id}-state`}>
+                <GhostStateWord state={ghost.state}/>{ghost.isDefault && <span className="sr-only"> · 메인</span>}
+              </span>
+            </span>
+            {ghost.isDefault && <Crown className="roster__crown" aria-hidden="true"/>}
+            {!split && <ArrowRight className="roster__arrow" aria-hidden="true"/>}
+          </button>
+        </li>)}
+      </ul>
+      {!shown.length && state && <p className="roster__empty" role="status">{needle ? '일치하는 Ghost가 없습니다.' : '설정할 Ghost가 없습니다.'}</p>}
+      <button type="button" id="settings-new-ghost" className="roster__new" aria-pressed={split ? createRequested : undefined}
+        disabled={!state || createRequested} onClick={beginCreate}>
+        <Plus aria-hidden="true"/>새 Ghost
+      </button>
+    </div>}
+    {(split || showingDetail) && <div ref={detail} className="ghost-settings-page__detail" tabIndex={-1}>
+      {!split && !compact && !createRequested && <a className="ghost-settings-page__back" href={`#${ghostRosterRoute}`} onClick={event => {
+        if ((history.state as GhostSettingsHistory | null)?.ghostSettingsFromRoster) { event.preventDefault(); history.back(); }
+      }}><ArrowLeft aria-hidden="true"/>Ghost 목록</a>}
+      {createRequested ? <GhostCreator onCancel={() => onCreateClosed?.()} onCreated={id => {
+        onCreateClosed?.();
+        onSelect(id);
+      }}/> : selected
+        ? <GhostSheet key={selected.id} ghost={selected} onChat={() => onChat(selected.id)}/>
+        : state && showingDetail && <p className="roster__empty" role="status">이 Ghost를 찾을 수 없습니다.</p>}
+    </div>}
   </section>;
 }
 
@@ -155,9 +226,8 @@ export function adaptationLine(adaptation: Adaptation, now: number): string {
 
 /** One Ghost's sheet; exported for tests. */
 export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) {
-  const { store } = useHost();
+  const { store, client } = useHost();
   const { state } = useHostState(store);
-  const { client } = useHost();
   const { save, error, saving } = useSaver();
   const [designing, setDesigning] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -175,13 +245,13 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
   return <div className="ghost-sheet" aria-busy={saving}>
     <header className="ghost-sheet__identity">
       <button type="button" className="ghost-sheet__portrait" aria-label={`${ghost.name} 꾸미기`} title="꾸미기" onClick={() => setDesigning(true)}>
-        <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={60}/>
+        <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={48}/>
       </button>
       <div className="ghost-sheet__who">
         <NameField key={ghost.name} name={ghost.name} onSave={name => update({ name })}/>
         <div className="ghost-sheet__marks">
-          {ghost.isDefault && <span className="main-mark" data-on><Crown aria-hidden="true"/>메인 Ghost</span>}
-          <span className="ghost-sheet__state" data-state={ghost.state}><Power aria-hidden="true"/>{states.find(item => item.value === ghost.state)?.label}</span>
+          {ghost.isDefault && <span className="main-mark"><Crown aria-hidden="true"/>메인</span>}
+          <GhostStateWord state={ghost.state}/>
         </div>
       </div>
       <Button type="button" variant="outline" className="ghost-sheet__chat" onClick={onChat}><MessageCircle aria-hidden="true"/>대화</Button>
@@ -273,9 +343,9 @@ function ModelRoute({ ghost, save }: { ghost: Ghost; save(command: Command): Pro
       <span>기본 대체 모델 따르기<small>{follows ? '끄면 이 Ghost는 대체 모델 없이 한 모델만 씁니다.' : '이 Ghost는 대체 모델 없이 한 모델만 씁니다.'}</small></span>
       <Switch checked={follows} disabled={pending} onCheckedChange={setFollows} aria-label="기본 대체 모델 따르기"/>
     </label>}
-    <p className="model-route__hint">{inherited.length
-      ? '기본 대체 모델을 따릅니다. 여기서 추가하면 이 Ghost만의 목록이 되어 기본 대체 모델 대신 씁니다.'
-      : '연결 오류·사용 한도에 걸리면 다음 모델로 이어갑니다.'}</p>
+    {(inherited.length > 0 || ghost.fallbacks.length > 0) && <p className="model-route__hint">{inherited.length
+      ? '여기서 추가하면 기본 대체 모델 대신 이 Ghost만의 목록을 씁니다.'
+      : '연결 오류·사용 한도에 걸리면 다음 모델로 이어갑니다.'}</p>}
   </div>;
 }
 
@@ -335,9 +405,19 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
 /** The name reads as the heading and edits in place; Enter or leaving the field saves, Escape restores. */
 function NameField({ name, onSave }: { name: string; onSave(name: string): Promise<boolean> }) {
   const [draft, setDraft] = useState(name);
-  const commit = () => { const next = draft.trim(); if (!next) setDraft(name); else if (next !== name) void onSave(next).then(ok => { if (!ok) setDraft(name); }); };
+  const cancelling = useRef(false);
+  const commit = () => {
+    if (cancelling.current) { cancelling.current = false; return; }
+    const next = draft.trim();
+    if (!next) setDraft(name);
+    else if (next !== name) void onSave(next).then(ok => { if (!ok) setDraft(name); });
+  };
   return <input className="ghost-sheet__name" aria-label="이름" value={draft} maxLength={128} onChange={event => setDraft(event.target.value)} onBlur={commit}
-    onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { setDraft(name); event.currentTarget.blur(); } }}/>;
+    onKeyDown={event => {
+      if (event.nativeEvent.isComposing) return;
+      if (event.key === 'Enter') event.currentTarget.blur();
+      if (event.key === 'Escape') { cancelling.current = true; setDraft(name); event.currentTarget.blur(); }
+    }}/>;
 }
 
 /** 활성 · 일시정지 · 은퇴 as one capsule with a sliding thumb. The main Ghost stays active. */
@@ -371,17 +451,15 @@ function PersonaNote({ persona, onSave }: { persona: string; onSave(persona: str
   };
   if (!editing) return <div className="persona-note" data-reading>
     <p className="persona-note__text">{persona}</p>
-    <div className="persona-note__actions">
-      <span className="persona-note__hint">첫 줄은 목록에 보이는 한 줄 소개입니다.</span>
-      <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}><Pencil aria-hidden="true"/>편집</Button>
-    </div>
+    <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}><Pencil aria-hidden="true"/>편집</Button>
   </div>;
   return <div className="persona-note" data-changed={changed || undefined}>
-    <textarea ref={area} aria-label={uiTerms.persona} value={draft} maxLength={8192} rows={3} onChange={event => setDraft(event.target.value)}
+    <textarea ref={area} aria-label={uiTerms.persona} aria-describedby="ghost-persona-hint" value={draft} maxLength={8192} rows={3} onChange={event => setDraft(event.target.value)}
       onKeyDown={event => {
         if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); void commit(); }
         if (event.key === 'Escape') { event.preventDefault(); cancel(); }
       }}/>
+    <p className="persona-note__hint" id="ghost-persona-hint">첫 줄은 목록에 보이는 한 줄 소개입니다.</p>
     <div className="persona-note__actions">
       {changed && <Button type="button" variant="ghost" size="icon" onClick={() => setDraft(persona)} aria-label="되돌리기" title="되돌리기"><RotateCcw aria-hidden="true"/></Button>}
       <Button type="button" variant="outline" size="sm" onClick={cancel}>취소</Button>
@@ -394,20 +472,42 @@ function PersonaNote({ persona, onSave }: { persona: string; onSave(persona: str
 function AdaptationNote({ adaptation, onSave }: { adaptation: Adaptation | undefined; onSave(notes: string): Promise<boolean> }) {
   const notes = adaptation?.notes ?? '';
   const previous = adaptation?.previous ?? null;
+  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(notes);
   const area = useRef<HTMLTextAreaElement>(null);
   const now = useNow();
-  useEffect(() => { const node = area.current; if (!node) return; node.style.height = 'auto'; node.style.height = `${node.scrollHeight}px`; }, [draft]);
+  useLayoutEffect(() => {
+    const node = area.current;
+    if (!node) return;
+    node.style.height = 'auto';
+    node.style.height = `${node.scrollHeight}px`;
+  }, [draft, editing]);
+  useEffect(() => { if (editing) area.current?.focus(); }, [editing]);
   const changed = draft !== notes;
-  const commit = () => { if (changed) void onSave(draft); };
+  const cancel = () => { setDraft(notes); setEditing(false); };
+  const commit = async () => { if (changed && await onSave(draft)) setEditing(false); };
+  const meta = adaptation && <p className="adaptation-note__meta">{adaptationLine(adaptation, now)}</p>;
+  if (!editing) return <div className="persona-note" data-reading>
+    <div className="persona-note__copy">
+      {notes ? <p className="persona-note__text">{notes}</p> : <p className="persona-note__empty">기록 없음</p>}
+      {meta}
+    </div>
+    <div className="persona-note__row-actions">
+      {previous !== null && <Button type="button" variant="ghost" size="sm" onClick={() => void onSave(previous)}>되돌리기</Button>}
+      <Button type="button" variant="outline" size="sm" aria-label="환경 적응 편집" onClick={() => setEditing(true)}><Pencil aria-hidden="true"/>편집</Button>
+    </div>
+  </div>;
   return <div className="persona-note" data-changed={changed || undefined}>
     <textarea ref={area} aria-label="환경 적응" value={draft} maxLength={ADAPTATION_MAX_CHARS} rows={3} placeholder="이 Mac에서 배운 사용법과 습관" onChange={event => setDraft(event.target.value)}
-      onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); commit(); } }}/>
-    {adaptation && <p className="adaptation-note__meta">{adaptationLine(adaptation, now)}</p>}
-    {(changed || previous !== null) && <div className="persona-note__actions">
-      {previous !== null && <Button type="button" variant="ghost" size="sm" onClick={() => void onSave(previous)}>되돌리기</Button>}
-      {changed && <Button type="button" size="sm" onClick={commit}>저장</Button>}
-    </div>}
+      onKeyDown={event => {
+        if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); void commit(); }
+        if (event.key === 'Escape') { event.preventDefault(); cancel(); }
+      }}/>
+    {meta}
+    <div className="persona-note__actions">
+      <Button type="button" variant="outline" size="sm" onClick={cancel}>취소</Button>
+      <Button type="button" size="sm" disabled={!changed} onClick={() => void commit()}>저장</Button>
+    </div>
   </div>;
 }
 
@@ -427,9 +527,9 @@ function CapabilityBoard({ tools, onChange }: { tools: readonly GhostTool[]; onC
     {groups.map(group => {
       const enabled = group.tools.filter(tool => shown.includes(tool)).length;
       const all = enabled === group.tools.length;
-      return <div key={group.title} className="capabilities__group" data-level={all ? 'all' : enabled ? 'some' : 'none'} data-privileged={group.privileged || undefined}>
+      return <div key={group.title} className="capabilities__group" data-privileged={group.privileged || undefined}>
         <button type="button" className="capabilities__head" aria-pressed={all} onClick={() => set(group.tools, !all)}>
-          <span className="capabilities__meter" aria-hidden="true" style={{ '--fill': enabled / group.tools.length } as CSSProperties}/>
+          <span aria-hidden="true"><StateGlyph state={all ? 'done' : enabled ? 'verifying' : 'queued'} mark={enabled ? 'dot' : 'ring'} size={16}/></span>
           {group.title}<span className="tabular">{enabled}/{group.tools.length}</span>
           {group.privileged && <Lock className="capabilities__lock" aria-label="소유자 전용"/>}
         </button>
@@ -449,7 +549,7 @@ function SandboxStrip({ ghostId, state, detail }: { ghostId: string; state: stri
   const [confirm, setConfirm] = useState(false);
   const label: Record<string, string> = { running: '실행 중', stopped: '정지됨', error: '오류' };
   return <div className="sandbox-strip" data-state={state}>
-    <span className="sandbox-strip__orb" aria-hidden="true"/>
+    <span aria-hidden="true"><StateGlyph state={state === 'error' ? 'failed' : state === 'running' ? 'running' : 'waiting'} size={16}/></span>
     <span className="sandbox-strip__copy"><strong>{label[state] ?? state}</strong>{detail && <small>{detail}</small>}</span>
     {state === 'running' && <Button type="button" variant="secondary" size="sm" onClick={() => void save({ type: 'sandbox.control', ghostId, action: 'stop' })}><Square aria-hidden="true"/>정지</Button>}
     {confirm
@@ -477,7 +577,7 @@ function GhostCreator({ onCancel, onCreated }: { onCancel(): void; onCreated(id:
   };
   return <form className="ghost-sheet ghost-sheet--new" onSubmit={event => { event.preventDefault(); void create(); }}>
     <header className="ghost-sheet__identity">
-      <span className="ghost-sheet__portrait" aria-hidden="true"><DotAvatar profileId={`new:${name}`} size={60}/></span>
+      <span className="ghost-sheet__portrait" aria-hidden="true"><DotAvatar profileId={`new:${name}`} size={48}/></span>
       <div className="ghost-sheet__who">
         <input className="ghost-sheet__name" aria-label="이름" placeholder="이름" value={name} maxLength={128} autoFocus required disabled={saving} onChange={event => setName(event.target.value)}/>
       </div>

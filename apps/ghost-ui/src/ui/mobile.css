@@ -1,20 +1,8 @@
 /* The shared workspace keeps its desktop geometry; only the compact frame owns these rules. */
 .compact-dock { display: none; }
-.conversations { width: min(100%, 560px); margin-inline: auto; }
-.conversations__heading { margin: 0 0 16px; font-size: var(--text-heading); font-weight: 650; }
 .mobile-list-search { min-width: 0; width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--ghost-line); border-radius: var(--radius-control); background: var(--ghost-inset); color: var(--ghost-ink); font-size: 16px; }
 .mobile-list-search::placeholder, .conversations__empty { color: var(--ghost-ink3); }
 .conversations__empty { margin-top: 20px; }
-.conversations__list { list-style: none; margin: 12px 0 0; padding: 0; }
-.conversations__list li + li { border-top: 1px solid var(--ghost-line); }
-.conversations__list button { display: flex; width: 100%; min-height: 60px; align-items: center; gap: 12px; padding: 8px 6px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--ghost-ink); text-align: left; cursor: pointer; }
-.conversations__list button:hover { background: var(--ghost-hover); }
-.conversations__list button > :not(.conversations__name) { flex: none; }
-.conversations__list button > svg { color: var(--ghost-ink3); }
-.conversations__tools { display: flex; align-items: center; gap: 8px; }
-.conversations__workspace { display: inline-flex; flex: none; align-items: center; gap: 6px; min-height: 44px; padding-inline: 10px; border-radius: var(--radius-control); color: var(--ghost-ink); font-weight: 550; cursor: pointer; }
-.conversations__workspace:hover { background: var(--ghost-hover); }
-.conversations__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
 .this-device { display: flex; min-width: 0; flex-direction: column; gap: 28px; }
 .this-device > header { display: grid; gap: 6px; }
 .this-device .ghost-settings-group__rows { padding-inline: 16px; }
@@ -99,21 +87,6 @@
   .ghost-titlebar .shell-search:not([data-duty="on"]) { background: none; color: var(--ghost-ink2); }
   .compact-dock__icon { position: relative; }
   .compact-dock__badge { position: absolute; left: 15px; top: -5px; min-width: 15px; padding: 2px 4px; border-radius: 10px; background: var(--ghost-amber); color: var(--ghost-canvas); font-size: 9px; line-height: 1.1; }
-  .conversations__heading { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .workspace-page { display: flex; min-height: 0; flex-direction: column; padding: 4px 18px 16px; }
-  .workspace-page .sidebar-primary, .workspace-page .sidebar-foot { display: none; }
-  .workspace-shortcuts { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--ghost-line); }
-  .workspace-shortcuts .ghost-navigation-item { flex: 1; justify-content: center; min-width: max-content; min-height: 44px; }
-  .workspace-page .ghost-navigation-group__label { font-size: 13px; padding-top: 24px; }
-  .workspace-page .ghost-navigation-group__head { margin-inline: 0; padding-inline: 0; background: var(--ghost-canvas); }
-  .workspace-page .ghost-navigation-item, .workspace-page .presence-row__main { min-height: 56px; }
-  .workspace-page .presence-row__main { padding-inline: 10px; }
-  .workspace-page .sidebar-project { min-height: 44px; padding-left: 46px; }
-  .workspace-page .presence-row { width: 100%; }
-  .workspace-page .sidebar-pool-toggle, .workspace-page .sidebar-group-action { width: 44px; height: 44px; margin-block: 10px 0; }
-  .workspace-page .sidebar-scroll-frame { margin-inline: 0; }
-  .workspace-page .sidebar-scroll { padding-inline: 0; }
-  .workspace-page .sidebar-scroll > .ghost-navigation-group + :is(.presence-row__main, .touch-context:has(.presence-row__main)) { margin-block-start: var(--ghost-space-6); }
   .ghost-conversation__dock {
     --composer-glow-blur: 5px;
     padding: 6px max(var(--ghost-space-3), env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(var(--ghost-space-3), env(safe-area-inset-left));
@@ -176,8 +149,6 @@
   /* Only the connection banner keeps the sheet's top edge; its sticky offset undoes the sheet's 24px top padding. */
   .connection-banner { top: -24px; }
   .work-transcript { padding: 14px 12px; }
-  /* A trail says what it did in words; the tool chips stay for wide screens. */
-  .trail__chips { display: none; }
   }
 }
 @media (pointer: coarse) {

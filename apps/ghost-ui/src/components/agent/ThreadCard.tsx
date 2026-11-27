@@ -18,12 +18,13 @@ const SHOWN_DELEGATES = 4;
  * and kept live — state, carrier, lifecycle, and the Ghosts it delegated parts to — so the
  * one durable chat shows its branches and the collaboration under them.
  */
-export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], onOpen, onOpenPage }: {
+export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], selected = false, onOpen, onOpenPage }: {
   work: Work;
   ghostName: string;
   needsOwner: boolean;
   now: number;
   delegates?: ThreadDelegate[];
+  selected?: boolean;
   onOpen(): void;
   onOpenPage?(): void;
 }) {
@@ -35,19 +36,16 @@ export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], o
   return <ContextMenu>
     <ContextMenuTrigger asChild touchAction="inline">
       <div className="thread-card" data-kind="thread" data-settled={settled || undefined} data-rail="thread" data-rail-tone={glyphTone(glyph)} data-rail-label={work.title}>
-        <button type="button" onClick={onOpen} aria-label={`스레드: ${work.title}, ${glyphLabel[glyph]}${delegates.length ? `, 위임 ${delegates.length}` : ''}`}>
+        <button type="button" onClick={onOpen} aria-expanded={selected}
+          aria-label={`스레드: ${work.title}, ${glyphLabel[glyph]}${delegates.length ? `, 위임 ${delegates.length}` : ''}`}>
           <StateGlyph state={glyph}/>
           <span className="thread-card__copy">
             <span className="thread-card__title">{work.title}</span>
-            <span className="thread-card__meta">
-              {settled
-                ? <time className="tabular">{relativeTime(work.endedAt ?? work.updatedAt, now)}</time>
-                : <>
-                  <DotAvatar profileId={work.ghostId} tone={toneFor(work.ghostId)} size={14}/>{ghostName}
-                  <span>{glyphLabel[glyph]}</span>
-                  <time className="tabular">{relativeTime(work.updatedAt, now)}</time>
-                </>}
-            </span>
+            {!settled && <span className="thread-card__meta">
+              <DotAvatar profileId={work.ghostId} tone={toneFor(work.ghostId)} size={14}/>{ghostName}
+              <span>· {glyphLabel[glyph]}</span>
+              <time className="tabular">· {relativeTime(work.updatedAt, now)}</time>
+            </span>}
             {shown.length > 0 && !settled && <span className="thread-card__delegates" aria-hidden="true">
               {shown.map(({ work: child, ghostName: name, needsOwner: waiting }) => <span key={child.id} className="thread-card__delegate" title={`${name}: ${child.title}`}>
                 <StateGlyph state={workGlyph(child.state, waiting)} size={12}/>
@@ -57,7 +55,9 @@ export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], o
               {delegates.length > shown.length && <span className="thread-card__delegate">+{delegates.length - shown.length}</span>}
             </span>}
           </span>
-          {!settled && <LifecycleTrack state={work.state} needsOwner={needsOwner} compact/>}
+          {settled
+            ? <time className="thread-card__time tabular">{relativeTime(work.endedAt ?? work.updatedAt, now)}</time>
+            : <LifecycleTrack state={work.state} needsOwner={needsOwner} compact/>}
         </button>
         <ContextMenuAction/>
       </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { CircleAlert } from 'lucide-react';
 import type { MetricsView } from '@ghost/contract';
 import { Button, InlineError, SettingsGroup, SettingsRow, SkeletonText } from '../ui';
 import { useHost } from '../host/context';
@@ -6,8 +7,8 @@ import { useHostState } from '../host/store';
 import { Choice, errorText } from './InfrastructureFields';
 import { uiTerms } from '../uiText';
 import { describeRule } from './policyText';
+import './SettingsLists.css';
 
-const percent = (value: number | null) => value === null ? '아직 없음' : `${(value * 100).toFixed(1)}%`;
 const number = (value: number | null) => value === null ? '아직 없음' : value.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
 const cost = (value: number | null) => value === null ? '아직 없음' : `$${value.toLocaleString('ko-KR', { maximumFractionDigits: 4 })}`;
 const duration = (ms: number | null) => {
@@ -19,7 +20,7 @@ const duration = (ms: number | null) => {
   const hours = Math.floor(minutes / 60);
   return minutes % 60 ? `${hours}시간 ${minutes % 60}분` : `${hours}시간`;
 };
-const value = (text: string) => <span className="text-ui font-medium text-ink">{text}</span>;
+const value = (text: string) => <span className="settings-list__value">{text}</span>;
 
 /** 「성과와 비용」: Ghost들이 맡은 일의 결과와, 일 하나당 든 시간·토큰·비용을 한눈에 보여 준다. */
 export function ScopeMetrics({ scopeId }: { scopeId?: string | null }) {
@@ -51,20 +52,24 @@ export function ScopeMetrics({ scopeId }: { scopeId?: string | null }) {
     ? [!metrics.usageComplete && '사용량 기록이 일부 없어 비용·토큰이 적게 보일 수 있습니다.', !metrics.observationHistoryComplete && '이전 관측 기록이 일부 없습니다.'].filter(Boolean).join(' ')
     : '';
   const ghostOptions = [{ value: '', label: '모두' }, ...(state?.ghosts ?? []).map(ghost => ({ value: ghost.id, label: ghost.name }))];
-  return <section className="grid gap-6">
-    <SettingsGroup title={uiTerms.metrics} actions={<Button variant="outline" disabled={loading} onClick={() => setReload(value => value + 1)}>새로고침</Button>}>
-      <div className="infra-editor">
+  return <section className="settings-list-page" aria-label={uiTerms.metrics}>
+    <div className="settings-list__lead">
+      {metrics && !loading && !error && <p className="settings-list__verdict">
+        {metrics.works ? `맡긴 일 ${metrics.works.toLocaleString('ko-KR')}건` : '아직 집계할 일이 없습니다.'}
+      </p>}
+      <div className="settings-list__actions"><Button variant="outline" disabled={loading} onClick={() => setReload(value => value + 1)}>새로고침</Button></div>
+    </div>
+    <div className="settings-list__filters">
         {scopeId === undefined && <Choice label="범위" value={selectedScope} onChange={setSelectedScope}
           options={[{ value: 'all', label: '모든 범위' }, { value: 'global', label: '전체 (프로젝트 없음)' }, ...(state?.scopes ?? []).map(scope => ({ value: scope.id, label: scope.name }))]} />}
         {scopeId === undefined
           ? <Choice label="Ghost" value={ghostId} onChange={setGhostId} options={ghostOptions}/>
           : <details className="infra-fold"><summary>Ghost별로 보기{ghostId ? ' · 고름' : ''}</summary><Choice label="Ghost" value={ghostId} onChange={setGhostId} options={ghostOptions}/></details>}
-        {loading && <SkeletonText label="불러오는 중…" lines={2} />}
-        {error && <InlineError>{error}</InlineError>}
-      </div>
-    </SettingsGroup>
+    </div>
+    {loading && <SkeletonText label="불러오는 중…" lines={2}/>}
+    {error && <InlineError>{error}</InlineError>}
+    {note && <p className="settings-list__meta settings-list__state" data-tone="amber"><CircleAlert size={14} aria-hidden="true"/>{note}</p>}
     {metrics && <>
-      {metrics.works === 0 && <p className="m-0 text-caption text-ink-2">아직 집계할 일이 없습니다.</p>}
       {metrics.works > 0 && <OutcomeBand works={metrics.works} completed={metrics.completed} rejected={metrics.rejected}/>}
       {metrics.works > 0 && (metrics.elapsedMsPerAcceptedWork !== null || metrics.tokensPerAcceptedWork !== null || metrics.costPerAcceptedWork !== null) && <SettingsGroup title="일 하나당" description="수용된 일 기준">
         {metrics.elapsedMsPerAcceptedWork !== null && <SettingsRow label="평균 걸린 시간">{value(duration(metrics.elapsedMsPerAcceptedWork))}</SettingsRow>}
@@ -76,10 +81,9 @@ export function ScopeMetrics({ scopeId }: { scopeId?: string | null }) {
         {metrics.quotaWaitMs > 0 && <SettingsRow label="사용량 한도 때문에 기다린 시간">{value(duration(metrics.quotaWaitMs))}</SettingsRow>}
         {metrics.repeatGuardHits > 0 && <SettingsRow label="같은 시도를 되풀이해 막은 횟수">{value(`${metrics.repeatGuardHits.toLocaleString('ko-KR')}번`)}</SettingsRow>}
       </SettingsGroup>}
-      {ruleRows.length > 0 && <SettingsGroup title="승인 요청 처리" description="규칙이 승인·거절한 요청의 누적 횟수입니다.">
+      {ruleRows.length > 0 && <SettingsGroup title="규칙별 승인 요청">
         {ruleRows.map(row => <SettingsRow key={row.key} label={row.subject} description={row.description}>{value(`승인 ${row.counts.approved.toLocaleString('ko-KR')} · 거절 ${row.counts.denied.toLocaleString('ko-KR')}`)}</SettingsRow>)}
       </SettingsGroup>}
-      {note && <p className="m-0 text-caption text-ink-3">{note}</p>}
     </>}
   </section>;
 }
@@ -97,7 +101,7 @@ function OutcomeBand({ works, completed, rejected }: { works: number; completed:
       {parts.filter(part => part.count > 0).map(part => <span key={part.kind} data-kind={part.kind} style={{ flexGrow: part.count }}/>)}
     </div>
     <dl className="outcome__legend">
-      <div><dt>맡긴 일</dt><dd className="tabular">{works.toLocaleString('ko-KR')}</dd></div>
+      {/* The total is already in the lead. */}
       {parts.map(part => <div key={part.kind} data-kind={part.kind}><dt>{part.label}</dt><dd className="tabular">{part.count.toLocaleString('ko-KR')} · {share(part.count)}</dd></div>)}
     </dl>
   </section>;

@@ -137,14 +137,14 @@ export function MailConnect({ seed, disabled, mainName, onAssist, onClose, onSav
       {telling && mainName ? <ConnectionRequest service={providerService ?? mailService} mainName={mainName} initialDetail={completed}
         onAssist={onAssist} onClose={close} onSendingChange={setSending}/>
       : expanded && <form noValidate className="setup-route__body" aria-busy={saving} onSubmit={event => { event.preventDefault(); void save(); }}>
-        {pending && <p className="m-0 text-caption text-ink-2" role="status">서버 정보를 찾는 중…</p>}
+        {pending && <p className="settings-list__meta" role="status">메일 서버 확인 중…</p>}
         {discoveryError && !pending && <InlineError onRetry={() => discover(completed)} retryLabel="다시 찾기">{discoveryError}</InlineError>}
         {found && !pending && <>
           <div className="mail-provider">
             {!seed && <ServiceIcon service={providerService}/>}
-            <div className="mail-provider__identity">
-              <p className="text-ui font-medium">{found.provider?.name ?? found.domain}</p>
-              {address.trim() !== completed && <p>{completed}</p>}
+            <div className="mail-provider__identity settings-list__copy">
+              <p className="settings-list__title">{found.provider?.name ?? found.domain}</p>
+              {address.trim() !== completed && <p className="settings-list__meta">{completed}</p>}
             </div>
             {oauthService && found.setupUrl && <ExternalAnchor href={found.setupUrl} target="_blank" rel="noopener noreferrer" className="setup-route__link">인증 설정 열기<ArrowUpRight size={12} aria-hidden="true"/></ExternalAnchor>}
           </div>

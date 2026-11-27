@@ -3,11 +3,11 @@ import { createPortal } from 'react-dom';
 import { CompactTitleSlot } from '../components/AppFrame';
 import { ArrowRight, CircleAlert, GitBranch, Monitor, Phone, X } from 'lucide-react';
 import { Button, Conversation, Popover, PopoverContent, PopoverTrigger, Row, SkeletonChat } from '../ui'
-import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
+import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type GhostTool, type Message, type State, type Work } from '@ghost/contract';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
 import { OpenWorkProvider, StateGlyph, ThreadCard, workGlyph } from '../components/agent';
-import { LiveReply, Transcript, type TranscriptExtra } from '../components/TranscriptMessage';
+import { Transcript, type TranscriptExtra } from '../components/TranscriptMessage';
 import { OutgoingMessage } from '../components/OutgoingMessage';
 import { quoteForReply } from '../components/MessageMenu';
 import { ChatComposer } from './ChatComposer';
@@ -24,7 +24,7 @@ import { useConversationFeed } from './conversationFeed';
 import { useOutbox } from './outbox';
 import { conversationStarters } from './conversationSuggestions';
 import { profileSummary } from './profileSummary';
-import { ghostPresence } from './ghostState';
+import { ghostLiveWork, type DotState } from './ghostState';
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { useHost } from '../host/context';
@@ -33,6 +33,8 @@ import { useCompact, useTouch } from '../ui/adaptive';
 import { recoverMessage, type RecoveredMessage } from './composerRecovery';
 import { useCallActions } from './call/CallProvider';
 import { callStartBlock } from './call/call-state';
+import { toolLabels } from './toolLabels';
+import './Chat.css';
 
 /** How often the conversation re-checks whether the Ghost's browser session is still there. */
 const SESSION_POLL_MS = 4000;
@@ -96,6 +98,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   const compact = useCompact();
   const titleSlot = useContext(CompactTitleSlot);
   const toolsSlot = toolsHost !== undefined ? toolsHost : compact ? titleSlot : null;
+  const showHead = !compact && toolsHost === undefined;
   const now = useNow();
   const conversations = state.conversations
     .filter(conversation => conversation.ghostId === ghost.id && conversation.kind === 'direct')
@@ -153,13 +156,24 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
     !running && lastMessage?.role === 'assistant' && outbox.rows.length === 0);
   const names = new Map(state.ghosts.map(item => [item.id, item.name]));
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
-  // What this screen needs from the owner, answered above the composer; an open thread's own decisions sit in its panel.
-  const decisions = chatDecisions(state, ghost.id, conversationId)
-    .filter(decision => !threadId || decision.workId !== threadId)
-    // A question asked in this conversation stays; a decision on Work answers to the project the Work belongs to.
+  // An open thread's own decisions stay in its panel, but still count toward the conversation's state.
+  const pending = chatDecisions(state, ghost.id, conversationId)
     .filter(decision => projectId === undefined || decision.workId === null || decisionScopeId(decision, state) === projectId);
+  const decisions = threadId ? pending.filter(decision => decision.workId !== threadId) : pending;
+  const currentTool = live?.tools.at(-1)?.name;
+  const nowDoing = currentTool ? toolLabels[currentTool as GhostTool] ?? currentTool
+    : live?.thinking && !live.partial ? '생각 중' : '응답 중';
+  const work = pending.length === 0 && !running ? ghostLiveWork(state, ghost.id)
+    .find(item => (projectId === undefined || item.scopeId === projectId)
+      && (item.state === 'running' || item.state === 'verifying' || item.state === 'blocked' || item.state === 'waiting')) : undefined;
+  const presence: DotState = pending.length > 0 || work?.state === 'blocked' ? 'attention'
+    : running || work?.state === 'running' || work?.state === 'verifying' ? 'working' : 'idle';
+  const status = pending.length > 0 ? `확인 필요 ${pending.length}`
+    : running ? `작업 중 · ${nowDoing}`
+    : work ? `${work.state === 'blocked' ? '막힘' : work.state === 'waiting' ? '응답 대기' : '작업 중'} · ${work.title}`
+    : '대기';
   const openWork = (id: string) => navigate(`/work/${encodeURIComponent(id)}`);
-  // Threads begun here appear where they started, kept live, with the Ghosts they delegated to beneath.
+  // A thread enters the activity group for the turn where it began and stays live there.
   const extras: TranscriptExtra[] = conversationId ? state.works
     .filter(work => work.originConversationId === conversationId && !work.parentId && (projectId === undefined || work.scopeId === projectId))
     .map(work => {
@@ -167,19 +181,20 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         .sort((a, b) => a.createdAt - b.createdAt)
         .map(child => ({ work: child, ghostName: names.get(child.ghostId) ?? 'Ghost', needsOwner: waiting.has(child.id) }));
       return { key: `thread:${work.id}`, at: work.createdAt, returnsAs: TERMINAL_WORK_STATES.includes(work.state) ? work.id : undefined, node: <ThreadCard work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'}
-        needsOwner={waiting.has(work.id)} now={now} delegates={delegates}
+        needsOwner={waiting.has(work.id)} now={now} delegates={delegates} selected={threadId === work.id}
         onOpen={() => openThread(work.id)} onOpenPage={() => openWork(work.id)}/> };
     }) : [];
 
   const callBlocked = calls ? callStartBlock(ghost, calls.occupied) : null;
   const callLabel = callBlocked ? `전화 — ${callBlocked}` : '전화';
-  const tools = <div className="chat-tools" role="group" aria-label="대화 도구">
-    <GhostProfile ghostID={ghost.id} name={ghost.name} summary={profileSummary(ghost.persona)} presence={ghostPresence(ghost, state).state}
+  const profile = <GhostProfile ghostID={ghost.id} name={ghost.name} summary={profileSummary(ghost.persona)} presence={presence}
       activity={{ model: projectGhostActivity(ghost, state), onInspectWork: openWork, onCancelTurn: stop }}
       onOpenWork={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}
       onManage={() => navigate(`/settings?tab=team&ghost=${encodeURIComponent(ghost.id)}`)}
       design={<GhostDesignEditor ghostId={ghost.id}/>}
       isMain={ghost.isDefault}/>
+  const tools = <div className="chat-tools" role="group" aria-label="대화 도구">
+    {!showHead && profile}
     {calls && <button type="button" className="chat-tool chat-call" aria-disabled={Boolean(callBlocked)} aria-label={callLabel} title={callLabel}
       onClick={event => { if (!callBlocked) calls.start(ghost, event.currentTarget); }}><Phone aria-hidden="true"/></button>}
     <Threads ghost={ghost} state={state} conversations={conversations} currentId={conversationId} waiting={waiting} now={now} projectId={projectId}
@@ -192,11 +207,22 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         <Monitor aria-hidden="true"/>
       </button>}
   </div>;
+  const outgoing = outbox.rows.map(({ entry, note }) => <OutgoingMessage key={entry.requestId} label="나" text={entry.command.text}
+    scopes={(entry.command.scopeId ? [entry.command.scopeId] : []).flatMap(id => state.scopes.filter(space => space.id === id))}
+    attachments={entry.command.attachments ?? []} state={entry.state} note={note}
+    onRetry={() => outbox.retry(entry.requestId)} onDiscard={() => takeBack(entry.requestId)}/>);
   return <OpenWorkProvider value={openThread}><div className="chat-layout" data-thread={threadId ? '' : undefined}>
     {toolsSlot && !threadId && createPortal(tools, toolsSlot)}
     <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
       scrollKey={`${page.messages.length}:${outbox.rows.length}:${live?.running ? 1 : 0}:${live?.partial ? 1 : 0}`} followKey={followKey}
-      header={toolsSlot ? null : <div className="chat-corner">{tools}</div>}
+      header={showHead ? <div className="chat-head" data-presence={presence}>
+        {profile}
+        <div className="chat-head__identity">
+          <h1 className="chat-head__name" title={ghost.name}>{ghost.name}</h1>
+          <p className="chat-head__state" title={status}>{status}</p>
+        </div>
+        {tools}
+      </div> : null}
       composer={<>
         <BrowserPaneContext.Provider value={conversationId ? { conversationId, open: () => setBrowserOpen(true) } : null}>
           <ChatDecisions state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread}/>
@@ -219,16 +245,12 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         <button type="button" className="link-quiet" disabled={olderLoading} onClick={loadOlder}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</button>
       </div>}
       <Transcript messages={page.messages} speaker={speaker} extras={extras} delivered={outbox.delivered}
+        continuation={{ live, ghostId: ghost.id, ghostName: ghost.name, outgoing }}
         onQuote={text => { setDraft(current => `${current.trim() ? `${current.trimEnd()}\n\n` : ''}${quoteForReply(text)}`); inputRef.current?.focus(); }}
         onReuse={text => { setDraft(text); inputRef.current?.focus(); }}
         onUiSubmit={message => message.conversationId === conversationId ? async (text, requestId) => {
           await client.send({ type: 'message.send', conversationId: message.conversationId, text }, requestId);
         } : undefined}/>
-      {outbox.rows.map(({ entry, note }) => <OutgoingMessage key={entry.requestId} label="나" text={entry.command.text}
-        scopes={(entry.command.scopeId ? [entry.command.scopeId] : []).flatMap(id => state.scopes.filter(space => space.id === id))}
-        attachments={entry.command.attachments ?? []} state={entry.state} note={note}
-        onRetry={() => outbox.retry(entry.requestId)} onDiscard={() => takeBack(entry.requestId)}/>)}
-      {live && <LiveReply live={live} ghostId={ghost.id} ghostName={ghost.name}/>}
     </Conversation>
     {browserOpen && conversationId && <aside className="browser-pane" aria-label="브라우저 화면">
       <header className="browser-pane__head">

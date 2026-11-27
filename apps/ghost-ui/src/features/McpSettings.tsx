@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from 'react';
+import { CircleAlert, Plug, PowerOff } from 'lucide-react';
 import type { McpServer } from '@ghost/contract';
-import { Button, Checkbox, InlineError, SettingsGroup, SettingsRow } from '../ui';
+import { Button, Checkbox, InlineError, SkeletonRows } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { uiTerms } from '../uiText';
 import { Choice, EditorActions, errorText, StringList, TextField } from './InfrastructureFields';
+import './SettingsLists.css';
 
 export function McpSettings() {
   const { store, client } = useHost();
@@ -12,35 +14,64 @@ export function McpSettings() {
   const [editing, setEditing] = useState<McpServer | 'new' | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const connections = state?.connections ?? [];
+  const servers = (state?.mcpServers ?? []).map(server => {
+    const transport = server.transport;
+    const source = transport.kind === 'http' && transport.connectionId ? connections.find(account => account.id === transport.connectionId) : undefined;
+    const attention = transport.kind === 'http' && Boolean(transport.connectionId && !source?.hasCredential);
+    return { server, attention };
+  }).sort((a, b) => Number(b.attention) - Number(a.attention));
+  const attention = servers.filter(row => row.attention).length;
   const remove = async (serverId: string) => {
     setBusy(true); setError('');
     try { await client.send({ type: 'mcp.delete', serverId }); setRemoving(null); }
     catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };
-  return <SettingsGroup title={uiTerms.mcp} actions={<Button onClick={() => { setEditing('new'); setError(''); }}>서버 추가</Button>}
-    description="Ghost가 쓸 수 있는 외부 도구를 연결합니다. 개발자가 준 MCP 서버의 실행 명령이나 주소가 있을 때만 필요합니다.">
+  return <section className="settings-list-page" aria-label={uiTerms.mcp}>
+    <div className="settings-list__lead">
+      {state && <p className="settings-list__verdict">{servers.length ? `서버 ${servers.length}개` : '연결해 둔 외부 도구 없음'}
+        {attention > 0 && <span className="settings-list__state" data-tone="amber"> · 확인 필요 {attention}</span>}
+      </p>}
+      <div className="settings-list__actions"><Button disabled={!state} onClick={() => { setEditing('new'); setError(''); }}>서버 추가</Button></div>
+    </div>
     {error && <InlineError>{error}</InlineError>}
-    {editing && <div className="px-4 py-3"><McpEditor key={typeof editing === 'string' ? editing : editing.id} server={editing === 'new' ? null : editing} onClose={() => setEditing(null)}/></div>}
-    {!state?.mcpServers.length && !editing && <p className="m-0 p-4 text-caption text-ink-2">연결해 둔 외부 도구가 없습니다.</p>}
-    {state?.mcpServers.map(server => <article className="min-w-0 border-b border-line last:border-b-0" key={server.id}>
-      <SettingsRow label={server.name} description={<>
-        <span className="block">{server.enabled ? '사용 중' : '중지'} · {server.transport.kind === 'stdio' ? server.transport.command : server.transport.url}</span>
-        {server.readTools.length > 0 && <span className="block">읽기 전용 도구: {server.readTools.join(', ')}</span>}
-      </>}>
-        <span className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setEditing(server)}>편집</Button>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRemoving(server.id)}>삭제</Button>
-        </span>
-      </SettingsRow>
-      {removing === server.id && <div className="grid gap-3 px-4 pb-4">
-        <p className="m-0">{server.name} 서버를 삭제할까요?</p>
-        <div className="infra-actions">
-          <Button variant="ghost" disabled={busy} onClick={() => setRemoving(null)}>취소</Button>
-          <Button variant="destructive" disabled={busy} onClick={() => void remove(server.id)}>서버 삭제</Button>
-        </div>
-      </div>}
-    </article>)}
-  </SettingsGroup>;
+    {editing === 'new' && <div className="settings-list__branch"><McpEditor server={null} onClose={() => setEditing(null)}/></div>}
+    {!state && <SkeletonRows label="외부 도구를 불러오는 중…" rows={2}/>}
+    {servers.length > 0 && <ul className="settings-list" role="list">
+      {servers.map(({ server, attention }) => {
+        const isEditing = typeof editing === 'object' && editing?.id === server.id;
+        const isRemoving = removing === server.id;
+        return <li key={server.id} data-tone={attention ? 'amber' : undefined} data-selected={isEditing || isRemoving || undefined}>
+          <article>
+            <div className="settings-list__row">
+              <span className="settings-list__mark">
+                {attention ? <CircleAlert size={16} aria-hidden="true"/> : server.enabled ? <Plug size={16} aria-hidden="true"/> : <PowerOff size={16} aria-hidden="true"/>}
+              </span>
+              <div className="settings-list__copy">
+                <h3 className="settings-list__title">{server.name}</h3>
+                <p className="settings-list__meta"><span className="settings-list__state">{attention ? '인증 필요' : server.enabled ? '사용 중' : '중지'}</span>
+                  {attention && !server.enabled && ' · 중지'} · {server.transport.kind === 'stdio' ? server.transport.command : server.transport.url}
+                </p>
+                {server.readTools.length > 0 && <p className="settings-list__meta">읽기 전용: {server.readTools.join(', ')}</p>}
+              </div>
+              <div className="settings-list__actions">
+                <Button variant="ghost" size="sm" aria-expanded={isEditing} onClick={() => setEditing(isEditing ? null : server)}>편집</Button>
+                <Button variant="ghost" size="sm" disabled={busy} aria-expanded={isRemoving} onClick={() => setRemoving(server.id)}>삭제</Button>
+              </div>
+            </div>
+            {isEditing && <div className="settings-list__branch"><McpEditor key={server.id} server={server} onClose={() => setEditing(null)}/></div>}
+            {isRemoving && <div className="settings-list__branch grid gap-2">
+              <p className="m-0 text-caption text-ink-2">{server.name} 서버를 삭제하면 Ghost가 이 서버의 도구를 사용할 수 없습니다.</p>
+              <div className="settings-list__actions">
+                <Button variant="ghost" disabled={busy} onClick={() => setRemoving(null)}>취소</Button>
+                <Button variant="destructive" disabled={busy} onClick={() => void remove(server.id)}>서버 삭제</Button>
+              </div>
+            </div>}
+          </article>
+        </li>;
+      })}
+    </ul>}
+  </section>;
 }
 
 function McpEditor({ server, onClose }: { server: McpServer | null; onClose(): void }) {

@@ -1,0 +1,117 @@
+@layer components {
+  /* The head, transcript and dock share the same measure. Only the transcript scrolls. */
+  .chat-layout .ghost-conversation__header {
+    padding-block: 0;
+    border-block-end: 1px solid var(--ghost-line);
+  }
+  .chat-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    min-height: 60px;
+    gap: 10px;
+    padding-block: 6px;
+  }
+  .chat-head .profile-trigger { width: 38px; height: 38px; }
+  .chat-head__name, .chat-head__state { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-head__name { color: var(--ghost-ink); font: 600 var(--text-headingLg)/1.2 var(--font-sans); letter-spacing: -.025em; }
+  .chat-head__state { margin-block-start: 2px; color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.4; font-variant-numeric: tabular-nums; }
+  .chat-head[data-presence='attention'] .chat-head__state { color: var(--ghost-amber-ink); }
+  /* Preserve the navigable trail for older conversations and open threads. */
+  .shell:has(.chat-head) .title-nav__crumb:only-child { display: none; }
+  .chat-layout :is(.ghost-conversation__transcript-frame, .ghost-conversation__dock)::before { display: none; }
+  .chat-layout .ghost-conversation__transcript-content { padding-block: 16px 12px; }
+  .chat-layout .ghost-conversation__dock { padding-block-start: 8px; }
+  .chat-layout .ghost-conversation__messages > [data-role='assistant'] + [data-role='assistant'] { margin-block-start: 16px; }
+  .chat-layout .ghost-conversation__messages > :is([data-kind='note'], [data-kind='activity']) + [data-role='assistant'] { margin-block-start: 16px; }
+  .chat-layout .ghost-conversation__messages > * + [data-kind='activity'] { margin-block-start: 10px; }
+  .chat-layout .ghost-conversation__messages > [data-kind='speaker'] + [data-kind='activity'] { margin-block-start: 6px; }
+  .thread-panel__transcript > * + [data-kind='activity'] { margin-block-start: 8px; }
+  @container (max-width: 420px) {
+    .chat-layout .ghost-conversation__transcript-content { padding-block-start: 10px; }
+  }
+
+  /* A turn's side effects share one edge; no connector or frame around each item. */
+  .transcript-activity {
+    display: grid;
+    min-width: 0;
+    padding-inline-start: 12px;
+    border-inline-start: 1px solid var(--ghost-line-strong);
+  }
+  .transcript-activity > * + * { border-block-start: 1px solid var(--ghost-line); }
+  .transcript-activity .thread-card { padding: 0; }
+  .transcript-activity .thread-card::before, .transcript-activity .outcome::before { display: none; }
+  .transcript-activity .thread-card > button {
+    min-height: 50px;
+    max-width: none;
+    padding: 6px;
+    border: 0;
+    border-radius: var(--radius-chip);
+    background: none;
+  }
+  .transcript-activity .thread-card[data-settled] > button { min-height: 36px; }
+  .transcript-activity .thread-card > button:hover { background: var(--ghost-hover); }
+  .transcript-activity .thread-card > button[aria-expanded='true'] { background: var(--ghost-hover2); }
+  .thread-card[data-rail-tone='signal'] { --thread-mark: var(--ghost-signal); }
+  .thread-card[data-rail-tone='amber'] { --thread-mark: var(--ghost-amber); }
+  .thread-card[data-rail-tone='danger'] { --thread-mark: var(--ghost-danger); }
+  .thread-card[data-rail-tone='success'] { --thread-mark: var(--ghost-success); }
+  .transcript-activity .thread-card > button[aria-expanded='true']::before {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: -13px;
+    width: 2px;
+    background: var(--thread-mark, var(--ghost-ink3));
+    pointer-events: none;
+  }
+  .transcript-activity :is(.thread-card__title, .outcome__title) { font-size: 15px; font-weight: 560; line-height: 1.35; }
+  .thread-card__time { flex: none; margin-inline-start: auto; color: var(--ghost-ink3); font-size: var(--text-caption); }
+  .transcript-activity .outcome { justify-items: stretch; gap: 4px; padding: 0 0 4px; }
+  .transcript-activity .outcome__head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    width: 100%;
+    min-height: 36px;
+    padding: 6px;
+    border-radius: var(--radius-chip);
+    background: none;
+  }
+  .transcript-activity .outcome__head:hover { background: var(--ghost-hover); filter: none; }
+  .transcript-activity .outcome__head:active { transform: none; }
+  .transcript-activity :is(.outcome__reason, .outcome__files) { margin-inline-start: 29px; padding-inline-start: 0; }
+  .transcript-activity :is(.thread-card > button, .outcome__head):focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
+
+  .trail > .trail__summary {
+    display: flex;
+    flex-wrap: nowrap;
+    width: 100%;
+    min-height: 30px;
+    margin: 0;
+    padding: 4px 6px;
+    border-radius: var(--radius-chip);
+  }
+  .trail__current { color: var(--ghost-signal-ink); }
+  .trail__failed { flex: none; margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+  .trail > .trail__steps { gap: 0; margin: 0; padding: 0; border: 0; }
+  .trail__steps > li { gap: 4px; padding: 8px 6px 8px 29px; border-block-start: 1px solid var(--ghost-line); }
+  .trail__steps > li::before { display: none; }
+  .trail__steps > li .trail__step-name { display: grid; grid-template-columns: minmax(0, 1fr) auto; font-weight: 500; }
+  .trail__steps > li pre { padding: 0; border-radius: 0; background: none; font-size: var(--text-caption); }
+
+  .transcript-event[data-kind='note'] { margin-inline: 0; color: var(--ghost-ink3); text-align: start; }
+  .transcript-event[data-kind='note']:not(details), .transcript-event[data-kind='note'] > summary { padding-inline: 6px; }
+  details.transcript-event[data-kind='note'][open] { background: none; }
+  .transcript-event[data-kind='note'] > summary { align-items: center; color: inherit; }
+  .transcript-event__text:only-child { width: 100%; }
+
+  @media (pointer: coarse) {
+    .trail > .trail__summary, .transcript-event[data-kind='note'] > summary,
+    .transcript-activity .outcome__head, .transcript-activity .thread-card[data-settled] > button { min-height: 44px; }
+    .transcript-activity .touch-context--inline .thread-card > button { padding-inline-end: 54px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chat-layout > .ghost-conversation, .trail[open] > .trail__steps, .transcript-event__detail,
+    .transcript-activity .outcome, .transcript-activity .thread-card__delegate { animation: none; }
+  }
+}

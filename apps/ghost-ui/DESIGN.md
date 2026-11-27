@@ -94,6 +94,15 @@ Bespoke redraw of the landing screens around what the owner does: settle what wa
 - **프로젝트** has one bar. 문서 keeps a narrow index beside the open document, which opens by default on wide screens; PDC format is a quiet fact in the document header only and the back-to-index button shows on phones. Document update times are not shown because the Host does not report them.
 - Heading counts and duplicate group labels are removed; counts live on the sidebar and the activity island only.
 
+## Screen structure, round 2 — 2026-11-27
+
+- **Conversation** (wide): a pinned head row holds the portrait in its presence ring, the name, one live state line (작업 중 · what it is doing, 확인 필요 N, 대기) and the actions; nothing floats over the transcript. A turn reads as the owner's message, the Ghost's reply, then what it set in motion as one quiet group on a shared left rule: the tool trail as one sentence that opens to rows, delegated threads, the outcome. A host wake line that the next reply already says is not drawn. The pending decision above the composer caps at 45dvh with its evidence scrolling inside. Phones keep their title-bar actions and the one-row 확인 필요 bar.
+- **대화 tab / 작업실** (phone): the Ghost roster is the screen — waiting on the owner first, then working, then the rest — each row a face in its presence ring, the name, one honest "now" line (the waiting question, the Work in progress or the last reply) and a time or live count. 프로젝트 follow, then quiet links to 맡긴 일 · 목표 · 메일. `/workspace` on a phone is `/conversations`. The desktop sidebar lists one pinned-first Ghost list; the pool fold appears only past eight Ghosts.
+- **Settings frame**: the content column starts with the page title; rail items carry a state mark only when the Host reports something that needs the owner (model not ready, connection lost, secure forms or accounts waiting). The phone index shows the current value under each name. Pages that are lists may opt into a wider column.
+- **Ghost settings**: a roster of Ghosts beside the selected Ghost's editor from 64rem; below it the roster is the screen and a Ghost its own screen with Back.
+- **모델** leads with one verdict (Ghost can run / why not); providers are rows with their quota inline and their editor as a branch of the row; the role models are one table whose cells are the selects. **연결 상태** and **업데이트** lead with their state and one action.
+- **List pages** (연결 계정, 금고, 기기, 반복 작업, 자동 활동) are ledgers: identity | one state line | action, failures first, no card per row. Connection add is a searchable catalog under 서비스 추가; per-record data-entry shapes are unchanged.
+
 ## Agent components
 
 Built for supervising agents instead of reusing generic cards and badges

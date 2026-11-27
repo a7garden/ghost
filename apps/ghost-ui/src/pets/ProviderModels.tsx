@@ -1,7 +1,7 @@
 import { useId, useMemo, useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Cpu, X } from 'lucide-react';
 import type { ModelInfo } from '@ghost/contract';
-import { Badge, Button, Checkbox, InlineError, Input } from '../ui';
+import { Button, Checkbox, InlineError, Input } from '../ui';
 import { mergeModels, toggleModel } from './provider-models';
 
 /** 128000 → '128K', 1500000 → '1.5M'; '' when unknown. */
@@ -55,8 +55,8 @@ export function ProviderModels({ catalog, selected, onChange, automatic = false,
     setError('');
   };
 
-  return <fieldset className="m-0 flex min-w-0 flex-col gap-2.5 border-t border-dashed border-line-strong pt-4" disabled={disabled}>
-    <legend className="mb-1 shrink-0 text-caption font-semibold text-ink">모델 · {automatic ? merged.length : selected.length}개</legend>
+  return <fieldset className="provider-models" disabled={disabled}>
+    <legend>모델 · {automatic ? merged.length : selected.length}개</legend>
     <div className="flex min-w-0 items-center gap-2">
       <Input aria-label="모델 검색" placeholder="모델 검색" value={query} maxLength={200} spellCheck={false}
         className="min-w-0 flex-1" disabled={disabled}
@@ -64,25 +64,26 @@ export function ProviderModels({ catalog, selected, onChange, automatic = false,
       {query && <Button variant="ghost" size="icon" type="button" aria-label="검색 지우기" disabled={disabled}
         onClick={() => setQuery('')}><X size={15}/></Button>}
     </div>
-    <div className="flex max-h-[28dvh] min-w-0 flex-col overflow-y-auto pr-1">
+    <div className="provider-models__list">
       {visible.map(row => {
         const rowId = `${idPrefix}-m${row.index}`;
         const meta = [contextLabel(row.model.contextWindow), row.model.reasoning ? '추론' : ''].filter(Boolean).join(' · ');
         const Row = automatic ? 'div' : 'label';
-        return <Row key={row.model.id} htmlFor={automatic ? undefined : rowId}
-          className="-mx-2 flex min-w-0 items-start gap-2.5 rounded-control px-2 py-2 text-caption text-ink transition-colors hover:bg-hover">
-          {!automatic && <Checkbox id={rowId} className="mt-0.5 flex-none" checked={selectedIds.has(row.model.id)} disabled={disabled || (!selectedIds.has(row.model.id) && selected.length >= 256)}
+        return <Row key={row.model.id} htmlFor={automatic ? undefined : rowId} className="provider-models__row">
+          {automatic ? <Cpu size={15} aria-hidden="true" className="text-ink-3"/> :
+          <Checkbox id={rowId} className="flex-none" checked={selectedIds.has(row.model.id)} disabled={disabled || (!selectedIds.has(row.model.id) && selected.length >= 256)}
             aria-label={row.model.name || row.model.id} onCheckedChange={checked => onChange(toggleModel(selected, row.model, checked === true))}/>}
-          <span className="min-w-0 flex-1">
-            <span className="block [overflow-wrap:anywhere]">{row.model.name || row.model.id}</span>
-            <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-ink-3">
-              {row.model.name && row.model.name !== row.model.id && <span className="[overflow-wrap:anywhere]">{row.model.id}</span>}
-              {!row.known && <Badge variant="outline">직접 추가</Badge>}
-              {meta && <span className="whitespace-nowrap">{meta}</span>}
+          <span className="provider-models__copy">
+            <span className="model-row-title">{row.model.name || row.model.id}</span>
+            <span className="model-meta">
+              {[row.model.name && row.model.name !== row.model.id ? row.model.id : '', !row.known ? '직접 추가' : ''].filter(Boolean).join(' · ')}
             </span>
           </span>
-          {automatic && !row.known && <Button variant="ghost" size="icon" type="button" aria-label={`${row.model.id} 삭제`} disabled={disabled}
-            onClick={() => onChange(selected.filter(model => model.id !== row.model.id))}><X size={14}/></Button>}
+          <span className="provider-models__value">
+            {meta && <span>{meta}</span>}
+            {automatic && !row.known && <Button variant="ghost" size="icon" type="button" aria-label={`${row.model.id} 삭제`} disabled={disabled}
+              onClick={() => onChange(selected.filter(model => model.id !== row.model.id))}><X size={14}/></Button>}
+          </span>
         </Row>;
       })}
       {needle && !visible.length && <p className="m-0 py-2 text-caption text-ink-3">"{query.trim()}" 검색 결과가 없습니다.</p>}
@@ -90,7 +91,7 @@ export function ProviderModels({ catalog, selected, onChange, automatic = false,
     </div>
     {selected.length >= 256 && <p className="m-0 text-caption text-ink-3">모델은 최대 256개까지 선택할 수 있습니다.</p>}
     <details className="shrink-0">
-      <summary className="w-fit cursor-pointer text-caption text-ink-2 hover:text-ink">모델 ID 직접 추가</summary>
+      <summary className="connection-advanced">모델 ID 직접 추가</summary>
       <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
         <Input aria-label="추가할 모델 ID" placeholder="모델 ID" value={draftId} maxLength={256} spellCheck={false}
           autoCapitalize="off" autoComplete="off" className="min-w-0 flex-1" disabled={disabled}

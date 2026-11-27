@@ -1,31 +1,55 @@
-/* Keep the compact summary fixed while the expanded deck shares the dock with the draft. */
-.chat-decisions { --chat-decision-height: min(40dvh, 380px); display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 6px; margin-bottom: var(--chat-dock-gap); }
-.chat-decisions:has(.chat-decisions__row) { min-height: 44px; }
-.chat-decisions:not(:has(.chat-decisions__row, .deck)) { display: none; }
-.chat-decisions .deck[data-docked] { margin-bottom: 0; }
-.chat-decisions__body { min-height: 0; max-height: var(--chat-decision-height); overflow-y: auto; overscroll-behavior: contain; }
-.chat-decisions__body:not([hidden]) { display: flex; flex-direction: column; }
-.chat-decisions__body:empty { display: none; }
-.chat-decisions__row {
-  display: flex; flex: none; min-width: 0; min-height: 44px; align-items: center; gap: 8px;
-  padding: 8px 12px; border: 1px solid var(--ghost-line-strong); border-radius: var(--radius-control);
-  background: var(--ghost-surface); color: var(--ghost-ink); font: inherit; text-align: left; cursor: pointer;
-}
-.chat-decisions__row:hover { background: var(--ghost-hover); }
-.chat-decisions__row:active { background: var(--ghost-hover2); }
-.chat-decisions__row > svg:first-child { flex: none; color: var(--ghost-amber-ink); }
-.chat-decisions__count { flex: none; font-size: 15px; font-weight: 650; }
-.chat-decisions__lead { flex: 1; min-width: 0; overflow: hidden; color: var(--ghost-ink2); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
-.chat-decisions__due { flex: none; color: var(--ghost-amber-ink); font-size: var(--text-caption); font-weight: 550; }
-.chat-decisions__row > .fold-mark { flex: none; }
+@layer components {
+  /* Cap the whole deck, including navigation. Evidence takes the remaining space before the answers shrink. */
+  .chat-decisions {
+    --chat-decision-height: min(45dvh, 28rem);
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: var(--chat-dock-gap);
+  }
+  .chat-decisions[data-compact] { --chat-decision-height: min(24rem, max(8rem, calc(45dvh - 50px))); }
+  .chat-decisions:has(.chat-decisions__row) { min-height: 44px; }
+  .chat-decisions:not(:has(.chat-decisions__row, .decision, .deck__ack:not(:empty), [role='alert'])) { display: none; }
+  .chat-decisions__body { min-height: 0; max-block-size: var(--chat-decision-height); overflow-y: auto; overscroll-behavior: contain; }
+  .chat-decisions__body:not([hidden]) { display: flex; flex-direction: column; }
+  .chat-decisions .deck[data-docked] { gap: 4px; margin: 0; }
+  .chat-decisions :is(.deck[data-docked], .deck__body) { display: flex; flex-direction: column; min-height: 0; }
+  .chat-decisions :is(.deck__head, .deck__index, .deck__ack) { flex: none; }
+  /* Very short windows still have a usable card scroller after the queue's own rows. */
+  .chat-decisions .deck__top { display: flex; min-block-size: min(10rem, var(--chat-decision-height)); }
+  .chat-decisions .deck .decision {
+    flex: 1;
+    min-block-size: 0;
+    max-block-size: var(--chat-decision-height);
+    gap: 12px;
+    padding: 14px 16px;
+    border-color: var(--ghost-line);
+  }
+  .chat-decisions .decision:focus-visible { outline-offset: -3px; }
+  .chat-decisions .deck .decision__body { min-block-size: min(40px, 20dvh); }
+  .chat-decisions .decision__response { gap: 8px; }
+  .chat-decisions .decision__answer-hint { display: none; }
 
-/* Reserve the deck's navigation before sizing the card, not on top of a full-height card. */
-.chat-decisions :is(.deck[data-docked], .deck__body, .deck__top) { display: flex; flex-direction: column; min-height: 0; }
-.chat-decisions :is(.deck__head, .deck__index) { flex: none; }
-/* With the keyboard open, the wrapper can scroll when there isn't room for a usable card. */
-.chat-decisions .deck__top { min-height: min(8rem, var(--chat-decision-height)); }
-.chat-decisions .decision:focus-visible { outline-offset: -3px; }
-:root[data-keyboard="open"] .chat-decisions { --chat-decision-height: max(110px, calc(var(--ghost-visible-height, 100dvh) * .29)); }
-.chat-decisions[data-open]:has(.decision) ~ .ghost-composer .ghost-composer__textarea {
-  max-height: clamp(44px, calc(var(--ghost-visible-height, 100dvh) * min(.18, var(--composer-draft-share, .18))), 240px);
+  .chat-decisions__row {
+    display: flex; flex: none; min-width: 0; min-height: 44px; align-items: center; gap: 8px;
+    padding: 8px 6px; border: 0; border-block-start: 1px solid var(--ghost-line);
+    background: none; color: var(--ghost-ink); font: inherit; text-align: start; cursor: pointer;
+  }
+  .chat-decisions__row:hover { background: var(--ghost-hover); }
+  .chat-decisions__row:is(:active, [aria-expanded='true']) { background: var(--ghost-hover2); }
+  .chat-decisions__row[aria-expanded='true'] { box-shadow: inset 2px 0 var(--ghost-amber); }
+  .chat-decisions__row:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
+  .chat-decisions__row > svg:first-child { flex: none; color: var(--ghost-amber-ink); }
+  .chat-decisions__count { flex: none; font-size: 15px; font-weight: 560; font-variant-numeric: tabular-nums; }
+  .chat-decisions__lead { flex: 1; min-width: 0; overflow: hidden; color: var(--ghost-ink3); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
+  .chat-decisions__due { flex: none; color: var(--ghost-amber-ink); font-size: var(--text-caption); font-weight: 550; }
+  .chat-decisions__row > .fold-mark { flex: none; }
+
+  :root[data-keyboard='open'] .chat-decisions[data-compact] { --chat-decision-height: max(110px, calc(var(--ghost-visible-height, 100dvh) * .29)); }
+  .chat-decisions[data-open]:has(.decision) ~ .ghost-composer .ghost-composer__textarea {
+    max-height: clamp(44px, calc(var(--ghost-visible-height, 100dvh) * min(.18, var(--composer-draft-share, .18))), 240px);
+  }
+  @media (prefers-reduced-motion: reduce) { .chat-decisions .deck__top { animation: none; } }
 }

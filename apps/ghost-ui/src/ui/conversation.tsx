@@ -55,7 +55,7 @@ export function Conversation({
   const contentRef = React.useRef<HTMLDivElement>(null)
   const hasMountedRef = React.useRef(false)
   const nearBottomRef = React.useRef(true)
-  const preserveDisclosurePositionRef = React.useRef(false)
+  const disclosureRef = React.useRef<HTMLElement | null>(null)
   const [showJumpToLatest, setShowJumpToLatest] = React.useState(false)
 
   const jumpToLatest = React.useCallback(() => {
@@ -85,12 +85,20 @@ export function Conversation({
     if (!content) return
 
     const observer = new ResizeObserver(() => {
-      // Opening a tool disclosure is a reading action, even at the latest turn.
-      // Preserve its summary instead of following newly revealed content down.
-      if (preserveDisclosurePositionRef.current) {
-        preserveDisclosurePositionRef.current = false
+      const summary = disclosureRef.current
+      if (summary) {
+        disclosureRef.current = null
         const viewport = viewportRef.current
         if (viewport) {
+          // Keep the trigger where it was unless it is at the bottom edge. In that case
+          // reveal the first lines, without following the rest of a long disclosure.
+          const details = summary.parentElement
+          if (details instanceof HTMLDetailsElement && details.open) {
+            const summaryBottom = summary.getBoundingClientRect().bottom
+            const evidence = Math.min(96, viewport.clientHeight / 4, details.getBoundingClientRect().bottom - summaryBottom)
+            const overlap = summaryBottom + evidence - viewport.getBoundingClientRect().bottom
+            if (overlap > 0) viewport.scrollTop += overlap
+          }
           nearBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= BOTTOM_THRESHOLD
           setShowJumpToLatest(!nearBottomRef.current)
         }
@@ -155,9 +163,8 @@ export function Conversation({
           onPointerDown={holdPointer}
           onKeyDown={markUserScroll}
           onClickCapture={(event) => {
-            if (event.target instanceof Element && event.target.closest("summary")) {
-              preserveDisclosurePositionRef.current = true
-            }
+            const summary = event.target instanceof Element ? event.target.closest("summary") : null
+            if (summary) disclosureRef.current = summary
           }}
         >
           <div ref={contentRef} className="ghost-conversation__column ghost-conversation__transcript-content">

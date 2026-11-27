@@ -41,4 +41,40 @@
   .look-option:active:not(:disabled) { transform: scale(.94); }
   .look-option[aria-pressed="true"] { background: var(--ghost-surface); box-shadow: 0 0 0 1.5px var(--ghost-ink), var(--shadow-raised); }
   .look-option:disabled { cursor: not-allowed; opacity: .5; }
+
+  /* Keep the three painted windows; the current theme gets the same rule as a selected row. */
+  .appearance { gap: 10px; }
+  .appearance > .theme-picker { gap: 8px; }
+  .appearance .theme-picker__choice {
+    gap: 6px;
+    padding: 6px;
+    border-radius: var(--radius-control);
+    color: var(--ghost-ink3);
+    font-size: 12px;
+  }
+  .appearance .theme-picker__window {
+    border-radius: var(--radius-control);
+    box-shadow: inset 0 0 0 1px var(--ghost-line);
+    transition: none;
+  }
+  .appearance .theme-picker__choice:hover .theme-picker__window { transform: none; box-shadow: inset 0 0 0 1px var(--ghost-line-strong); }
+  .appearance .theme-picker__choice[aria-checked="true"] {
+    color: var(--ghost-ink);
+    background: var(--ghost-hover2);
+    box-shadow: inset 2px 0 var(--ghost-ink3);
+    font-weight: 600;
+  }
+  .appearance .theme-picker__choice[aria-checked="true"] .theme-picker__window { box-shadow: inset 0 0 0 1px var(--ghost-line-strong); }
+  .appearance .theme-picker__choice:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
+  .appearance .theme-picker__choice:focus-visible .theme-picker__window { box-shadow: inset 0 0 0 1px var(--ghost-line); }
+  .appearance > .appearance__toggle {
+    min-height: 48px;
+    padding: 6px 10px;
+    border-block-start: 1px solid var(--ghost-line);
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    font-size: 15px;
+    font-weight: 560;
+  }
 }

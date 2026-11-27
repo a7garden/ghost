@@ -1,13 +1,16 @@
 import { useState, type FormEvent } from 'react';
 import type { PolicyConditions, PolicyDecision, PolicyReviewer, PolicyRule } from '@ghost/contract';
-import { Badge, Button, InlineError, SettingsGroup, SettingsRow } from '../ui';
+import { Button, InlineError, SettingsGroup } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
+import { StateGlyph, type GlyphState } from '../components/agent/StateGlyph';
 import { uiTerms } from '../uiText';
 import { Choice, EditorActions, errorText, TextField } from './InfrastructureFields';
 import { conditionAxes, decisionHints, decisionLabels, describeRule, isSystemRule, targetKinds, toolLabel } from './policyText';
+import './SettingsPages.css';
 
-const outcomeTone: Record<PolicyDecision, 'success' | 'warning' | 'default' | 'danger'> = { allow: 'success', owner: 'warning', review: 'default', deny: 'danger' };
+const ruleGlyph: Record<PolicyDecision, GlyphState> = { allow: 'done', owner: 'attention', review: 'waiting', deny: 'failed' };
+const ruleTone: Partial<Record<PolicyDecision, 'warning' | 'danger'>> = { owner: 'warning', deny: 'danger' };
 const decisions = (['deny', 'owner', 'review', 'allow'] as const).map(value => ({ value, label: decisionLabels[value] }));
 /** The actions people actually write rules about; anything else is typed in under 「직접 입력」. */
 const toolChoices = ['*', 'browser_*', 'desktop_*', 'host_command_propose', 'mail_send', 'document_propose', 'connection_request', 'mcp.*'];
@@ -32,31 +35,47 @@ export function PolicySettings({ scopeId }: { scopeId?: string }) {
   const row = (rule: PolicyRule) => {
     const text = describeRule(rule, state);
     const fromActivity = rule.id.startsWith('activity:');
-    return <article className="infra-entry" key={rule.id}>
-      <SettingsRow label={<span className="flex flex-wrap items-center gap-2">{text.subject}<Badge variant={outcomeTone[rule.decision]}>{text.outcome}</Badge></span>}
-        description={[text.conditions.join(' · '), text.reach, ...text.extras, fromActivity ? '자동 활동 설정에서 바꿉니다.' : ''].filter(Boolean).join(' · ')}>
-        {!fromActivity && <span className="flex gap-2">
-          <Button size="sm" variant="ghost" onClick={() => { setEditing(rule); setError(''); }}>편집</Button>
-          {!isSystemRule(rule) && <Button size="sm" variant="ghost" onClick={() => setRemoving(rule.id)}>삭제</Button>}
-        </span>}
-      </SettingsRow>
-      {removing === rule.id && <div className="infra-delete px-4 pb-4"><p>이 규칙을 삭제할까요? 남은 규칙에 따라 처리됩니다.</p><div className="infra-actions"><Button variant="ghost" disabled={busy} onClick={() => setRemoving(null)}>취소</Button><Button variant="destructive" disabled={busy} onClick={() => void remove(rule.id)}>규칙 삭제</Button></div></div>}
+    const selected = typeof editing === 'object' && editing?.id === rule.id;
+    const deleting = removing === rule.id;
+    return <article className="settings-ledger__record" key={rule.id}>
+      <div className="settings-ledger__record-head" data-selected={selected || deleting || undefined} data-tone={ruleTone[rule.decision]}>
+        <span aria-hidden="true"><StateGlyph state={ruleGlyph[rule.decision]}/></span>
+        <div className="settings-ledger__record-copy">
+          <span className="settings-ledger__label">{text.subject}</span>
+          <p className="settings-ledger__meta">{[...text.conditions, text.reach, ...text.extras, fromActivity && '자동 활동 설정에서 변경'].filter(Boolean).join(' · ')}</p>
+        </div>
+        <div className="settings-ledger__record-value">
+          <span className="settings-ledger__value" data-tone={ruleTone[rule.decision]}>{text.outcome}</span>
+          {!fromActivity && <span className="settings-ledger__actions">
+            <Button size="sm" variant="ghost" aria-expanded={selected} onClick={() => { setEditing(selected ? null : rule); setRemoving(null); setError(''); }}>편집</Button>
+            {!isSystemRule(rule) && <Button size="sm" variant="ghost" aria-expanded={deleting} onClick={() => { setRemoving(deleting ? null : rule.id); setEditing(null); setError(''); }}>삭제</Button>}
+          </span>}
+        </div>
+      </div>
+      {selected && <RuleEditor rule={rule} scopeId={scopeId} onClose={() => setEditing(null)}/>}
+      {deleting && <div className="settings-ledger__branch">
+        <p className="m-0">이 규칙을 삭제하면 남은 규칙에 따라 처리됩니다.</p>
+        {error && <InlineError>{error}</InlineError>}
+        <div className="settings-ledger__actions">
+          <Button variant="ghost" disabled={busy} onClick={() => setRemoving(null)}>취소</Button>
+          <Button variant="destructive" disabled={busy} onClick={() => void remove(rule.id)}>규칙 삭제</Button>
+        </div>
+      </div>}
     </article>;
   };
-  return <section className="grid gap-6" aria-label={uiTerms.rules}>
-    <SettingsGroup title={uiTerms.rules} actions={<Button onClick={() => { setEditing('new'); setError(''); }}>규칙 추가</Button>}
-      description="Ghost가 돈을 쓰거나 보내거나 지우려 할 때 누가 정할지 정합니다. 겹치면 가장 엄격한 규칙이 이깁니다.">
-      {error && <InlineError className="m-4">{error}</InlineError>}
-      {editing && <RuleEditor key={editing === 'new' ? 'new' : editing.id} rule={editing === 'new' ? null : editing} scopeId={scopeId} onClose={() => setEditing(null)}/>}
-      {!own.length && !editing && <p className="m-0 p-4 text-caption text-ink-2">직접 만든 규칙이 없습니다. 기본 안전 규칙만 적용됩니다. 자동 승인 시간은 「승인과 언어」에서 바꿉니다.</p>}
+  return <section className="settings-ledger" aria-label={uiTerms.rules}>
+    <SettingsGroup title={<span className="sr-only">{uiTerms.rules}</span>} className="settings-ledger__group"
+      actions={<Button variant="add" aria-expanded={editing === 'new'} onClick={() => { setEditing(editing === 'new' ? null : 'new'); setRemoving(null); setError(''); }}>규칙 추가</Button>}
+      description="규칙이 겹치면 가장 엄격한 규칙이 적용됩니다.">
+      {editing === 'new' && <RuleEditor rule={null} scopeId={scopeId} onClose={() => setEditing(null)}/>}
+      {!own.length && editing !== 'new' && <p className="settings-ledger__note">직접 만든 규칙이 없습니다.</p>}
       {scopeId === undefined ? own.map(row) : <>
-        {here.length > 0 && <><p className="menu-heading">이 프로젝트만</p>{here.map(row)}</>}
-        {inherited.length > 0 && <><p className="menu-heading">전체에서 상속</p>{inherited.map(row)}</>}
+        {here.length > 0 && <><p className="settings-ledger__caption">이 프로젝트만</p>{here.map(row)}</>}
+        {inherited.length > 0 && <><p className="settings-ledger__caption">전체에서 상속</p>{inherited.map(row)}</>}
       </>}
     </SettingsGroup>
-    {builtIn.length > 0 && <details className="infra-fold">
-      <summary>기본 안전 규칙 {builtIn.length}개</summary>
-      <p className="m-0 mb-3 text-caption text-ink-2">처음부터 적용되는 규칙입니다. 더 엄격하게 하려면 위에서 규칙을 추가하세요.</p>
+    {builtIn.length > 0 && <details className="settings-ledger__disclosure">
+      <summary>기본 안전 규칙</summary>
       <div className="ghost-settings-group__rows">{builtIn.map(row)}</div>
     </details>}
   </section>;

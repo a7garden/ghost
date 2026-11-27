@@ -40,7 +40,7 @@ test.describe('Connection and activity edits', () => {
   test.beforeEach(async ({ page }) => {
     connections.length = activities.length = ghosts.length = 0;
     await page.goto(`${readRunState('activities').baseUrl}/#/settings?tab=connections`);
-    await expect(page.getByRole('textbox', { name: '서비스 검색', exact: true })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: '서비스 추가', exact: true })).toBeVisible();
   });
 
   test.afterEach(async ({ page }) => {
@@ -58,6 +58,7 @@ test.describe('Connection and activity edits', () => {
     await page.route('**/api/connect/mail*', route => route.fulfill({ json: {
       email: 'owner@example.test', domain: 'example.test', provider: null, imap: null, smtp: null, auth: 'password', setupUrl: null, note: null, source: 'none',
     } }));
+    await page.getByRole('textbox', { name: '서비스 추가', exact: true }).fill('다른 메일 계정');
     await page.getByRole('button', { name: '다른 메일 계정 연결', exact: true }).click();
     const setup = page.getByRole('region', { name: '이메일 연결', exact: true });
     await setup.getByRole('textbox', { name: '이메일 주소', exact: true }).fill('owner@example.test');
@@ -196,6 +197,7 @@ test.describe('Connection and activity edits', () => {
       await prompt.press('Control+Enter');
       await expect(create).toHaveCount(0);
       const row = page.getByRole('article').filter({ hasText: original });
+      await row.getByText('예약 시각', { exact: true }).click();
       await expect(row).toContainText('35분마다');
       await row.getByRole('button', { name: '반복 작업 편집', exact: true }).click();
       const edit = page.getByRole('form', { name: '반복 작업 편집', exact: true });
@@ -203,7 +205,10 @@ test.describe('Connection and activity edits', () => {
       await edit.getByRole('textbox', { name: '실행할 내용', exact: true }).fill(revised);
       await edit.getByRole('button', { name: '저장', exact: true }).click();
       await expect(edit).toHaveCount(0);
-      await expect(page.getByRole('article').filter({ hasText: revised })).toContainText('35분마다');
+      const savedRow = page.getByRole('article').filter({ hasText: revised });
+      await savedRow.getByText('예약 시각', { exact: true }).click();
+      await expect(savedRow.locator('.schedule-rule__beats')).toBeVisible();
+      await expect(savedRow.locator('.schedule-rule__beats')).toContainText('35분마다');
       expect((await storedState(page)).schedules.find(schedule => schedule.prompt === revised)?.spec)
         .toEqual({ kind: 'every', seconds: 2100, startAt });
     } finally {

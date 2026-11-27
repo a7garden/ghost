@@ -164,6 +164,8 @@ test('editing an item keeps stored secrets out of the body and shows them as 저
   });
   await page.goto(`${baseUrl}/#/settings?tab=vault`);
   const row = page.getByRole('article', { name: '서비스 로그인', exact: true });
+  await expect(row.getByText('https://app.example.com · owner@example.com', { exact: false })).toBeVisible();
+  await expect(row.locator('input')).toHaveCount(0);
   await row.getByRole('button', { name: '고치기' }).click();
   const editor = page.getByRole('form', { name: '금고 항목 고치기' });
   await expect(page.getByRole('list', { name: '금고 항목' }).getByRole('form')).toBeVisible();

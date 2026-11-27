@@ -1,0 +1,130 @@
+@layer components {
+  .settings-ledger {
+    display: grid;
+    align-content: start;
+    min-width: 0;
+    gap: var(--ghost-space-4);
+  }
+  .settings-verdict {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 52px;
+    padding: 8px 10px;
+    border-block-end: 1px solid var(--ghost-line);
+    color: var(--ghost-ink);
+  }
+  .settings-verdict__copy { min-width: 0; line-height: 1.4; overflow-wrap: anywhere; }
+  .settings-verdict__copy strong { font-size: 16px; font-weight: 600; }
+  .settings-verdict__copy small { display: block; margin-block-start: 2px; color: var(--ghost-ink3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .settings-verdict[data-tone="warning"] .settings-verdict__copy strong, .settings-ledger__value[data-tone="warning"] { color: var(--ghost-amber-ink); }
+  .settings-verdict[data-tone="warning"] .state-glyph { color: var(--ghost-amber-ink); }
+  .settings-verdict[data-tone="danger"] .settings-verdict__copy strong, .settings-ledger__value[data-tone="danger"] { color: var(--ghost-danger-ink); }
+
+  .settings-ledger .ghost-settings-group, .ghost-settings-group.settings-ledger__group { margin: 0; }
+  .settings-ledger .ghost-settings-group__header, .settings-ledger__group > .ghost-settings-group__header { margin-block-end: 6px; }
+  .settings-ledger .ghost-settings-group__description, .settings-ledger__group .ghost-settings-group__description {
+    margin-block-start: 0;
+    color: var(--ghost-ink3);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .settings-ledger__group--unheaded > .ghost-settings-group__header { margin: 0; }
+  .settings-ledger__group > .ghost-settings-group__rows,
+  .settings-ledger__disclosure > .ghost-settings-group__rows {
+    min-width: 0;
+    padding: 0;
+    overflow: visible;
+    border-radius: var(--radius-control);
+    background: none;
+    box-shadow: none;
+  }
+  .settings-ledger__group > .ghost-settings-group__rows:has(> :is(.ghost-settings-row, .settings-ledger__record) ~ :is(.ghost-settings-row, .settings-ledger__record), > .approval-roster > button + button),
+  .settings-ledger__disclosure > .ghost-settings-group__rows:has(> .settings-ledger__record + .settings-ledger__record) {
+    border: 1px solid var(--ghost-line);
+    background: var(--ghost-surface);
+  }
+  .settings-ledger__group .ghost-settings-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, min(49%, 19rem));
+    align-items: center;
+    min-height: 48px;
+    gap: 4px 10px;
+    padding: 7px 10px;
+  }
+  .settings-ledger__group .ghost-settings-row__control { justify-content: flex-end; text-align: end; font-variant-numeric: tabular-nums; }
+  .settings-ledger__group .ghost-settings-row__label, .settings-ledger__label, .approval-roster__name {
+    color: var(--ghost-ink);
+    font-size: 15px;
+    font-weight: 560;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .settings-ledger__group .ghost-settings-row__description, .settings-ledger__meta, .settings-ledger__caption, .settings-ledger__note {
+    margin: 2px 0 0;
+    color: var(--ghost-ink3);
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+  .settings-ledger__group .settings-ledger__notes-row { grid-template-columns: minmax(0, 1fr); }
+  .settings-ledger__notes-row .ghost-settings-row__description { white-space: pre-wrap; }
+  .settings-ledger__notes-row > .ghost-settings-row__control:empty { display: none; }
+  .settings-ledger__value { color: var(--ghost-ink2); font-size: var(--text-ui); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .settings-ledger__select { width: 100%; min-width: 0; }
+  .settings-ledger__footer, .settings-ledger__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; }
+  .settings-ledger__footer { gap: 8px; }
+  .settings-ledger__footer > :not(button) { margin-inline-end: auto; }
+  .settings-ledger__note, .settings-ledger__caption { padding: 4px 10px; }
+  .settings-ledger__caption { padding-block: 8px 2px; font-weight: 600; }
+
+  .settings-ledger__record + .settings-ledger__record, .settings-ledger__caption:not(:first-child) { border-block-start: 1px solid var(--ghost-line); }
+  .settings-ledger__record-head, .approval-roster__row {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) minmax(0, max-content);
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 7px 10px;
+  }
+  .settings-ledger__record-head[data-selected] { background: var(--ghost-hover2); box-shadow: inset 2px 0 var(--ghost-ink3); }
+  .settings-ledger__record-head[data-selected][data-tone="warning"] { box-shadow: inset 2px 0 var(--ghost-amber); }
+  .settings-ledger__record-head[data-selected][data-tone="danger"] { box-shadow: inset 2px 0 var(--ghost-danger); }
+  .settings-ledger__record-copy { min-width: 0; }
+  .settings-ledger__record-value { display: grid; max-width: 12rem; min-width: 0; justify-items: end; text-align: end; }
+  .settings-ledger__branch, .settings-ledger__record > .infra-editor {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    margin: 6px 10px 10px 28px;
+    padding: 4px 0 4px 12px;
+    border: 0;
+    border-inline-start: 1px solid var(--ghost-line-strong);
+  }
+  .settings-ledger__branch > .infra-form, .settings-ledger__branch > .infra-form > fieldset { gap: 10px; }
+  .settings-ledger__disclosure > summary { display: flex; min-height: 44px; align-items: center; color: var(--ghost-ink2); font-size: var(--text-ui); font-weight: 560; }
+
+  .approval-roster__row { grid-template-columns: 24px minmax(0, 1fr) auto; width: 100%; background: none; text-align: start; cursor: pointer; }
+  .approval-roster__row + .approval-roster__row { border-block-start: 1px solid var(--ghost-line); }
+  .approval-roster__row:hover:not(:disabled) { background: var(--ghost-hover); }
+  .approval-roster__row[aria-pressed="false"] { background: var(--ghost-hover2); box-shadow: inset 2px 0 var(--ghost-amber); }
+  .approval-roster__row:focus-visible, .settings-ledger__disclosure > summary:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
+  .approval-roster__row:disabled { cursor: not-allowed; }
+  .approval-roster__name > svg { display: inline-block; width: 12px; height: 12px; margin-inline-start: 4px; color: var(--ghost-ink3); }
+  .approval-roster__mode { color: var(--ghost-ink3); font-size: 12px; }
+  .approval-roster__row[aria-pressed="false"] .approval-roster__mode { color: var(--ghost-amber-ink); font-weight: 600; }
+
+  .duty-settings__times, .update-settings__token { display: flex; min-width: 0; align-items: center; justify-content: end; gap: 6px; }
+  .duty-settings__times > input { width: min(100%, 7rem); min-width: 0; }
+  .update-settings__token > input { min-width: 0; }
+  .duty-settings__days { display: flex; flex-wrap: wrap; gap: 3px 8px; justify-content: end; }
+  .duty-settings__days > label { display: inline-flex; min-height: 34px; align-items: center; gap: 4px; cursor: pointer; }
+  .settings-ledger__group .settings-ledger__wide-value { grid-template-columns: minmax(0, 1fr) minmax(0, min(66%, 22rem)); }
+  @container ghost-settings-group (max-width: 25rem) {
+    .settings-ledger__group .settings-ledger__wide-value { grid-template-columns: minmax(0, 1fr); }
+    .settings-ledger__record-value { max-width: 8rem; }
+  }
+  @media (pointer: coarse) {
+    .settings-ledger :is(button[data-slot="button"], .duty-settings__days > label), .settings-ledger__group button[data-slot="button"] { min-height: 44px; }
+  }
+}

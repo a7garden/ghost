@@ -23,6 +23,11 @@ export function modelDisplayName(settings: Settings | null | undefined, choice: 
   return provider ? `${provider.name} / ${name ?? choice.model}` : choice.model;
 }
 
+/** Short name where the provider is already available elsewhere, as in a verdict or chip. */
+export function modelShortName(settings: Settings | null | undefined, choice: ModelChoice): string {
+  return settings?.providers.find(item => item.id === choice.provider)?.models.find(item => item.id === choice.model)?.name || choice.model;
+}
+
 /** `<providerId>/<modelId>` values for Select fields, labelled with the stored names. */
 export function modelSelectOptions(settings: Settings | null | undefined): { value: string; label: string }[] {
   return usableProviders(settings).flatMap(provider => provider.models.map(model => ({
@@ -66,7 +71,7 @@ export function ModelPicker({ conversationId, value, onChange, disabled = false,
   const locked = disabled || pending || Boolean(conversation?.busy);
   // The chip names the model; its provider is in the tooltip and the list.
   const fullName = modelDisplayName(settings, saved);
-  const shortName = saved ? settings?.providers.find(item => item.id === saved.provider)?.models.find(item => item.id === saved.model)?.name || saved.model : fullName;
+  const shortName = saved ? modelShortName(settings, saved) : fullName;
 
   const choose = async (choice: ModelChoice) => {
     if (locked || !conversationId && (saved?.provider === choice.provider && saved?.model === choice.model)) { setOpen(false); return; }

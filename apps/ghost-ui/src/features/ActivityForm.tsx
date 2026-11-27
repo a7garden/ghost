@@ -58,7 +58,9 @@ function ActivityTools({ choices, selected, saving, onChange }: {
   </details>;
 }
 
-export function ActivityRulePreview({ config, state }: { config: ActivityConfig; state: Pick<State, 'ghosts' | 'scopes' | 'connections'> }) {
+export function ActivityRulePreview({ config, state, inline }: {
+  config: ActivityConfig; state: Pick<State, 'ghosts' | 'scopes' | 'connections'>; inline?: 'saved' | 'proposal';
+}) {
   const { source, execution, policy } = config;
   const ghost = state.ghosts.find(item => item.id === config.ghostId)?.name ?? config.ghostId;
   const scopeName = (id: string) => state.scopes.find(item => item.id === id)?.name ?? id;
@@ -68,14 +70,14 @@ export function ActivityRulePreview({ config, state }: { config: ActivityConfig;
   const existing = 'includeExisting' in source && source.includeExisting;
   return <ActivityRule when={<>
     <p>{source.kind === 'mail' || source.kind === 'pull_request' ? `${watched} · 새 항목이 오면` : watched}
-      {'connectionId' in source && ` · ${connection?.name ?? '연결 없음'}`}</p>
+      {'connectionId' in source && (connection ? ` · ${connection.name}` : inline !== 'saved' && ' · 연결 없음')}</p>
     {(checks || existing) && <p className="rule-facts">{checks}{existing && ' · 처음엔 기존 항목도 실행'}</p>}
     {source.kind === 'poll' && (source.itemsPointer || source.idPointer) && <p className="rule-facts">
       {source.itemsPointer && `목록 ${source.itemsPointer}`}{source.itemsPointer && source.idPointer && ' · '}{source.idPointer && `항목 ID ${source.idPointer}`}
     </p>}
   </>} does={<>
     <p className="rule-facts">{ghost}에게{config.scopeId && ` · ${scopeName(config.scopeId)}`}</p>
-    <h3 className="rule-message rule-message--heading">{config.name}</h3>
+    {!inline && <h3 className="rule-message rule-message--heading">{config.name}</h3>}
     <details className="rule-disclosure"><summary>지시와 완료 기준</summary>
       <p className="rule-message">{config.prompt}</p>
       <p className="rule-facts rule-facts--important whitespace-pre-wrap">완료 기준 · {config.acceptanceCriteria}</p>

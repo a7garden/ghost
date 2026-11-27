@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, CircleAlert } from 'lucide-react';
 import type { ConnectionOAuthView, Ghost } from '@ghost/contract';
 import { Button, Checkbox, FormField, InlineError, Input, SkeletonText } from '../ui';
 import { ExternalAnchor } from '../components/ExternalAnchor';
@@ -67,8 +67,10 @@ export function ConnectionOAuthPanel({ service, ghosts, defaultUsername = '', on
     catch (reason) { setError(reason instanceof Error ? reason.message : '로그인을 진행하지 못했습니다.'); }
     finally { setBusy(false); }
   };
-  return <section className="flex flex-col gap-4" aria-label={`${service.name} 로그인`}>
-    {view && !view.configured && <p className="m-0 text-caption text-ink-2">처음 한 번은 {service.name} OAuth 앱을 등록해야 합니다.</p>}
+  return <section className="connection-oauth grid min-w-0 gap-3" aria-label={`${service.name} 로그인`}>
+    {view && !view.configured && <p className="settings-list__meta settings-list__state" data-tone="amber">
+      <CircleAlert size={14} aria-hidden="true"/>처음 한 번은 OAuth 앱을 등록해야 합니다.
+    </p>}
     {view && <>
       <button type="button" className="connection-advanced" aria-expanded={configure || !view.configured} disabled={busy || pending} onClick={() => setConfigure(!configure)}>OAuth 앱 설정<span aria-hidden="true" className="fold-mark"/></button>
       {(configure || !view.configured) && <div className="setup-route__body">
@@ -91,12 +93,15 @@ export function ConnectionOAuthPanel({ service, ghosts, defaultUsername = '', on
         <p className="m-0 text-caption text-ink-2">{service.id === 'google' ? '프로필·이메일과 선택한 Drive 읽기 권한에 동의합니다. 메일은 Gmail 항목에서 별도로 연결합니다.' : service.id === 'outlook' ? '메일 읽기와 SMTP 인증 권한에 동의합니다. 실제 발송은 자동 활동의 별도 정책을 따릅니다.' : service.id === 'x' ? '프로필·게시물 읽기 권한으로 연결합니다.' : '서비스 동의 화면에서 계정과 접근 범위를 확인해 주세요.'}</p>
         {!pending && <div><Button type="button" disabled={busy || !name.trim() || (service.id === 'outlook' && !defaultUsername.trim())} onClick={() => void act(() => client.startConnectionOAuth(service.id, { name: name.trim(), ghostIds, ...(service.id === 'outlook' ? { username: defaultUsername.trim() } : {}), ...(service.id === 'google' ? { googleDrive } : {}) }))}>{busy ? '준비 중…' : `${service.name} 로그인`}</Button></div>}
       </>}
-      {pending && <div className="flex flex-wrap items-center gap-3">
-        {view.authorizationUrl && <ExternalAnchor href={view.authorizationUrl} target="_blank" rel="noopener noreferrer" className="text-ui font-medium underline underline-offset-4">{service.name}에서 로그인<ArrowUpRight size={14} className="ml-1 inline"/></ExternalAnchor>}
-        <Button variant="ghost" type="button" disabled={busy} onClick={() => void act(() => client.cancelConnectionOAuth(service.id))}>로그인 취소</Button>
-        <p className="m-0 w-full text-caption text-ink-2" role="status">서비스의 로그인·동의 완료를 기다립니다.</p>
+      {pending && <div className="settings-list__lead">
+        <p className="settings-list__meta" role="status">로그인·동의 대기 중</p>
+        <div className="settings-list__actions">
+          {view.authorizationUrl && <ExternalAnchor href={view.authorizationUrl} target="_blank" rel="noopener noreferrer" className="setup-route__link">{service.name}에서 로그인<ArrowUpRight size={14} aria-hidden="true"/></ExternalAnchor>}
+          <Button variant="ghost" type="button" disabled={busy} onClick={() => void act(() => client.cancelConnectionOAuth(service.id))}>로그인 취소</Button>
+        </div>
       </div>}
-      {view.message && <p className="m-0 text-caption text-ink-2" role={view.state === 'error' ? 'alert' : 'status'}>{view.message}</p>}
+      {view.message && <p className="settings-list__meta settings-list__state" data-tone={view.state === 'error' ? 'danger' : undefined}
+        role={view.state === 'error' ? 'alert' : 'status'}>{view.message}</p>}
     </>}
     {!view && !error && <SkeletonText label="로그인 설정을 확인하는 중…" lines={2}/>}
     {error && <><InlineError>{error}</InlineError><div><Button variant="outline" type="button" onClick={() => setReload(value => value + 1)}>다시 확인</Button></div></>}

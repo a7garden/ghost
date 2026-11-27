@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { VaultItem } from '@ghost/contract';
 import { emptyVaultForm, generatePassword, toggleGhostGrant, vaultFormFromItem, vaultGrantsLabel, vaultRowDetail, vaultWriteBody } from './VaultView';
 import { previewVaultCsv } from './vaultCsvPreview';
+import { absoluteTime } from './time';
 
 const item = (patch: Partial<VaultItem> = {}): VaultItem => ({
   id: 'v1', kind: 'login', title: '예시 로그인', origin: 'https://app.example.com', username: 'owner@example.com',
@@ -190,10 +191,9 @@ describe('vaultRowDetail and vaultGrantsLabel', () => {
   it('names the granted Ghosts and the one-time expiry', () => {
     expect(vaultGrantsLabel(item({ ghostIds: ['g1'] }), id => `Ghost ${id}`)).toBe('Ghost g1 사용 가능');
     expect(vaultGrantsLabel(item({ ghostIds: [] }), id => id)).toBe('Ghost 권한 없음');
-    // The 일회용 badge already marks the kind; the description carries only the time.
-    const expiryLabel = vaultGrantsLabel(item({ ghostIds: [], expiresAt: Date.UTC(2026, 10, 9, 6, 30) }), id => id);
-    expect(expiryLabel.startsWith('Ghost 권한 없음 · ')).toBe(true);
-    expect(expiryLabel.endsWith('에 삭제')).toBe(true);
+    const expiresAt = Date.UTC(2026, 10, 9, 6, 30);
+    const expiryLabel = vaultGrantsLabel(item({ ghostIds: [], expiresAt }), id => id);
+    expect(expiryLabel).toContain(absoluteTime(expiresAt));
     expect(expiryLabel).not.toContain('일회용');
   });
 });

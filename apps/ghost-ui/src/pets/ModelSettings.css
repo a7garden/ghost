@@ -1,0 +1,83 @@
+@layer components {
+  .model-settings { container: model-settings / inline-size; }
+  .model-settings .model-row-title { color: var(--ghost-ink); font-size: 15px; font-weight: 560; line-height: 1.35; overflow-wrap: anywhere; }
+  .model-settings .model-meta { display: block; margin: 0; color: var(--ghost-ink3); font-size: 12px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
+  .model-verdict__model { color: var(--ghost-ink2); font-size: var(--text-ui); }
+  .model-settings :is(.model-providers, .model-route-group, .model-role-group) > .ghost-settings-group__rows {
+    display: grid;
+    gap: 8px;
+    padding: 0;
+    overflow: visible;
+    border: 0;
+    background: none;
+    box-shadow: none;
+  }
+  .model-settings :is(.provider-ledger, .model-route) { border-radius: var(--radius-control); }
+  .model-settings .provider-ledger:has(> :nth-child(2)), .model-settings .model-route, .model-settings .model-roles {
+    border: 1px solid var(--ghost-line);
+    background: var(--ghost-surface);
+  }
+  .provider-ledger__row {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    grid-template-areas: 'mark copy actions' '. quota quota';
+    align-items: center;
+    min-height: 54px;
+    gap: 4px 10px;
+    padding: 8px 10px;
+    border-radius: inherit;
+  }
+  .provider-ledger__mark { grid-area: mark; color: var(--ghost-ink3); }
+  .provider-ledger__row[data-attention] .provider-ledger__mark { color: var(--ghost-amber-ink); }
+  .provider-ledger__row[data-selected] { background: var(--ghost-hover2); box-shadow: inset 2px 0 var(--ghost-ink3); }
+  .provider-ledger__row[data-selected][data-attention] { box-shadow: inset 2px 0 var(--ghost-amber); }
+  .provider-ledger__copy { grid-area: copy; min-width: 0; }
+  .provider-ledger__actions { grid-area: actions; display: flex; justify-content: flex-end; align-items: center; gap: 2px; }
+  .model-settings .provider-record { min-width: 0; border-radius: inherit; }
+  .model-settings .provider-record > .setup-route { margin: 8px 10px 12px 27px; }
+  .model-settings .provider-enrollment__choices { border-radius: var(--radius-control); box-shadow: none; }
+  .model-settings .provider-enrollment__choices:has(> :nth-child(2)) { border: 1px solid var(--ghost-line); }
+  .model-settings .provider-enrollment__choices:not(:has(> :nth-child(2))) { background: none; }
+  .model-settings .provider-enrollment__identity { min-height: 48px; padding-inline: 10px; font-size: 15px; font-weight: 560; }
+  .model-provider__advanced { padding-block-start: 6px; border-block-start: 1px solid var(--ghost-line); }
+
+  .model-quota { grid-area: quota; display: grid; min-width: 0; gap: 3px; }
+  .model-quota__windows { min-width: 0; margin: 0; padding: 0; list-style: none; }
+  .model-quota__window { display: grid; grid-template-columns: minmax(0, 4fr) minmax(16px, 5fr) 4ch minmax(0, 6fr); align-items: center; column-gap: 6px; min-height: 22px; color: var(--ghost-ink3); font-size: 12px; overflow-wrap: anywhere; }
+  .model-quota__meter { display: block; height: 5px; overflow: hidden; border-radius: var(--radius-pill); background: var(--ghost-inset); }
+  .model-quota__meter > span { display: block; height: 100%; border-radius: inherit; }
+  .model-quota__percent { text-align: end; color: var(--ghost-ink); font-variant-numeric: tabular-nums; }
+  .model-quota__window time { text-align: end; font-variant-numeric: tabular-nums; }
+  @container model-settings (min-width: 37rem) {
+    .provider-ledger__row:has(> .model-quota) { grid-template-columns: 18px minmax(0, 1fr) minmax(0, 42%) auto; grid-template-areas: 'mark copy quota actions'; }
+  }
+  @container model-settings (max-width: 27rem) {
+    .provider-ledger__row:has(.provider-ledger__actions > :nth-child(2)) { grid-template-columns: 18px minmax(0, 1fr); grid-template-areas: 'mark copy' '. quota' '. actions'; }
+  }
+
+  .model-settings .model-route { padding: 4px 10px 8px; }
+  .model-settings .model-route__step[data-primary] { grid-template-columns: 24px minmax(0, 1fr) minmax(0, 56%); align-items: center; }
+  .model-settings .model-route__step[data-primary] .model-route__node { margin-block-start: 0; }
+  .model-settings .model-route__step[data-primary]::before { top: 50%; }
+  .model-settings .model-route-caption { padding-inline-start: 34px; }
+  .model-select { width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
+  .model-thinking { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; min-height: 44px; padding: 4px 10px; }
+  .model-suggestions { cursor: pointer; }
+  .model-settings .model-roles { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; border-radius: var(--radius-control); }
+  .model-roles th, .model-roles td { padding: 6px 10px; text-align: start; }
+  .model-roles td { width: 56%; }
+  .model-roles tr + tr > * { border-block-start: 1px solid var(--ghost-line); }
+
+  .provider-models { display: grid; min-width: 0; gap: 6px; margin: 0; padding: 6px 0 0; border: 0; }
+  .provider-models > legend { color: var(--ghost-ink3); font-size: 12px; font-weight: 600; }
+  .provider-models__list { max-height: 28dvh; overflow: auto; }
+  .provider-models__row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 44px; padding: 4px 2px; }
+  .provider-models__row + .provider-models__row { border-block-start: 1px solid var(--ghost-line); }
+  label.provider-models__row:hover { background: var(--ghost-hover); cursor: pointer; }
+  .provider-models__copy { min-width: 0; }
+  .provider-models__value { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--ghost-ink3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .provider-models__value:empty, .provider-models__copy .model-meta:empty { display: none; }
+  @media (pointer: coarse) {
+    .model-settings :is(.provider-ledger__actions button, .model-route__actions button, .provider-models summary) { min-height: 44px; }
+  }
+}

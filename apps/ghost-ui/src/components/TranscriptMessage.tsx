@@ -50,22 +50,16 @@ export function trailSummary(names: readonly string[], live: boolean): string {
 }
 
 /**
- * Consecutive tool results fold into one trail: one line saying what the Ghost did, with the
- * tools as chips beside it on wide screens; opening it shows every call's output on a thread.
- * Running tools tick at the end.
+ * Consecutive calls read as one sentence. The opened rows keep tool names, states and exact output.
  */
 export function ToolTrail({ results, running = [] }: { results: Message[]; running?: LiveTool[] }) {
   const failed = results.filter(message => message.tool?.isError).length;
-  const names = [...results.map(message => ({ id: message.id, name: message.tool?.name ?? '도구', error: Boolean(message.tool?.isError), live: false })),
-    ...running.map(tool => ({ id: tool.callId, name: tool.name, error: false, live: true }))];
-  const summary = running.length ? trailSummary(running.map(tool => tool.name), true) : trailSummary(names.map(item => item.name), false);
+  const done = results.length ? trailSummary(results.map(message => message.tool?.name ?? '도구'), false) : '';
+  const current = running.length ? trailSummary(running.map(tool => tool.name), true) : '';
   return <details className="trail" data-kind="trail" data-live={running.length > 0 || undefined}>
     <summary className="trail__summary">
-      <span className="trail__count">{summary}{failed > 0 && <span className="trail__failed"> · 실패 {failed}</span>}</span>
-      <span className="trail__chips" aria-hidden="true">
-        {names.slice(-6).map(item => <span key={item.id} className="trail__chip" title={item.name} data-error={item.error || undefined} data-live={item.live || undefined}>{item.name}</span>)}
-        {names.length > 6 && <span className="trail__chip" data-more>+{names.length - 6}</span>}
-      </span>
+      <span className="trail__count">{done}{done && current && ' · '}{current && <span className="trail__current">{current}</span>}</span>
+      {failed > 0 && <span className="trail__failed">실패 {failed}</span>}
     </summary>
     <ol className="trail__steps">
       {results.map(message => <li key={message.id} data-error={message.tool?.isError || undefined}>
@@ -98,23 +92,54 @@ export function Reasoning({ text, live = false }: { text: string; live?: boolean
   </details>;
 }
 
-/**
- * A wake the host sent on the owner's behalf. A settled Work returns as its outcome line; every
- * other wake reads as one line in the owner's language with the Ghost's exact text folded below.
- */
-function WakeEvent({ message, label }: { message: Message & { origin: Exclude<Message['origin'], 'owner' | null> }; label: string }) {
-  const outcome = message.origin === 'report' || message.origin === 'child_result' ? parseOutcome(message.text) : null;
+type HostWake = Message & { origin: Exclude<Message['origin'], 'owner' | null> };
+
+function hostWake(message: Message): message is HostWake {
+  return message.role === 'user' && message.origin !== null && message.origin !== 'owner';
+}
+
+function wakeOutcome(message: Message) {
+  return message.origin === 'report' || message.origin === 'child_result' ? parseOutcome(message.text) : null;
+}
+
+/** Ignore typography, not changed words or numbers. The full wake must match, not just its heading. */
+function wakeText(text: string): string {
+  return text.normalize('NFC').trim().replace(/^#{1,6}\s+/gm, '').replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/\s+/g, ' ').replace(/[.。!！]+$/, '');
+}
+
+function wakeRepeatsReply(messages: readonly Message[], index: number): boolean {
+  const text = wakeText(messages[index].text);
+  if (!text) return false;
+  for (let next = index + 1; next < messages.length; next++) {
+    const message = messages[next];
+    if (message.role === 'user' || message.role === 'note') return false;
+    if (message.role === 'assistant' && message.text.trim() && !silent(message)) return text === wakeText(message.text);
+  }
+  return false;
+}
+
+function EventLine({ kind, line, detail, origin, label }: {
+  kind?: string; line: string; detail?: string | null; origin?: string; label: string;
+}) {
+  const head = <>
+    {kind && <span className="transcript-event__kind">{kind}</span>}
+    <span className="transcript-event__text"><InlineText text={line}/></span>
+  </>;
+  if (!detail) return <div className="transcript-event" data-kind="note" data-origin={origin} role="note" aria-label={label}>{head}</div>;
+  return <details className="transcript-event" data-kind="note" data-origin={origin} aria-label={label}>
+    <summary>{head}</summary>
+    <div className="transcript-event__detail">{detail}</div>
+  </details>;
+}
+
+/** A host wake is not an owner bubble. Settled Work has its own outcome row. */
+function WakeEvent({ message, label }: { message: HostWake; label: string }) {
+  const outcome = wakeOutcome(message);
   if (outcome) return <OutcomeLine outcome={outcome}/>;
   const view = describeWake(message.origin, message.text);
-  const head = <>
-    <span className="transcript-event__kind">{view.label}</span>
-    <span className="transcript-event__text"><InlineText text={view.line}/></span>
-  </>;
-  if (!view.detail) return <div className="transcript-event" data-kind="note" data-origin={message.origin} role="note" aria-label={label}>{head}</div>;
-  return <details className="transcript-event" data-kind="note" data-origin={message.origin} aria-label={label}>
-    <summary>{head}</summary>
-    <div className="transcript-event__detail">{view.detail}</div>
-  </details>;
+  return <EventLine kind={view.label} line={view.line} detail={view.detail ?? (view.line === message.text.trim() ? message.text : null)}
+    origin={message.origin} label={label}/>;
 }
 
 /** Composer actions a transcript offers from its message menus; absent in read-only transcripts. */
@@ -156,16 +181,11 @@ export function TranscriptMessage({ message, speaker, onUiSubmit, onQuote, onReu
       <Attachments message={message}/>
     </ConversationMessage>;
     const handoff = delegation(message);
-    if (handoff) return <div className="transcript-event" data-kind="note" data-origin="delegate" role="note" aria-label="위임">
-      <span className="transcript-event__kind">위임</span>
-      <span className="transcript-event__text">{handoff.ghost} · {handoff.title}</span>
-    </div>;
+    if (handoff) return <EventLine kind="위임" line={`${handoff.ghost} · ${handoff.title}`} origin="delegate" label="위임"/>;
     return <ToolTrail results={[message]}/>;
   }
   // Wakes the host sent on the owner's behalf (reports, results, answers, schedules) are events, not the owner speaking.
-  if (message.role === 'user' && message.origin && message.origin !== 'owner') {
-    return <WakeEvent message={{ ...message, origin: message.origin }} label={speaker(message)}/>;
-  }
+  if (hostWake(message)) return <WakeEvent message={message} label={speaker(message)}/>;
   if (message.role === 'user') {
     return <MessageMenu text={message.text} onReuse={onReuse}>
       <ConversationMessage role="user" label={speaker(message)} data-rail="owner" data-rail-label={message.text.replace(/\s+/g, ' ').trim().slice(0, 80)} data-delivered={delivered || undefined}>
@@ -176,7 +196,8 @@ export function TranscriptMessage({ message, speaker, onUiSubmit, onQuote, onReu
     </MessageMenu>;
   }
   if (message.role === 'note') {
-    return <p className="transcript-note" data-kind="note">{message.text}</p>;
+    const line = message.text.trim().split('\n', 1)[0];
+    return <EventLine line={line} detail={message.text} label={speaker(message)}/>;
   }
   if (silent(message)) return null;
   return <MessageMenu text={message.text} onQuote={onQuote}>
@@ -196,71 +217,112 @@ export interface TranscriptExtra {
   returnsAs?: string;
 }
 
-function outcomeWorkId(message: Message): string | null {
-  if (message.origin !== 'report' && message.origin !== 'child_result') return null;
-  return parseOutcome(message.text)?.workId ?? null;
-}
-
 /**
- * A whole transcript: tool results that follow each other become one trail; extras sit where they happened.
- * With `runLabel`, the Ghost's name heads each run of its rows (the work conversation, where nothing else
- * says who is speaking once the owner's turns lose their bubble).
+ * Each turn reads as speech followed by one group of actions. Within the group, tools, thread starts
+ * and outcomes follow their recorded order. A new owner turn or host wake ends the preceding group.
+ * With `runLabel`, the Ghost's name also heads each run of its rows in a work conversation.
  */
-export function Transcript({ messages, speaker, onUiSubmit, extras = [], onQuote, onReuse, runLabel, delivered }: {
+export function Transcript({ messages, speaker, onUiSubmit, extras = [], onQuote, onReuse, runLabel, delivered, continuation }: {
   messages: Message[]; speaker(message: Message): string; onUiSubmit?(message: Message): UiSubmit | undefined; extras?: TranscriptExtra[]; runLabel?: string;
   /** Owner turns that replaced an outgoing row (useOutbox). */
   delivered?: ReadonlySet<string>;
+  continuation?: { live: Live | null; ghostId: string; ghostName: string; outgoing?: ReactNode[] };
 } & TranscriptActions) {
   const rows: ReactNode[] = [];
   const pending = [...extras].sort((a, b) => a.at - b.at);
-  // The settled thread card placed last, until any other row follows it.
+  let nextExtra = 0;
+  let activity: ReactNode[] = [];
+  let tools: Message[] = [];
+  let turn = 'start';
   let folding: string | undefined;
-  // The last row on screen is the Ghost's: its name is already above.
   let inRun = false;
-  const flushBefore = (at: number) => { while (pending.length && pending[0].at <= at) {
-    const extra = pending.shift()!;
-    rows.push(<Fragment key={extra.key}>{extra.node}</Fragment>);
-    folding = extra.returnsAs;
-    inRun = false;
-  } };
+  const flushTools = (running?: LiveTool[]) => {
+    const first = tools[0];
+    if (!first && !running?.length) return;
+    activity.push(<ToolTrail key={first ? `${first.conversationId}:${first.id}` : 'live-tools'} results={tools} running={running}/>);
+    tools = [];
+  };
+  const flushActivity = () => {
+    flushTools();
+    if (activity.length === 0) return;
+    rows.push(<div key={`activity:${turn}`} className="transcript-activity" data-kind="activity">{activity}</div>);
+    activity = [];
+  };
+  const flushBefore = (at: number) => {
+    while (nextExtra < pending.length && pending[nextExtra].at <= at) {
+      const extra = pending[nextExtra++];
+      flushTools();
+      activity.push(<Fragment key={extra.key}>{extra.node}</Fragment>);
+      folding = extra.returnsAs;
+    }
+  };
+
   for (let index = 0; index < messages.length; index++) {
     const message = messages[index];
     flushBefore(message.createdAt);
-    if (folding && outcomeWorkId(message) === folding) rows.pop();
-    folding = undefined;
-    const row = ghostRow(message);
-    if (row !== null) {
-      if (row && !inRun && runLabel) rows.push(<GhostRunLabel key={`${message.conversationId}:${message.id}:speaker`} name={runLabel}/>);
-      inRun = row;
-    }
-    if (message.role === 'tool' && !standalone(message)) {
-      const run = [message];
-      // A thread that began between two results splits the trail so it sits where it started.
-      while (index + 1 < messages.length && messages[index + 1].role === 'tool' && !standalone(messages[index + 1])
-        && !(pending.length && pending[0].at <= messages[index + 1].createdAt)) run.push(messages[++index]);
-      rows.push(<ToolTrail key={`${message.conversationId}:${message.id}`} results={run}/>);
+    if (silent(message)) continue;
+    const key = `${message.conversationId}:${message.id}`;
+    const outcome = wakeOutcome(message);
+    if (outcome) {
+      flushTools();
+      if (outcome.workId === folding) activity.pop();
+      activity.push(<OutcomeLine key={key} outcome={outcome}/>);
+      folding = undefined;
       continue;
     }
-    rows.push(<TranscriptMessage key={`${message.conversationId}:${message.id}`} message={message} speaker={speaker} onUiSubmit={onUiSubmit?.(message)} onQuote={onQuote} onReuse={onReuse} delivered={delivered?.has(message.id)}/>);
+    folding = undefined;
+    if (message.role === 'user' || message.role === 'note') {
+      flushActivity();
+      turn = key;
+      inRun = false;
+      if ((message.role === 'note' || hostWake(message)) && wakeRepeatsReply(messages, index)) continue;
+    } else {
+      if (!inRun && runLabel) rows.push(<GhostRunLabel key={`${key}:speaker`} name={runLabel}/>);
+      inRun = true;
+      if (message.role === 'tool' && !standalone(message)) { tools.push(message); continue; }
+    }
+    const node = <TranscriptMessage key={key} message={message} speaker={speaker}
+      onUiSubmit={onUiSubmit?.(message)} onQuote={onQuote} onReuse={onReuse} delivered={delivered?.has(message.id)}/>;
+    if (message.role === 'tool' && message.tool?.name === 'delegate') {
+      flushTools();
+      activity.push(node);
+    } else rows.push(node);
   }
   flushBefore(Infinity);
+  if (continuation?.outgoing?.length) {
+    flushActivity();
+    rows.push(...continuation.outgoing);
+    turn = 'outgoing';
+    inRun = false;
+  }
+  if (continuation?.live?.running) {
+    const { live, ghostId, ghostName } = continuation;
+    if (!inRun && runLabel) rows.push(<GhostRunLabel key="live-speaker" name={runLabel}/>);
+    rows.push(<StreamingReply key="live-reply" live={live} ghostId={ghostId} ghostName={ghostName}/>);
+    flushTools(live.tools);
+  }
+  flushActivity();
   return <>{rows}</>;
 }
 
-/** The generation in progress: running tools, then reasoning and the reply as they stream. */
-export function LiveReply({ live, ghostId, ghostName }: { live: Live; ghostId: string; ghostName: string }) {
-  if (!live.running) return null;
+/** The generation in progress, used by the Work detail's read-only conversation. */
+export function LiveReply(props: { live: Live; ghostId: string; ghostName: string }) {
+  if (!props.live.running) return null;
   return <>
-    {live.tools.length > 0 && <ToolTrail results={[]} running={live.tools}/>}
-    <article className="ghost-conversation-message chat-live" data-role="assistant" aria-label={`${ghostName} · 응답 작성 중`} aria-busy="true">
-      <div className="ghost-conversation-message__content">
-        {live.thinking && <Reasoning text={live.thinking} live={!live.partial}/>}
-        {live.partial
-          ? <StreamingText text={live.partial}/>
-          : !live.thinking && <div className="chat-thinking" role="status"><PresenceAvatar ghostId={ghostId} state="working" size={22}/><span>응답 중</span></div>}
-      </div>
-    </article>
+    <StreamingReply {...props}/>
+    {props.live.tools.length > 0 && <div className="transcript-activity" data-kind="activity"><ToolTrail results={[]} running={props.live.tools}/></div>}
   </>;
+}
+
+function StreamingReply({ live, ghostId, ghostName }: { live: Live; ghostId: string; ghostName: string }) {
+  return <article className="ghost-conversation-message chat-live" data-role="assistant" aria-label={`${ghostName} · 응답 작성 중`} aria-busy="true">
+    <div className="ghost-conversation-message__content">
+      {live.thinking && <Reasoning text={live.thinking} live={!live.partial}/>}
+      {live.partial
+        ? <StreamingText text={live.partial}/>
+        : !live.thinking && <div className="chat-thinking" role="status"><PresenceAvatar ghostId={ghostId} state="working" size={22}/><span>응답 중</span></div>}
+    </div>
+  </article>;
 }
 
 function StreamingText({ text }: { text: string }) {

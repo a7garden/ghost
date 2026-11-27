@@ -4,7 +4,7 @@ import { TERMINAL_WORK_STATES, type State, type WorkDetail } from '@ghost/contra
 import { LifecycleTrack, StateGlyph, glyphLabel, workGlyph } from '../components/agent';
 import { DotAvatar } from '../components/DotAvatar';
 import { InlineText } from '../components/MessageBody';
-import { GhostRunLabel, LiveReply, Transcript, endsInGhostRun } from '../components/TranscriptMessage';
+import { Transcript } from '../components/TranscriptMessage';
 import { useHost } from '../host/context';
 import { HostError } from '../host/client';
 import { InlineError, Row, SkeletonChat } from '../ui';
@@ -116,10 +116,8 @@ export function ThreadPanel({ workId, state, closing = false, onClosed, onClose,
         {!work.conversationId ? <p className="work-aside__empty">{liveWork(work) ? '아직 시작 전' : '기록 없음'}</p>
           : loading ? <SkeletonChat label="대화 기록을 읽는 중"/>
             : <div className="ghost-conversation__messages work-stream thread-panel__transcript">
-              <Transcript messages={feed.messages} runLabel={carrier}
+              <Transcript messages={feed.messages} runLabel={carrier} continuation={{ live: feed.live, ghostId: work.ghostId, ghostName: carrier }}
                 speaker={message => message.role === 'user' ? `${carrier}에게 전달` : message.role === 'tool' ? '도구 기록' : message.role === 'note' ? '기록' : carrier}/>
-              {feed.live?.running && !endsInGhostRun(feed.messages) && <GhostRunLabel name={carrier}/>}
-              {feed.live && <LiveReply live={feed.live} ghostId={work.ghostId} ghostName={carrier}/>}
             </div>}
       </section>
     </div>}

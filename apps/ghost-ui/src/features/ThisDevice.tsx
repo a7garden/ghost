@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Bell, BellOff, LogOut, Minus, Plus } from 'lucide-react';
+import { Bell, BellOff, CircleAlert, LogOut, Minus, Plus, Smartphone } from 'lucide-react';
 import type { Device, Ghost, NotificationKind, QuietHours } from '@ghost/contract';
 import { Button, InlineError, Input, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { DotAvatar } from '../components/DotAvatar';
@@ -9,12 +9,13 @@ import { shell, shellCall, type PermissionStatus } from '../host/shell';
 import { toneFor } from './ghostState';
 import { AlertWriter } from './deviceAlerts';
 import { blurTouchSearchOnEnter } from '../ui/adaptive';
+import './SettingsLists.css';
 
-const kinds: { kind: NotificationKind; label: string; tone: string }[] = [
-  { kind: 'decision', label: '확인 요청', tone: 'attention' },
-  { kind: 'message', label: '대화', tone: 'message' },
-  { kind: 'work_done', label: '완료', tone: 'done' },
-  { kind: 'work_failed', label: '실패', tone: 'failed' },
+const kinds: { kind: NotificationKind; label: string }[] = [
+  { kind: 'decision', label: '확인 요청' },
+  { kind: 'message', label: '대화' },
+  { kind: 'work_done', label: '완료' },
+  { kind: 'work_failed', label: '실패' },
 ];
 export function ThisDevice({ device, ghosts }: { device: Device; ghosts: Ghost[] }) {
   const { client } = useHost();
@@ -53,19 +54,42 @@ export function ThisDevice({ device, ghosts }: { device: Device; ghosts: Ghost[]
   const filter = query.trim().toLocaleLowerCase();
   const shownGhosts = picking ? ghosts.filter(ghost => ghost.name.toLocaleLowerCase().includes(filter)) : [];
   const setQuiet = (next: QuietHours | null) => { setAlertError(''); void writer.toggle({ quietHours: next }); };
-  return <section className="this-device" aria-label="이 기기">
-    <header><span className="text-caption text-ink-3">이 기기</span><h2 className="section-title">{device.name}</h2></header>
+  return <section className="settings-list-page this-device-ledger" aria-label="이 기기">
+    <div className="settings-list__lead">
+      <p className="settings-list__verdict">이 기기 · 페어링됨</p>
+      <div className="settings-list__actions">
+        <Button variant="ghost" className="text-danger" onClick={() => setDisconnecting(true)}><LogOut size={17}/>연결 해제</Button>
+      </div>
+    </div>
+    <div className="settings-list__row" data-tone={permission === 'denied' ? 'amber' : undefined}>
+      <span className="settings-list__mark"><Smartphone size={17} aria-hidden="true"/></span>
+      <div className="settings-list__copy">
+        <h2 className="settings-list__title">{device.name}</h2>
+        <p className="settings-list__meta settings-list__state">
+          {permission === 'denied' && <CircleAlert size={14} aria-hidden="true"/>}
+          {!shell ? 'iPhone 앱에서 알림을 설정할 수 있습니다.' : permission === 'allowed' ? 'iPhone 알림 허용됨'
+            : permission === 'denied' ? 'iPhone 알림 권한 필요' : 'iPhone 알림'}
+        </p>
+      </div>
+      {shell && <div className="settings-list__actions">
+        <Button variant="outline" aria-label={permission === 'allowed' ? '허용됨' : undefined} disabled={busy || !permission} onClick={() => void permissionAction()}>
+          {permission === 'allowed' ? <Bell size={16} aria-hidden="true"/> : permission === 'denied' ? '설정 열기' : '알림 허용'}
+        </Button>
+      </div>}
+    </div>
     <SettingsGroup title="알림">
-      <SettingsRow className="device-permission-row" label="iPhone 알림" description={!shell ? 'iPhone 앱에서 알림을 설정할 수 있습니다.' : undefined}>
-        {shell && <Button variant="outline" disabled={busy || !permission} onClick={() => void permissionAction()}>
-          {permission === 'allowed' ? <><Bell size={16}/>허용됨</> : permission === 'denied' ? '설정 열기' : '알림 허용'}
-        </Button>}
-      </SettingsRow>
-      <div className="device-alert-kinds" role="group" aria-label="받을 알림">
-        {kinds.map(item => { const enabled = !alerts.mutedKinds.includes(item.kind); return <button type="button" key={item.kind} data-tone={item.tone} aria-pressed={enabled}
-          onClick={() => { setAlertError(''); void writer.toggle({ kind: item.kind }); }}>
-          {enabled ? <Bell size={18}/> : <BellOff size={18}/>}<span>{item.label}</span><i aria-hidden="true"/>
-        </button>; })}
+      <div role="group" aria-label="받을 알림">
+      <ul className="device-alert-ledger" role="list">
+        {kinds.map(item => {
+          const enabled = !alerts.mutedKinds.includes(item.kind);
+          return <li key={item.kind}><button className="settings-list__row device-alert-ledger__toggle" type="button" aria-pressed={enabled} aria-label={item.label}
+            onClick={() => { setAlertError(''); void writer.toggle({ kind: item.kind }); }}>
+            <span className="settings-list__mark">{enabled ? <Bell size={16} aria-hidden="true"/> : <BellOff size={16} aria-hidden="true"/>}</span>
+            <span className="settings-list__title">{item.label}</span>
+            <span className="settings-list__value" aria-hidden="true">{enabled ? '켬' : '끔'}</span>
+          </button></li>;
+        })}
+      </ul>
       </div>
       <div className="device-ghost-control" onKeyDown={event => {
         if (picking && event.key === 'Escape' && !event.nativeEvent.isComposing) {
@@ -93,8 +117,10 @@ export function ThisDevice({ device, ghosts }: { device: Device; ghosts: Ghost[]
                   setAlertError(''); setPendingMutes(count => count + 1);
                   void writer.toggle({ ghostId: ghost.id }).finally(() => setPendingMutes(count => count - 1));
                 }}>
-                  <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={32}/><span className="device-ghost-name">{ghost.name}</span>
-                  {enabled ? <Bell size={18} aria-hidden="true"/> : <BellOff size={18} aria-hidden="true"/>}
+                  <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={26}/>
+                  <span className="device-ghost-name settings-list__title">{ghost.name}</span>
+                  <span className="settings-list__value" aria-hidden="true">{enabled ? '켬' : '끔'}</span>
+                  {enabled ? <Bell size={16} aria-hidden="true"/> : <BellOff size={16} aria-hidden="true"/>}
                 </button></li>;
               })}
             </ul> : <p className="device-ghost-feedback">{ghosts.length ? '검색 결과 없음' : 'Ghost 없음'}</p>}
@@ -114,10 +140,9 @@ export function ThisDevice({ device, ghosts }: { device: Device; ghosts: Ghost[]
         </span>
       </SettingsRow>}
     </SettingsGroup>
-    {error && <InlineError>{error}</InlineError>}
-    <Button variant="ghost" className="self-start text-danger" onClick={() => setDisconnecting(true)}><LogOut size={17}/>연결 해제</Button>
+    {error && !disconnecting && <InlineError>{error}</InlineError>}
     {disconnecting && <Modal title="연결 해제" onClose={() => !busy && setDisconnecting(false)}>
-      <p>{device.name}에서 Ghost 연결을 해제할까요?</p>
+      <p>{device.name}의 페어링을 해제하면 이 기기는 더 이상 Ghost에 접근할 수 없습니다.</p>
       {error && <InlineError>{error}</InlineError>}
       <div className="flex justify-end gap-2"><Button variant="outline" disabled={busy} onClick={() => setDisconnecting(false)}>취소</Button>
         <Button variant="destructive" disabled={busy} onClick={() => {

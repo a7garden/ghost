@@ -1,6 +1,6 @@
 import { useId, useState, type ReactNode } from 'react';
-import { Pause, Pencil, Play, Plus, Trash2 } from 'lucide-react';
-import { Badge, Button, InlineError, SkeletonRows } from '../ui';
+import { Clock, CircleCheck, Pause, Pencil, Play, Trash2 } from 'lucide-react';
+import { Button, InlineError, SkeletonRows } from '../ui';
 import type { Schedule, ScheduleSpec } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -8,6 +8,7 @@ import { Modal } from '../components/Modal';
 import { visibleGhosts } from './ghostState';
 import { uiTerms } from '../uiText';
 import { mainForRule, restoreRuleFocus, ruleError, ruleKeys, TellRule } from './standing-rules';
+import './SettingsLists.css';
 
 const dateTime = (ms: number) => new Date(ms).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const beatDate = new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -40,7 +41,6 @@ export function specLabel(spec: ScheduleSpec): string {
 }
 
 export const scheduleStateLabel: Record<Schedule['state'], string> = { active: '대기 중', paused: '일시정지', done: '완료' };
-const scheduleTone: Record<Schedule['state'], 'outline' | 'warning' | 'success'> = { active: 'outline', paused: 'warning', done: 'success' };
 
 /** Make and edit the same time rule that appears in the list. A wake goes to the Ghost's conversation. */
 export function Schedules({ ghostId }: { ghostId?: string }) {
@@ -69,15 +69,15 @@ export function Schedules({ ghostId }: { ghostId?: string }) {
     catch (reason) { setError(reason instanceof Error ? reason.message : '요청을 처리하지 못했습니다.'); }
     finally { setPending(''); }
   };
-  return <section className="rule-layout" aria-label={uiTerms.schedules}>
-    <div className="settings-section-header flex flex-wrap items-center justify-between gap-3">
-      <h2 className="section-title">{uiTerms.schedules}</h2>
-      {editor === null && <div className="rule-actions">
+  return <section className="settings-list-page" aria-label={uiTerms.schedules}>
+    <div className="settings-list__lead">
+      {state && <p className="settings-list__verdict">{schedules.length ? `반복 작업 ${schedules.length}개` : '예약된 반복 작업 없음'}</p>}
+      {editor === null && <div className="settings-list__actions">
         {talkingGhost && <Button id={tellId} variant="ghost" type="button" onClick={() => setEditor('tell')}>{talkingGhost.name}에게 말하기</Button>}
-        <Button id={createId} variant="add" type="button" disabled={!state} onClick={() => setEditor('create')}><Plus size={15}/>반복 작업 예약</Button>
+        <Button id={createId} variant="add" type="button" disabled={!state} onClick={() => setEditor('create')}>반복 작업 예약</Button>
       </div>}
     </div>
-    {error && <InlineError>{error}</InlineError>}
+    {error && !remove && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
     {!state ? <SkeletonRows label="반복 작업을 불러오는 중…" rows={2}/> : <>
       {editor === 'create' && <ScheduleRuleEditor fixedGhostId={ghostId} onClose={closeEditor} onSave={async input => {
@@ -89,22 +89,29 @@ export function Schedules({ ghostId }: { ghostId?: string }) {
         consequence={`${talkingGhost?.name ?? '메인 Ghost'}의 대화에 바로 예약할 수 있습니다. 반복 시작 시각을 정하려면 직접 예약해 주세요.`}
         requestText={words => `아래 요청을 이 대화에 schedule_create로 예약해 줘. 내 시간대는 ${Intl.DateTimeFormat().resolvedOptions().timeZone}야. 시각이나 간격이 모호하면 예약하기 전에 먼저 물어봐.\n\n${words}`}
         onClose={closeEditor}/>}
-      {shownSchedules.length > 0
-        ? <ul className="rule-list">{shownSchedules.map(schedule => <li key={schedule.id}>
+      {shownSchedules.length > 0 && <ul className="settings-list" role="list">{shownSchedules.map(schedule =>
+        <li key={schedule.id} data-selected={editing?.id === schedule.id || undefined}
+          data-tone={schedule.state === 'paused' ? 'amber' : schedule.state === 'done' ? 'success' : undefined}>
           {editing?.id === schedule.id
             ? <ScheduleRuleEditor schedule={editing} onClose={closeEditor} onSave={async ({ prompt, spec }) => {
               if (prompt !== editing.prompt || spec !== editing.spec) await client.send({ type: 'schedule.update', scheduleId: editing.id, prompt, spec });
               closeEditor();
             }}/>
-            : <article className="rule-sheet">
-              <ScheduleRule beats={<ScheduleBeats spec={schedule.spec}/>} recipient={ghostName(schedule.ghostId)}
-                message={<p className="rule-message">{schedule.prompt}</p>}/>
-              <div className="schedule-rule__tail rule-actions rule-actions--spread">
-                <div className="rule-actions">
-                  <Badge variant={scheduleTone[schedule.state]}>{scheduleStateLabel[schedule.state]}</Badge>
-                  {schedule.state === 'active' && <p className="rule-facts">{schedule.nextAt ? `다음 실행 · ${dateTime(schedule.nextAt)}` : '다음 실행 없음'}</p>}
+            : <article>
+              <div className="settings-list__row settings-list__row--actions-wrap">
+                <span className="settings-list__mark">
+                  {schedule.state === 'paused' ? <Pause size={16} aria-hidden="true"/> : schedule.state === 'done'
+                    ? <CircleCheck size={16} aria-hidden="true"/> : <Clock size={16} aria-hidden="true"/>}
+                </span>
+                <div className="settings-list__copy">
+                  <h3 className="settings-list__title settings-list__prompt">{schedule.prompt}</h3>
+                  <p className="settings-list__meta">
+                    <span className="settings-list__state">{scheduleStateLabel[schedule.state]}</span> · {ghostName(schedule.ghostId)}의 대화로
+                    {schedule.state === 'active' && (schedule.nextAt
+                      ? <> · 다음 실행 <time dateTime={new Date(schedule.nextAt).toISOString()}>{dateTime(schedule.nextAt)}</time></> : ' · 다음 실행 없음')}
+                  </p>
                 </div>
-                <div className="rule-actions">
+                <div className="settings-list__actions">
                   {schedule.state !== 'done' && <>
                     {schedule.state === 'paused'
                       ? <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} onClick={() => void run(schedule.id, () => client.send({ type: 'schedule.update', scheduleId: schedule.id, paused: false }), '반복 작업을 재개했습니다.')}><Play size={14}/>재개</Button>
@@ -115,9 +122,12 @@ export function Schedules({ ghostId }: { ghostId?: string }) {
                   <Button variant="ghost" size="icon" type="button" aria-label="반복 작업 삭제" disabled={pending !== ''} onClick={() => { setError(''); setRemove(schedule); }}><Trash2 size={15}/></Button>
                 </div>
               </div>
+              <details className="settings-list__branch settings-list__disclosure">
+                <summary>예약 시각</summary>
+                <div className="schedule-rule__beats"><ScheduleBeats spec={schedule.spec}/></div>
+              </details>
             </article>}
-        </li>)}</ul>
-        : editor === null && <p className="rule-facts">예약된 반복 작업 없음</p>}
+        </li>)}</ul>}
     </>}
     {remove && <Modal title="반복 작업 삭제" onClose={() => pending === '' && setRemove(undefined)}>
       <p className="m-0">이 반복 작업을 삭제할까요? 예약된 실행도 함께 사라집니다.</p>

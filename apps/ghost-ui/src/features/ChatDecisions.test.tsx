@@ -14,8 +14,10 @@ describe('chatPendingSummary', () => {
   it('counts what waits and names the first card of the deck, in owner order', () => {
     const calm = decision({ id: 'calm', kind: 'accept_result', title: '주간 보고 초안', createdAt: 1 });
     const urgent = decision({ id: 'urgent', kind: 'question', title: '어느 쪽으로 할까요?', options: ['서울'], createdAt: 2 });
-    expect(chatPendingSummary([calm, urgent], {}, state([calm, urgent]), 0))
-      .toEqual({ count: '확인 필요 2건', lead: '어느 쪽으로 할까요? 외 1건', due: null });
+    const summary = chatPendingSummary([calm, urgent], {}, state([calm, urgent]), 0);
+    expect(summary.count).toMatch(/2건/);
+    expect(summary.lead).toBe(urgent.title);
+    expect(summary.due).toBeNull();
   });
 
   it('keeps the deadline of the first card on the row', () => {

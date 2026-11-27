@@ -1,0 +1,96 @@
+@layer components {
+  .settings-list-page { display: grid; min-width: 0; align-content: start; gap: var(--ghost-space-4); container: settings-ledger / inline-size; }
+  .settings-list__lead, .settings-list__actions, .settings-list__empty {
+    display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: 6px 8px;
+  }
+  .settings-list__lead { justify-content: space-between; }
+  .settings-list__lead:empty { display: none; }
+  .settings-list__actions { justify-content: end; }
+  .settings-list__lead > .settings-list__actions { margin-inline-start: auto; }
+  .settings-list__lead > .settings-list__actions:empty { display: none; }
+  .settings-list__verdict, .settings-list__empty > p {
+    min-width: 0; margin: 0; color: var(--ghost-ink2); font-size: var(--text-ui); line-height: 1.4;
+    font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+  }
+  .settings-list__verdict { font-weight: 600; }
+  .settings-list__filters { display: flex; min-width: 0; flex-wrap: wrap; gap: 8px 16px; }
+  .settings-list { min-width: 0; margin: 0; padding: 0; list-style: none; }
+  .settings-list:has(> li + li):not(.settings-list--sections) {
+    border: 1px solid var(--ghost-line); border-radius: var(--radius-control); background: var(--ghost-surface);
+  }
+  .settings-list > li { min-width: 0; }
+  .settings-list > li + li:not(.settings-list__label) { border-block-start: 1px solid var(--ghost-line); }
+  .settings-list > li:last-child { border-end-start-radius: inherit; border-end-end-radius: inherit; }
+  .settings-list > li:first-child { border-start-start-radius: inherit; border-start-end-radius: inherit; }
+  .settings-list__label {
+    margin: 0; color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.4; font-weight: 600;
+  }
+  .settings-list__label h3 { margin: 0; font: inherit; }
+  .settings-list--sections > .settings-list__label { padding-block: 5px; }
+  .settings-list--sections > .settings-list__label:not(:first-child) { margin-block-start: var(--ghost-space-3); }
+  .settings-list__row {
+    display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; min-width: 0; min-height: 52px;
+    align-items: center; gap: 4px 10px; padding: 8px 10px; font-variant-numeric: tabular-nums;
+  }
+  .settings-list__row > .settings-list__actions { grid-column: 3; }
+  .settings-list__mark { display: grid; width: 26px; place-items: center; color: var(--list-state-ink, var(--ghost-ink3)); }
+  .settings-list__copy { display: grid; min-width: 0; gap: 2px; }
+  .settings-list__title { margin: 0; color: var(--ghost-ink); font-size: 15px; font-weight: 560; line-height: 1.35; overflow-wrap: anywhere; }
+  .settings-list__meta, .settings-list__value {
+    margin: 0; color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.45; overflow-wrap: anywhere;
+  }
+  .settings-list__value { grid-column: 3; text-align: end; }
+  .settings-list__state { color: var(--list-state-ink, var(--ghost-ink3)); }
+  .settings-list__state > svg { display: inline-block; margin-inline-end: 4px; vertical-align: -.15em; }
+  :is(.settings-list, .settings-list-page) [data-tone='amber'] { --list-state-ink: var(--ghost-amber-ink); }
+  :is(.settings-list, .settings-list-page) [data-tone='danger'] { --list-state-ink: var(--ghost-danger-ink); }
+  :is(.settings-list, .settings-list-page) [data-tone='success'] { --list-state-ink: var(--ghost-success-ink); }
+  :is(.settings-list, .settings-list-page) [data-tone='signal'] { --list-state-ink: var(--ghost-signal-ink); }
+  .settings-list > [data-selected], .settings-list__row[data-selected] {
+    background: var(--ghost-hover2); box-shadow: inset 2px 0 var(--list-state-ink, var(--ghost-ink3));
+  }
+  .settings-list__row:focus-visible, .settings-list > li:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
+  .settings-list__branch { min-width: 0; margin: 0 12px 12px 46px; }
+  .settings-list__branch:empty { display: none; }
+  .settings-list__disclosure { min-width: 0; }
+  .settings-list__disclosure > summary {
+    display: flex; min-height: 36px; width: fit-content; align-items: center; gap: 6px; cursor: pointer;
+    list-style: none; color: var(--ghost-ink2); font-size: var(--text-caption);
+  }
+  .settings-list__disclosure[open] > summary { margin-block-end: 6px; }
+  .settings-list__run-detail { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+  .settings-list__run-detail > button { margin-inline-start: auto; }
+  .settings-list__prompt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; white-space: pre-wrap; }
+  article:has(> .settings-list__disclosure[open]) .settings-list__prompt { display: block; }
+  a.rule-review { display: inline-flex; align-items: center; }
+  .device-alert-ledger { margin: 0; padding: 0; list-style: none; }
+  .device-alert-ledger > li { border-block-end: 1px solid var(--ghost-line); }
+  .device-alert-ledger__toggle {
+    width: 100%; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: start;
+  }
+  .device-alert-ledger__toggle:hover { background: var(--ghost-hover); }
+  .device-alert-ledger__toggle[aria-pressed='true'] .settings-list__mark { color: var(--ghost-signal-ink); }
+  .this-device-ledger .device-ghost-control { padding-inline: 10px; }
+  .this-device-ledger .device-ghost-list { grid-template-columns: minmax(0, 1fr); }
+  .this-device-ledger .ghost-settings-row__control > span { flex-wrap: wrap; }
+  .settings-list__row--actions-wrap { grid-template-columns: 26px minmax(0, 1fr); }
+  .settings-list__row--actions-wrap > .settings-list__actions { grid-column: 2; }
+
+  @container settings-ledger (min-width: 38rem) {
+    .settings-list__row--actions-wrap { grid-template-columns: 26px minmax(0, 1fr) auto; }
+    .settings-list__row--actions-wrap > .settings-list__actions { grid-column: 3; }
+  }
+  @media (max-width: 39.999rem), (pointer: coarse) {
+    :is(.settings-list__actions, .settings-list__branch) > :is(button, a), .settings-list__disclosure > summary {
+      min-height: 44px;
+    }
+    .settings-list__actions > button { min-width: 44px; }
+    .settings-list__row--actions-wrap { grid-template-columns: 26px minmax(0, 1fr); }
+    .settings-list__row--actions-wrap > .settings-list__actions { grid-column: 2; }
+  }
+  @container settings-ledger (max-width: 28rem) {
+    .activity-ledger-row > .settings-list__actions { gap: 4px; }
+    .activity-ledger-row > .settings-list__actions > button { width: 44px; padding-inline: 0; }
+    .activity-ledger-row > .settings-list__actions > button > span:not(.fold-mark) { display: none; }
+  }
+}

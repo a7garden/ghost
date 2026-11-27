@@ -123,7 +123,8 @@ function Shell() {
     setRoute(next);
   };
   const navigate = (path: string, options?: { replace?: boolean }) => {
-    const next = path === '/conversations' ? mainChatPath ?? path : path;
+    const next = compact && path === '/workspace' ? '/conversations'
+      : !compact && path === '/conversations' ? mainChatPath ?? path : path;
     const from = currentRoute();
     resetScroll();
     if (from !== next) {
@@ -183,19 +184,19 @@ function Shell() {
   const section = path.split('/')[1]?.split('?')[0] || 'home';
   const orchestrationOpen = path === orchestrationPath;
   useEffect(() => {
-    if (section === 'workspace' && !compact) {
-      history.replaceState(history.state, '', '#/');
-      setRoute('/');
-      document.getElementById('main-content')?.scrollTo(0, 0);
-    }
-  }, [compact, section]);
+    if (section !== 'workspace' || currentRoute() !== route) return;
+    const next = compact ? `/conversations${query ? `?${query}` : ''}` : '/';
+    history.replaceState(history.state, '', `#${next}`);
+    setRoute(next);
+    document.getElementById('main-content')?.scrollTo(0, 0);
+  }, [compact, query, route, section]);
 
-  // A bookmarked 대화 entry resolves in place once the snapshot identifies the main Ghost.
+  // The desktop 대화 bookmark still opens the main Ghost; the phone keeps the roster.
   useEffect(() => {
-    if (section !== 'conversations' || !mainChatPath || currentRoute() !== route) return;
+    if (compact || section !== 'conversations' || !mainChatPath || currentRoute() !== route) return;
     history.replaceState(history.state, '', `#${mainChatPath}`);
     setRoute(mainChatPath);
-  }, [mainChatPath, route, section]);
+  }, [compact, mainChatPath, route, section]);
 
   const attentionCount = state ? pendingDecisions(state).length : 0;
   const status = hostStatus(connection, Boolean(state), offlineSince, Date.now());
@@ -211,7 +212,7 @@ function Shell() {
   // On a phone an agent or the launch pad is a screen of its own; /coding itself is the roster.
   const codingDetail = embeddedSessionId !== null || (section === 'coding' && params.has('launch'));
   const projectOpen = section === 'scopes' && selectedScope !== undefined && !params.has('new') && Boolean(state?.scopes.some(scope => scope.id === selectedScope));
-  const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail' || section === 'coding' || projectOpen;
+  const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'mail' || section === 'coding' || projectOpen;
 
   const go = (target: string) => () => navigate(target);
   const ghostName = (id: string) => ghosts.find(ghost => ghost.id === id)?.name ?? 'Ghost';
@@ -301,19 +302,18 @@ function Shell() {
           section={section} attentionCount={attentionCount} navigate={navigate}
           hideDock={orchestrationOpen || codingDetail || section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
           location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
-            compactBack={section === 'settings' && params.has('tab') ? '/settings'
-              : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? (mainChatPath ? '/workspace' : '/conversations')
-              : section === 'workspace' ? '/conversations'
-              : section === 'goals' || section === 'mail' ? '/workspace'
+            compactBack={section === 'settings' && params.has('tab') ? (params.get('tab') === 'team' && params.has('ghost') ? '/settings?tab=team' : '/settings')
+              : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? '/conversations'
+              : section === 'goals' || section === 'mail' ? '/conversations'
               : section === 'work' && path.split('/')[2] ? '/work'
               : codingDetail ? '/coding'
-              : section === 'scopes' && selectedScope ? '/workspace' : undefined}
+              : section === 'scopes' && selectedScope ? '/conversations' : undefined}
             onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
           duty={state && <DutySwitch state={state}/>}
-          callTray={callTray} sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
+          callTray={callTray} sidebar={compact ? null : sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
           {/* Connection banners stay in view while the sheet scrolls (`.connection-banner`). */}
-          {(status.state === 'offline' || (compact && status.state === 'reconnecting' && !status.quiet)) && <div className="connection-banner">
+          {!(section === 'settings' && params.get('tab') === 'host' && state) && (status.state === 'offline' || (compact && status.state === 'reconnecting' && !status.quiet)) && <div className="connection-banner">
             {status.state === 'offline' ? <Banner variant="danger" action={<Button variant="outline" onClick={() => store.refresh()}>다시 연결</Button>}>
               {state ? '호스트와 연결이 끊겼습니다.' : '호스트에 연결할 수 없습니다.'}
             </Banner>
@@ -321,11 +321,10 @@ function Shell() {
               : <Banner variant="warning">{status.label}</Banner>}
           </div>}
           <UpdatePrompt monitor={update} navigate={navigate}/>
-          {runtimeDown && state && section !== 'home' && section !== 'coding' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
+          {runtimeDown && state && section !== 'home' && section !== 'coding' && !(section === 'settings' && (params.get('tab') === 'models' || params.get('tab') === 'host')) && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={status.state !== 'offline'}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
             {section === 'home' && <Overview state={state} navigate={navigate}/>}
-            {section === 'conversations' && !mainChatPath && <Conversations ghosts={ghosts} openGhost={switchGhost} openWorkspace={() => navigate('/workspace')}/>}
-            {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
+            {section === 'conversations' && (compact || !mainChatPath) && <Conversations state={state} navigate={navigate} openGhost={switchGhost}/>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
             {orchestrationOpen && <Orchestration/>}

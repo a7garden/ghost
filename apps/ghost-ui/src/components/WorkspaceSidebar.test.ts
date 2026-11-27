@@ -50,8 +50,7 @@ function render(overrides: Partial<Parameters<typeof WorkspaceSidebar>[0]> = {})
   }));
 }
 
-/** The markup of the roster groups: the pinned group first, then the pool. */
-const roster = (html: string) => html.slice(html.indexOf('고정</p>'));
+const roster = (html: string) => html.slice(html.indexOf('class="ghost-navigation-group sidebar-ghosts"'));
 
 const storeSidebar = (value: unknown) => vi.stubGlobal('localStorage', {
   getItem: (key: string) => key === 'ghost-ui:sidebar' ? JSON.stringify(value) : null,
@@ -88,7 +87,7 @@ it('marks the open Ghost while any of its conversations is on screen', () => {
 it('shows the sole main Ghost without roster labels or a redundant role badge', () => {
   const html = render({ state: team(['도우미']) });
   expect(html).toContain('도우미');
-  expect(html).not.toContain('고정</p>');
+  expect(html).not.toContain('sidebar-ghosts');
   expect(html).not.toContain('presence-row__main-mark');
   expect(html).not.toContain('Ghost 목록');
   expect(html).toContain('프로젝트');
@@ -107,7 +106,7 @@ it('files each project under its receiving Ghost, unassigned ones under the main
 
 it('nests a project right under its Ghost, even when the folded pool would hide that Ghost', () => {
   storeSidebar({ pinned: [], expanded: false });
-  const html = render({ state: team(['main', 'writer', 'idle'], { scopes: [project('novel', 'writer')] }) });
+  const html = render({ state: team(['main', 'writer', 'idle', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6'], { scopes: [project('novel', 'writer')] }) });
   const writer = html.indexOf('writer');
   expect(writer).toBeGreaterThan(-1);
   expect(html.indexOf('프로젝트-novel')).toBeGreaterThan(writer);
@@ -131,28 +130,26 @@ it('never renders retired or deleted Ghosts', () => {
   expect(html).toContain('sage');
   expect(html).not.toContain('gone');
   expect(html).not.toContain('tomb');
-  expect(html).not.toContain('sidebar-more');
+  expect(html).not.toContain('sidebar-pool-toggle');
 });
 
-it('shows the default Ghost in 고정 even with no pins, the rest in the pool', () => {
-  const html = render({ state: team(['도우미', '연구원', '기록가']) });
-  const pinned = html.slice(html.indexOf('고정</p>'), html.indexOf('Ghost</p>'));
-  const pool = html.slice(html.indexOf('Ghost</p>'));
-  expect(pinned).toContain('도우미');
-  expect(pinned).not.toContain('연구원');
-  expect(pool).toContain('연구원');
-  expect(pool).toContain('기록가');
-  expect(pool.indexOf('기록가')).toBeLessThan(pool.indexOf('연구원'));
+it('keeps small rosters together and shows the default first even with the long roster folded', () => {
+  storeSidebar({ pinned: [], expanded: false });
+  const ghosts = roster(render({ state: team(['도우미', '연구원', '기록가']) }));
+  expect(ghosts).not.toContain('sidebar-pool-toggle');
+  expect(ghosts).toContain('도우미');
+  expect(ghosts).toContain('기록가');
+  expect(ghosts).toContain('연구원');
+  expect(ghosts.indexOf('도우미')).toBeLessThan(ghosts.indexOf('기록가'));
+  expect(ghosts.indexOf('기록가')).toBeLessThan(ghosts.indexOf('연구원'));
 });
 
-it('pins Ghosts in pin order after the default, apart from the pool', () => {
+it('pins Ghosts in pin order after the default and before the pool', () => {
   storeSidebar({ pinned: ['g7', 'g2'], expanded: true });
-  const html = render({ state: team(['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8']) });
-  const pinned = html.slice(html.indexOf('고정</p>'), html.indexOf('Ghost</p>'));
-  expect(pinned.indexOf('도우미')).toBeLessThan(pinned.indexOf('g7'));
-  expect(pinned.indexOf('g7')).toBeLessThan(pinned.indexOf('g2'));
-  expect(pinned).not.toContain('g1');
-  expect(html.slice(html.indexOf('Ghost</p>'))).toContain('g1');
+  const ghosts = roster(render({ state: team(['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8']) }));
+  expect(ghosts.indexOf('도우미')).toBeLessThan(ghosts.indexOf('g7'));
+  expect(ghosts.indexOf('g7')).toBeLessThan(ghosts.indexOf('g2'));
+  expect(ghosts.indexOf('g2')).toBeLessThan(ghosts.indexOf('g1'));
 });
 
 it('folds the pool from its header, keeping what needs the owner or is on screen', () => {
@@ -162,14 +159,13 @@ it('folds the pool from its header, keeping what needs the owner or is on screen
     conversations: [{ id: 'conv-g5', ghostId: 'g5', kind: 'direct', workId: null, title: '대화', model: null, busy: true, createdAt: 1, lastActivityAt: 1 }],
   }), openGhostId: 'g4' });
   expect(html).toContain('aria-expanded="false"');
-  expect(html).toContain('Ghost 목록 펼치기 (9)');
-  const pool = html.slice(html.indexOf('Ghost</p>'));
+  const pool = html.slice(html.indexOf('class="sidebar-pool"'));
   for (const shown of ['g3', 'g4', 'g5']) expect(pool).toContain(shown);
   for (const hidden of ['g1', 'g2', 'g6', 'g7', 'g8', 'g9']) expect(pool).not.toContain(hidden);
   expect(html).not.toContain('Ghost 찾기');
 });
 
-it('an expanded pool past eight rows grows its own filter, paused Ghosts dimmed', () => {
+it('an expanded roster past eight Ghosts grows a pool filter and marks paused Ghosts', () => {
   storeSidebar({ pinned: [], expanded: true });
   const ghosts10 = ['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9'];
   const html = render({ state: team(ghosts10, { ghosts: ghosts10.map((name, index) => ghost(name, index === 0, index === 3 ? { state: 'paused' as const } : {})) }) });

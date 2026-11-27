@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import type { CodingSession, PiPackage, PiSettings, PiSettingsOverrides } from '@ghost/contract';
 import type { PiGlobalConfig, PiSessionView } from '../host/client';
 import { useHost } from '../host/context';
@@ -8,9 +8,11 @@ import { codingBusy, codingError } from './CodingSessionModel';
 import { PI_BASE_TOOLS, PiCompactionFields, PiDeliveryField, PiDisclosure, PiImageField, PiModelFields, PiRetryFields, PiToolFields } from './PiConfigFields';
 import { PiConfigPackages, PiPackageRows } from './PiConfigPackages';
 import './PiConfig.css';
+import './SettingsLists.css';
 
 export function PiConfigSettings() {
   const { client } = useHost();
+  const formId = useId();
   const { models, error: modelError, reload: reloadModels } = useEmbeddedModels(true);
   const [config, setConfig] = useState<PiGlobalConfig>();
   const [draft, setDraft] = useState<PiSettings>();
@@ -38,8 +40,11 @@ export function PiConfigSettings() {
   const dirty = JSON.stringify(config.settings) !== JSON.stringify(draft);
   const change = (value: PiSettings) => { setDraft(value); setNotice(''); };
   return <>
-    <SettingsGroup title="내장 코딩 기본값" className="pi-settings">
-      <form onSubmit={event => {
+    <SettingsGroup title="내장 코딩 기본값" className="pi-settings" actions={<div className="settings-list__actions">
+      {(dirty || notice) && <span className="settings-list__meta" role="status">{dirty ? '저장하지 않은 변경' : notice}</span>}
+      <Button form={formId} type="submit" size="sm" disabled={!dirty || saving}>{saving ? '저장 중…' : '저장'}</Button>
+    </div>}>
+      <form id={formId} onSubmit={event => {
         event.preventDefault();
         if (!dirty || saving) return;
         setSaving(true); setError(''); setNotice('');
@@ -50,17 +55,22 @@ export function PiConfigSettings() {
         <fieldset disabled={saving}>
           <PiModelFields value={draft} models={models} change={change}/>
           {modelError && <InlineError onRetry={reloadModels} retryLabel="다시 불러오기">{modelError}</InlineError>}
-          <PiDisclosure label="맥락 압축"><PiCompactionFields value={draft.compaction} change={compaction => change({ ...draft, compaction })}/></PiDisclosure>
-          <PiDisclosure label="재시도"><PiRetryFields value={draft.retry} change={retry => change({ ...draft, retry })}/></PiDisclosure>
+          <PiDisclosure label="맥락 압축" value={draft.compaction.enabled ? '켬' : '끔'}>
+            <PiCompactionFields value={draft.compaction} change={compaction => change({ ...draft, compaction })}/>
+          </PiDisclosure>
+          <PiDisclosure label="재시도" value={draft.retry.enabled ? '켬' : '끔'}>
+            <PiRetryFields value={draft.retry} change={retry => change({ ...draft, retry })}/>
+          </PiDisclosure>
           <PiDisclosure label="메시지와 이미지">
             <PiDeliveryField label="스티어링" value={draft.steeringMode} change={steeringMode => change({ ...draft, steeringMode })}/>
             <PiDeliveryField label="후속 메시지" value={draft.followUpMode} change={followUpMode => change({ ...draft, followUpMode })}/>
             <PiImageField value={draft.imageAutoResize} change={config.imageResizeAvailable ? imageAutoResize => change({ ...draft, imageAutoResize }) : undefined}/>
           </PiDisclosure>
-          <PiDisclosure label="도구"><PiToolFields tools={tools} value={draft.toolAllowlist} change={toolAllowlist => change({ ...draft, toolAllowlist })}/></PiDisclosure>
+          <PiDisclosure label="도구" value={draft.toolAllowlist === null ? '기본값' : `${draft.toolAllowlist.length}개 허용`}>
+            <PiToolFields tools={tools} value={draft.toolAllowlist} change={toolAllowlist => change({ ...draft, toolAllowlist })}/>
+          </PiDisclosure>
         </fieldset>
         {error && <InlineError>{error}</InlineError>}
-        <div className="pi-apply"><Button type="submit" size="sm" disabled={!dirty || saving}>저장</Button>{notice && <span role="status" className="pi-meta">{notice}</span>}</div>
       </form>
     </SettingsGroup>
     <PiConfigPackages items={packages} canManage={config.canManagePackages} setItems={setPackages}/>

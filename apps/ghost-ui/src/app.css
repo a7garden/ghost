@@ -476,7 +476,6 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 .chat-empty__starters button:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
 .chat-thinking { display: inline-flex; align-items: center; gap: 10px; color: var(--ghost-ink3); font-size: var(--text-ui); font-weight: 500; animation: fade-in var(--duration-slow) ease both; }
 .chat-thinking > span:not(.presence) { background: linear-gradient(90deg, var(--ghost-ink3) 0%, var(--ghost-ink) 50%, var(--ghost-ink3) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer-text 1.8s linear infinite; }
-.transcript-note { align-self: center; margin: 0; padding: 4px 12px; border-radius: var(--radius-pill); color: var(--ghost-ink3); background: var(--ghost-hover); font-size: var(--text-caption); white-space: pre-wrap; overflow-wrap: anywhere; text-align: center; }
 /* Host wakes read as one quiet line; the Ghost's exact text folds beneath when there is more. */
 .transcript-event { display: flex; min-width: 0; align-items: baseline; gap: 10px; padding: 5px 10px; margin-inline: -10px; border-radius: var(--radius-control); color: var(--ghost-ink2); font-size: var(--text-caption); line-height: 1.5; }
 details.transcript-event { display: block; padding: 0; }
@@ -534,15 +533,7 @@ details.transcript-event[open] { background: var(--ghost-hover); }
 .trail[open] > .trail__steps, .reasoning[open]:not([data-live]) > .reasoning__body { animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .trail__count { min-width: 0; overflow: hidden; color: var(--ghost-ink2); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .trail__failed { color: var(--ghost-danger-ink); }
-.trail__chips { display: inline-flex; min-width: 0; gap: 4px; overflow: hidden; }
-.trail__chip { flex: none; padding: 2px 7px; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: var(--ghost-hover); font: 500 11px/1.4 var(--font-mono); }
-.trail__chip[data-error] { color: var(--ghost-danger-ink); background: var(--ghost-danger-tint); }
-.trail__chip[data-live] { color: var(--ghost-signal-ink); background: var(--ghost-signal-tint); }
-.trail__chip[data-live]::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 5px; vertical-align: 1px; border-radius: 50%; background: currentColor; animation: island-breathe 1s ease-in-out infinite; }
-.trail__chip[data-more] { color: var(--ghost-ink3); background: none; }
 .thread-panel .trail__summary { flex-wrap: wrap; row-gap: 4px; }
-.thread-panel .trail__chips { flex-wrap: wrap; max-width: 100%; }
-.thread-panel .trail__chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trail__steps { display: grid; gap: 12px; margin: 8px 0 4px 13px; padding: 4px 0 4px 18px; list-style: none; border-left: 1.5px solid var(--ghost-line-strong); }
 .trail__steps li { position: relative; display: grid; gap: 6px; min-width: 0; }
 .trail__steps li::before { content: ''; position: absolute; top: 6px; left: -22.5px; width: 7px; height: 7px; border-radius: 50%; background: var(--ghost-canvas); box-shadow: inset 0 0 0 1.5px var(--ghost-ink3); }

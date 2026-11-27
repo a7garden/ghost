@@ -112,12 +112,12 @@ test.describe('Ghost model route', () => {
     await page.getByRole('dialog').getByRole('button', { name: '삭제', exact: true }).click();
     await expect.poll(async () => (await storedGhost(page, ghostId)).deletedAt).not.toBeNull();
     await page.getByRole('button', { name: 'Ghost 검색 지우기', exact: true }).click({ timeout: 3000 });
-    await expect(page.locator('.roster').getByRole('button', { name: '검색 경계 검증 0', exact: true })).toBeVisible();
+    await expect(page.getByRole('list', { name: '설정할 Ghost' }).getByRole('button', { name: '검색 경계 검증 0', exact: true })).toBeVisible();
     await expect(page.getByRole('textbox', { name: '설정할 Ghost 찾기', exact: true })).toHaveCount(0);
   });
 });
 
-test('provider tile retains a rejected key draft, then shows the saved account at 390px', async ({ page }) => {
+test('provider setup retains a rejected key draft and edits the saved account inline at 390px', async ({ page }) => {
   const run = readRunState();
   const providerId = 'e2e-provider-inline';
   const label = '검증용 모델 서버';
@@ -160,10 +160,12 @@ test('provider tile retains a rejected key draft, then shows the saved account a
     await expect(picker).toHaveCount(0);
 
     const record = page.locator('.provider-record').filter({ hasText: label });
-    await expect(record.getByRole('status')).toHaveText('설정 저장됨');
+    await expect(record.getByRole('status')).toBeVisible();
+    await expect(record.getByRole('button', { name: `${label} 제공자 삭제`, exact: true })).toHaveCount(0);
     await record.getByRole('button', { name: `${label} 설정`, exact: true }).click();
     const edit = record.getByRole('region', { name: `${label} 설정`, exact: true });
     await expect(edit.getByLabel('새 API 키', { exact: true })).toHaveValue('');
+    await expect(edit.getByRole('button', { name: `${label} 제공자 삭제`, exact: true })).toBeVisible();
     await edit.getByRole('button', { name: '취소', exact: true }).click();
     await expect(edit).toHaveCount(0);
   } finally {
@@ -228,7 +230,7 @@ test('paired device names are edited on their row and retained when a save fails
     const rename = devices.getByRole('button', { name: `${deviceName} 이름 변경`, exact: true });
     const form = devices.getByRole('form', { name: '기기 이름 변경', exact: true });
     const field = form.getByRole('textbox', { name: '기기 이름', exact: true });
-    const row = devices.locator('.ghost-settings-row').filter({ has: page.getByRole('form', { name: '기기 이름 변경', exact: true }) });
+    const row = devices.getByRole('listitem').filter({ has: page.getByRole('form', { name: '기기 이름 변경', exact: true }) });
     await rename.click();
     await expect(field).toBeFocused();
     await expect(field).toHaveValue(deviceName);

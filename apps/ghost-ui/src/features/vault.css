@@ -1,11 +1,11 @@
 @layer components {
-.vault-list { container: vault / inline-size; display: grid; min-width: 0; gap: var(--ghost-space-3); padding: 0; margin: 0; list-style: none; }
+.vault-list { container: vault / inline-size; }
 .vault-list > li { min-width: 0; }
 .vault-card, .vault-csv {
   display: grid; gap: var(--ghost-space-4); min-width: 0; padding: var(--ghost-space-4);
-  border-radius: var(--radius-card); background: var(--ghost-surface); box-shadow: var(--shadow-card);
+  border: 1px solid var(--ghost-line); border-radius: var(--radius-card); background: var(--ghost-surface);
 }
-.vault-card[data-editing], .vault-csv { box-shadow: var(--shadow-raised); }
+.vault-list > li:has(.vault-card, .vault-csv) { padding: 6px; }
 .vault-card__head { display: grid; justify-items: start; gap: var(--ghost-space-1); }
 .vault-card__kind { display: flex; align-items: center; gap: var(--ghost-space-2); color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 550; }
 .vault-card__kind select { padding: 4px 8px; margin-inline-start: -8px; border: 0; border-radius: var(--radius-control); background: var(--ghost-hover); color: var(--ghost-ink); font: inherit; cursor: pointer; }
@@ -15,10 +15,8 @@
 .vault-card__seal { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--ghost-space-2); align-items: start; padding: var(--ghost-space-2) var(--ghost-space-3); border-radius: var(--radius-control); background: var(--ghost-hover); color: var(--ghost-ink2); }
 .vault-card__seal > svg { margin-block-start: .22em; color: var(--ghost-ink3); }
 .vault-card__seal > div { display: grid; gap: var(--ghost-space-1) var(--ghost-space-2); align-items: baseline; }
-.vault-card:not([data-editing]) .vault-card__seal { width: fit-content; max-width: 100%; }
-.vault-card:not([data-editing]) .vault-card__seal > div { display: flex; flex-wrap: wrap; }
-.vault-card__mask { font-family: var(--font-mono); letter-spacing: .04em; }
 .vault-card__notes { margin: 0; padding-block: var(--ghost-space-2) 0; border-block-start: 1px solid var(--ghost-line); color: var(--ghost-ink2); font-size: var(--text-ui); white-space: pre-wrap; overflow-wrap: anywhere; }
+.vault-row__details { white-space: pre-wrap; }
 .vault-card__field { display: grid; grid-template-columns: minmax(0, 7rem) minmax(0, 1fr); align-items: baseline; gap: var(--ghost-space-2); min-width: 0; font-size: var(--text-caption); color: var(--ghost-ink3); }
 .vault-card__field > span { overflow-wrap: anywhere; }
 .vault-card :is(input:not([type="checkbox"]), textarea) {

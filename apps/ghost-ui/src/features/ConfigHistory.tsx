@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Button, InlineError, SettingsGroup } from '../ui';
+import { History, Minus, Plus } from 'lucide-react';
+import { Button, InlineError, SkeletonRows } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { absoluteTime } from './time';
 import { Choice, errorText } from './InfrastructureFields';
 import { uiTerms } from '../uiText';
 import { entityKindLabels, revisionChanges, revisionSentence, type ConfigEntity } from './configText';
+import './SettingsLists.css';
 
 const kindOptions: { value: string; label: string }[] = [
   { value: '', label: '전체' },
@@ -29,43 +31,50 @@ export function ConfigHistory({ scopeId }: { scopeId?: string }) {
     try { await client.send({ type: 'config.revert', revisionId }); setConfirm(null); setNotice('변경 전 구성으로 되돌렸습니다.'); }
     catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };
-  return <SettingsGroup title={uiTerms.configHistory}>
-    {!scopeId && <div className="infra-editor"><Choice label="종류" value={filter} onChange={setFilter} options={kindOptions}/></div>}
-    {error && <InlineError className="m-4">{error}</InlineError>}
-    {notice && <p className="m-0 px-4 py-3 text-caption text-success" role="status">{notice}</p>}
-    {!revisions.length && <p className="m-0 p-4 text-caption text-ink-3">변경 기록이 없습니다.</p>}
-    <div className="grid min-w-0 gap-2.5">
+  return <section className="settings-list-page" aria-label={uiTerms.configHistory}>
+    <div className="settings-list__lead">
+      {state && <p className="settings-list__verdict">{revisions.length ? `변경 ${revisions.length}건` : '변경 기록 없음'}</p>}
+      {!scopeId && <div className="settings-list__actions"><Choice label="종류" value={filter} onChange={setFilter} options={kindOptions}/></div>}
+    </div>
+    {error && <InlineError>{error}</InlineError>}
+    {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
+    {!state && <SkeletonRows label="변경 기록을 불러오는 중…" rows={2}/>}
+    {revisions.length > 0 && <ul className="settings-list" role="list">
       {revisions.map(revision => {
         const changes = revisionChanges(revision, state ?? null);
-        return <article key={revision.id} className="grid min-w-0 gap-2 rounded-xl bg-surface p-4 shadow-card">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-            <h3 className="m-0 text-ui font-semibold text-ink [overflow-wrap:anywhere]">{revisionSentence(revision, state ?? null)}</h3>
-            <time className="text-caption text-ink-3">{absoluteTime(revision.at)}</time>
+        return <li key={revision.id} data-selected={confirm === revision.id || undefined}><article>
+          <div className="settings-list__row">
+            <span className="settings-list__mark" aria-hidden="true">{changes.created ? <Plus size={16}/> : changes.deleted ? <Minus size={16}/> : <History size={16}/>}</span>
+            <div className="settings-list__copy">
+              <h3 className="settings-list__title">{revisionSentence(revision, state ?? null)}</h3>
+              <time className="settings-list__meta" dateTime={new Date(revision.at).toISOString()}>{absoluteTime(revision.at)}</time>
+            </div>
+            {confirm !== revision.id && <div className="settings-list__actions">
+              <Button variant="ghost" size="sm" onClick={() => { setConfirm(revision.id); setError(''); }}>되돌리기</Button>
+            </div>}
           </div>
-          {(changes.created || changes.deleted || changes.lines.length > 0 || changes.extraCount > 0) && <ul className="m-0 grid list-none gap-1 p-0 text-caption text-ink-2">
-            {changes.created && <li>새로 만듦</li>}
-            {changes.deleted && <li>삭제함</li>}
+          <div className="settings-list__branch">
+          {(changes.lines.length > 0 || changes.extraCount > 0) && <ul className="m-0 grid list-none gap-1 p-0 text-caption text-ink-2 [overflow-wrap:anywhere]">
             {changes.lines.map(line => <li key={line.label}>{line.label}: {line.before} → {line.after}</li>)}
             {changes.extraCount > 0 && <li>그 밖의 {changes.extraCount}개 항목</li>}
           </ul>}
-          <details className="min-w-0 text-caption text-ink-3">
-            <summary className="w-fit cursor-pointer select-none">기술 정보</summary>
+          <details className="settings-list__disclosure">
+            <summary>기술 정보</summary>
             <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
               <div className="min-w-0"><p className="m-0 mb-1">변경 전</p><pre className="infra-json">{JSON.stringify(revision.before, null, 2)}</pre></div>
               <div className="min-w-0"><p className="m-0 mb-1">변경 후</p><pre className="infra-json">{JSON.stringify(revision.after, null, 2)}</pre></div>
             </div>
           </details>
-          {confirm === revision.id
-            ? <div className="grid gap-2">
+          {confirm === revision.id && <div className="grid gap-2">
               <p className="m-0 text-caption text-ink-2">이 변경 이전의 구성으로 되돌립니다. 그 뒤에 구성이 더 바뀌었다면 충돌로 중단됩니다.</p>
-              <div className="infra-actions">
+              <div className="settings-list__actions">
                 <Button variant="ghost" disabled={busy} onClick={() => setConfirm(null)}>취소</Button>
                 <Button disabled={busy} onClick={() => void revert(revision.id)}>{busy ? '되돌리는 중…' : '변경 전으로 되돌리기'}</Button>
               </div>
-            </div>
-            : <div className="infra-actions"><Button variant="outline" size="sm" onClick={() => { setConfirm(revision.id); setError(''); }}>되돌리기</Button></div>}
-        </article>;
+            </div>}
+          </div>
+        </article></li>;
       })}
-    </div>
-  </SettingsGroup>;
+    </ul>}
+  </section>;
 }

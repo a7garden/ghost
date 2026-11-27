@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react';
+import { Layers } from 'lucide-react';
 import type { ModelRef, Settings } from '@ghost/contract';
-import { Badge, Button, InlineError, SelectField, SettingsGroup, SettingsRow } from '../ui';
+import { Button, InlineError, SelectField, SettingsGroup, SettingsRow } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { uiTerms } from '../uiText';
 import { NO_MODEL, modelDisplayName, modelFromKey, modelSelectOptions } from '../pets/ModelPicker';
 import { Choice, EditorActions, errorText, TextField } from './InfrastructureFields';
+import './SettingsPages.css';
 
 type Slot = NonNullable<Settings['slots']>[string];
 export function SlotSettings() {
@@ -21,32 +23,42 @@ export function SlotSettings() {
     setBusy(true); setError('');
     try { await work(); setRemoving(null); } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };
-  return <SettingsGroup title={uiTerms.modelCombos} actions={<Button onClick={() => { setCreating(true); setEditing(null); }}>조합 추가</Button>}
-    description="모델 하나와 실패했을 때 이어받을 모델들을 묶어 이름을 붙입니다. 평가나 재시도처럼 일에 쓸 모델을 고를 때 이 이름으로 고릅니다.">
-    {error && <InlineError>{error}</InlineError>}
-    {entries.length > 0 && <SettingsRow label="기본 모델 조합" description="조합을 따로 고르지 않은 일이 쓰는 조합입니다.">
-      <SelectField label="기본 모델 조합" className="w-[220px] max-w-full" value={state.settings.defaultSlot ?? NO_MODEL} disabled={busy}
+  return <SettingsGroup title={<span className="sr-only">{uiTerms.modelCombos}</span>} className="settings-ledger__group"
+    actions={<Button variant="add" aria-expanded={creating} onClick={() => { setCreating(!creating); setEditing(null); setRemoving(null); }}>조합 추가</Button>}>
+    {error && removing === null && <InlineError>{error}</InlineError>}
+    {entries.length > 0 && <SettingsRow label="기본 모델 조합">
+      <SelectField label="기본 모델 조합" className="settings-ledger__select" value={state.settings.defaultSlot ?? NO_MODEL} disabled={busy}
         onValueChange={name => void act(() => client.send({ type: 'settings.update', defaultSlot: name === NO_MODEL ? null : name }))}
         options={[{ value: NO_MODEL, label: '지정 안 함' }, ...entries.map(([name]) => ({ value: name, label: name }))]} />
     </SettingsRow>}
-    {(creating || editing !== null) && <div className="px-4 py-3"><SlotEditor key={creating ? 'new' : editing!} name={creating ? null : editing} slot={editing !== null ? slots[editing] : undefined} onClose={() => { setCreating(false); setEditing(null); }}/></div>}
-    {!entries.length && !creating && <p className="m-0 p-4 text-caption text-ink-2">아직 만들어 둔 조합이 없습니다.</p>}
-    {entries.map(([name, slot]) => <article className="min-w-0 border-b border-line last:border-b-0" key={name}>
-      <SettingsRow label={<>{name}{state.settings.defaultSlot === name && <Badge className="ml-2">기본</Badge>}</>}
-        description={[slot.model, ...slot.fallbacks].map(model => modelDisplayName(state.settings, model)).join(' → ')}>
-        <span className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => { setEditing(name); setCreating(false); }}>편집</Button>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRemoving(name)}>삭제</Button>
-        </span>
-      </SettingsRow>
-      {removing === name && <div className="grid gap-3 px-4 pb-4">
-        <p className="m-0">{name} 모델 조합을 삭제할까요?</p>
-        <div className="infra-actions">
-          <Button variant="ghost" disabled={busy} onClick={() => setRemoving(null)}>취소</Button>
-          <Button variant="destructive" disabled={busy} onClick={() => void act(() => client.send({ type: 'slot.delete', name }))}>조합 삭제</Button>
+    {creating && <div className="settings-ledger__branch"><SlotEditor name={null} onClose={() => setCreating(false)}/></div>}
+    {!entries.length && !creating && <p className="settings-ledger__note">저장된 조합이 없습니다.</p>}
+    {entries.map(([name, slot]) => {
+      const selected = editing === name;
+      const deleting = removing === name;
+      return <article className="settings-ledger__record" key={name}>
+        <div className="settings-ledger__record-head" data-selected={selected || deleting || undefined}>
+          <Layers size={16} className="text-ink-3" aria-hidden="true"/>
+          <div className="settings-ledger__record-copy">
+            <span className="settings-ledger__label">{name}</span>
+            <p className="settings-ledger__meta">{[slot.model, ...slot.fallbacks].map(model => modelDisplayName(state.settings, model)).join(' → ')}</p>
+          </div>
+          <span className="settings-ledger__actions">
+            <Button variant="ghost" size="sm" aria-expanded={selected} onClick={() => { setEditing(selected ? null : name); setCreating(false); setRemoving(null); }}>편집</Button>
+            <Button variant="ghost" size="sm" aria-expanded={deleting} disabled={busy} onClick={() => { setRemoving(deleting ? null : name); setEditing(null); setCreating(false); setError(''); }}>삭제</Button>
+          </span>
         </div>
-      </div>}
-    </article>)}
+        {selected && <div className="settings-ledger__branch"><SlotEditor name={name} slot={slot} onClose={() => setEditing(null)}/></div>}
+        {deleting && <div className="settings-ledger__branch">
+          <p className="m-0">{name} 모델 조합을 삭제할까요?</p>
+          {error && <InlineError>{error}</InlineError>}
+          <div className="settings-ledger__actions">
+            <Button variant="ghost" disabled={busy} onClick={() => { setRemoving(null); setError(''); }}>취소</Button>
+            <Button variant="destructive" disabled={busy} onClick={() => void act(() => client.send({ type: 'slot.delete', name }))}>조합 삭제</Button>
+          </div>
+        </div>}
+      </article>;
+    })}
   </SettingsGroup>;
 }
 
@@ -75,7 +87,7 @@ function SlotEditor({ name: original, slot, onClose }: { name: string | null; sl
   };
   return <form className="infra-form" onSubmit={event => void save(event)} aria-label={original ? '모델 조합 편집' : '모델 조합 추가'}>
     <fieldset disabled={busy} className="infra-form border-0 p-0 m-0 min-w-0">
-      {original ? <p className="m-0">{original}</p> : <div className="grid gap-1 min-w-0">
+      {!original && <div className="grid gap-1 min-w-0">
         <TextField label="조합 이름" required value={name} onChange={setName} pattern={'[a-z][a-z0-9\\-]{0,31}'} maxLength={32}/>
         <p className="m-0 text-caption text-ink-2">이름은 소문자·숫자·하이픈으로 만듭니다.</p>
       </div>}

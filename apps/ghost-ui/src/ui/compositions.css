@@ -117,17 +117,12 @@
 .sidebar-scroll-frame > .ghost-rail { top: 8px; right: 0; bottom: 8px; }
 .sidebar-scroll-frame:hover > .ghost-rail { opacity: .7; }
 .sidebar-primary { display: flex; flex-direction: column; gap: 2px; }
-.sidebar-scroll > .presence-row__main { width: 100%; margin-top: var(--ghost-space-2); }
 .sidebar-foot { flex: none; padding-top: 8px; border-top: 1px solid var(--ghost-line); }
 .sidebar-count { margin-left: auto; color: var(--ghost-ink3); font-size: var(--text-micro); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sidebar-count[data-tone="amber"] { min-width: 20px; padding: 2px 6px; border-radius: var(--radius-pill); color: var(--ghost-amber-ink); background: var(--ghost-amber-tint); text-align: center; }
 .sidebar-count[data-tone="danger"] { padding: 2px 6px; border-radius: var(--radius-pill); color: var(--ghost-danger-ink); background: var(--ghost-danger-tint); }
 .sidebar-group-action { display: grid; width: 24px; height: 24px; flex: none; margin: 12px 4px 0 0; place-items: center; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink3); background: none; cursor: pointer; }
 .sidebar-group-action:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
-/* A Ghost's projects sit under its row, indented to its name: the Ghost is the app, the project is what it opens. */
-.sidebar-projects { display: flex; flex-direction: column; gap: 1px; padding-bottom: 4px; }
-.sidebar-project { min-height: 30px; padding-left: 44px; font-weight: 450; }
-.sidebar-project[data-paused] { opacity: .55; }
 
 .presence-row__main {
   display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 44px; padding: 6px 10px 6px 8px;
@@ -146,15 +141,6 @@
 .shell-menu .sidebar-scroll .ghost-navigation-group__head { background: var(--ghost-raised); }
 .shell-menu .sidebar-foot { padding: 8px 10px 10px; }
 
-/* Overflow roster: the +N disclosure and, once expanded past eight, its filter. */
-.sidebar-more {
-  display: flex; align-items: center; min-height: 28px; padding: 4px 10px; border: 0; border-radius: var(--radius-control);
-  color: var(--ghost-ink3); background: none; cursor: pointer; text-align: left;
-  font: 600 var(--text-caption)/1 var(--font-sans); font-variant-numeric: tabular-nums;
-  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease;
-}
-.sidebar-more:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
-.sidebar-more[aria-expanded="true"] { color: var(--ghost-ink2); }
 .sidebar-search {
   box-sizing: border-box; width: 100%; height: 30px; margin-top: 2px; padding: 0 10px;
   border: 0; border-radius: var(--radius-control); background: var(--ghost-hover); color: var(--ghost-ink); outline: none;
@@ -162,8 +148,6 @@
 }
 .sidebar-search::placeholder { color: var(--ghost-ink3); }
 .sidebar-search:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
-/* Paused Ghosts read as on hold, like the settings roster. */
-.presence-row__main[data-dimmed] { filter: grayscale(.85); opacity: .6; }
 
 /* Command search ------------------------------------------------------- */
 .ghost-command-palette__backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; justify-content: center; align-items: flex-start; padding: min(16vh, 128px) 16px 24px; background: color-mix(in srgb, var(--ghost-page) 40%, transparent); backdrop-filter: blur(2px); }

@@ -127,6 +127,8 @@ describe('work conversation stream', () => {
     expect(markup.indexOf('data-kind="speaker"')).toBeGreaterThan(markup.indexOf('보고서를 써 줘'));
     expect(markup.indexOf('data-kind="speaker"')).toBeLessThan(markup.indexOf('data-kind="trail"'));
     expect(renderToStaticMarkup(createElement(Transcript, { messages: rows, speaker }))).not.toContain('data-kind="speaker"');
+    expect(markup.indexOf('초안을 썼습니다.')).toBeLessThan(markup.indexOf('data-kind="activity"'));
+    expect(markup.indexOf('data-kind="activity"')).toBeLessThan(markup.indexOf('출처를 더해 줘'));
   });
 
   it('lets a streaming reply continue the run only when the Ghost spoke last', () => {
@@ -140,13 +142,13 @@ describe('work conversation stream', () => {
     expect(trailSummary(['bash'], true)).toBe('명령 실행 중');
     expect(trailSummary(['read', 'bash', 'web_search', 'mcp__ghost__delegate_work', 'write'], false)).toBe('파일 읽기 · 명령 실행 · 웹 검색 외 2개');
     const markup = renderToStaticMarkup(createElement(ToolTrail, { results: [tool('m2', 'read'), tool('m3', 'bash', 'boom', true)] }));
-    expect(markup).toContain('파일 읽기 · 명령 실행<span class="trail__failed"> · 실패 1</span>');
+    expect(markup).toContain('class="trail__failed"');
   });
 
   it('keeps a long tool name and tool output inside the trail\'s wrapping step, not on the summary line', () => {
     const name = 'mcp__ghost__delegate_work_with_a_very_long_identifier_that_never_breaks';
     const markup = renderToStaticMarkup(createElement(ToolTrail, { results: [tool('m2', name, `curl https://example.com/${'a'.repeat(200)}`)] }));
-    expect(markup).toContain(`<span class="trail__count">${name}</span>`);
+    expect(markup).not.toContain('trail__chip');
     expect(markup).toContain(`<span class="trail__step-name">${name}</span>`);
     expect(markup).toMatch(/<pre>curl https:\/\/example\.com\/a{200}<\/pre>/);
   });

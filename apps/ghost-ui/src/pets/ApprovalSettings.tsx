@@ -6,6 +6,7 @@ import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { DotAvatar } from '../components/DotAvatar';
 import { toneFor } from '../features/ghostState';
+import '../features/SettingsPages.css';
 
 /** Languages offered for what Ghosts write to the owner; Ghosts still think in whatever language suits them. */
 export const ownerLanguages: readonly { value: string; label: string }[] = [
@@ -47,41 +48,39 @@ export function ApprovalSettings() {
       .catch(reason => setError(reason instanceof Error ? reason.message : '설정을 저장하지 못했습니다.'))
       .finally(() => setPending(false));
   };
-  const manual = ghosts.filter(ghost => policy.ghosts?.[ghost.id] === 'owner').length;
   const languageOptions = ownerLanguages.some(option => option.value === language) ? ownerLanguages : [...ownerLanguages, { value: language, label: language }];
 
-  return <section className="grid gap-6">
-    <SettingsGroup title="언어">
-      <SettingsRow label="받아 볼 언어" description="Ghost가 보내는 답 · 질문 · 승인 요청 · 결과 보고를 이 언어로 씁니다. Ghost끼리 주고받는 말과 생각은 다른 언어일 수 있습니다.">
-        <SelectField label="받아 볼 언어" className="w-[200px] max-w-full" value={language} disabled={pending || !settings}
-          onValueChange={value => save({ ownerLanguage: value }, '언어를 저장했습니다. 다음 답부터 적용됩니다.')} options={[...languageOptions]}/>
+  return <section className="settings-ledger">
+    <SettingsGroup title="언어" className="settings-ledger__group">
+      <SettingsRow label="받아 볼 언어" description="답변, 질문, 승인 요청, 결과 보고에 적용됩니다.">
+        <SelectField label="받아 볼 언어" className="settings-ledger__select" value={language} disabled={pending || !settings}
+          onValueChange={value => save({ ownerLanguage: value }, '언어를 저장했습니다. 다음 답부터 적용됩니다.')} options={languageOptions}/>
       </SettingsRow>
     </SettingsGroup>
 
-    <SettingsGroup title="자동 승인" description="되돌릴 수 있는 요청만 해당합니다. 돈을 쓰거나 · 카드를 입력하거나 · 메일과 댓글을 보내거나 · 지우는 요청은 늘 직접 승인합니다.">
-      <SettingsRow label="답이 없을 때" description="추천안이 있는 질문과 되돌릴 수 있는 승인은 이 시간이 지나면 추천대로 진행합니다. 카드에 남은 시간이 보입니다.">
-        <SelectField label="답이 없을 때" className="w-[200px] max-w-full" value={String(policy.autoMinutes)} disabled={pending || !settings}
+    <SettingsGroup title="자동 승인" className="settings-ledger__group" description="결제, 카드 입력, 메일·댓글 발송, 삭제는 직접 승인해야 합니다.">
+      <SettingsRow label="답이 없을 때" description="추천안이 있는 질문이나 되돌릴 수 있는 요청을 추천대로 진행합니다.">
+        <SelectField label="답이 없을 때" className="settings-ledger__select" value={String(policy.autoMinutes)} disabled={pending || !settings}
           onValueChange={value => save({ approvals: { ...policy, autoMinutes: Number(value) } }, '자동 진행 시간을 저장했습니다.')}
           options={autoWaits.some(option => option.value === String(policy.autoMinutes)) ? [...autoWaits] : [...autoWaits, { value: String(policy.autoMinutes), label: `${policy.autoMinutes}분` }]}/>
       </SettingsRow>
-      <SettingsRow label="메인 Ghost가 먼저 검토" description="다른 Ghost의 요청을 메인이 먼저 봅니다. 되돌릴 수 있는 요청은 대신 정하고 알림으로 까닭을 알려 줍니다. 발송 · 결제 · 삭제 같은 요청은 정하지 않고 카드에 「메인 의견」만 남깁니다." htmlFor="delegate-switch">
+      <SettingsRow label="메인 Ghost가 먼저 검토" description="되돌릴 수 있는 요청은 대신 정하고, 직접 승인이 필요한 요청에는 의견만 남깁니다." htmlFor="delegate-switch">
         <Switch id="delegate-switch" checked={policy.delegate === 'reversible'} disabled={pending || !settings}
           onCheckedChange={checked => save({ approvals: { ...policy, delegate: checked ? 'reversible' : 'none' } }, checked ? '메인 Ghost가 먼저 검토합니다.' : '메인 검토 없이 직접 판단합니다.')}/>
       </SettingsRow>
     </SettingsGroup>
 
-    {/* 2026.11.11 : Ghost 마다 한 줄씩 쌓던 스위치 목록이 Ghost 가 늘면 끝없이 길어졌다. 초상 타일 그리드로 한눈에 보고 눌러 바꾼다. */}
-    {ghosts.length > 0 && <SettingsGroup title="Ghost별 자동 승인"
-      description={`눌러서 바꿉니다. 「직접 승인」인 Ghost의 요청은 추천안만 보여 주고 직접 승인할 때까지 기다립니다. 메인 Ghost의 요청은 메인이 스스로 승인하지 않고 자동 진행 시간만 적용됩니다.${manual ? ` · ${ghosts.length}명 중 ${manual}명 직접 승인` : ''}`}>
-      <div className="approval-grid" role="group" aria-label="Ghost별 자동 승인">
+    {ghosts.length > 0 && <SettingsGroup title="Ghost별 자동 승인" className="settings-ledger__group"
+      description="메인 Ghost는 자기 요청을 검토하지 않습니다. 자동 진행 시간만 적용됩니다.">
+      <div className="approval-roster" role="group" aria-label="Ghost별 자동 승인">
         {ghosts.map(ghost => {
           const automatic = policy.ghosts?.[ghost.id] !== 'owner';
-          return <button key={ghost.id} type="button" className="approval-tile" aria-pressed={automatic} disabled={pending || !settings}
+          return <button key={ghost.id} type="button" className="approval-roster__row" aria-pressed={automatic} disabled={pending || !settings}
             aria-label={`${ghost.name}: ${automatic ? '자동 승인' : '직접 승인'}`}
             onClick={() => save({ approvals: withGhostRule(policy, ghost.id, !automatic) }, `${ghost.name}: ${automatic ? '늘 직접 승인' : '자동 승인 켬'}`)}>
-            <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={36}/>
-            <span className="approval-tile__name">{ghost.isDefault && <Crown aria-hidden="true"/>}{ghost.name}</span>
-            <span className="approval-tile__mode">{automatic ? '자동 승인' : '직접 승인'}</span>
+            <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={24}/>
+            <span className="approval-roster__name">{ghost.name}{ghost.isDefault && <Crown aria-label="메인 Ghost"/>}</span>
+            <span className="approval-roster__mode">{automatic ? '자동 승인' : '직접 승인'}</span>
           </button>;
         })}
       </div>

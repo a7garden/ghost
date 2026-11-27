@@ -59,6 +59,7 @@ test('docked decisions keep choices and direct answers reachable with long evide
   expect(await body.evaluate(element => element.clientHeight > 0 && element.scrollHeight > element.clientHeight)).toBe(true);
   const responseBounds = (await decision.locator('.decision__response').boundingBox())!;
   const cardBounds = (await decision.boundingBox())!;
+  expect(cardBounds.height).toBeLessThanOrEqual(640 * .45 + 1);
   expect(responseBounds.y + responseBounds.height).toBeLessThanOrEqual(cardBounds.y + cardBounds.height);
   await expect(decision.locator('.decision__review-auto')).toBeInViewport();
   await expect(decision.locator('summary').filter({ hasText: '직접 답하기' })).toBeInViewport();

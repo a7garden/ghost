@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
+import type { Message } from '@ghost/contract';
 import { InlineText, MessageBody } from './MessageBody';
 import { Transcript, TranscriptMessage } from './TranscriptMessage';
 
@@ -47,6 +48,21 @@ it('marks only the owner turn that replaced its outgoing row, so it does not ris
   }));
   expect(html.match(/data-delivered/g)).toHaveLength(1);
   expect(html.indexOf('data-delivered')).toBeGreaterThan(html.indexOf('어제 보낸 말'));
+});
+
+it('hides a wake only when the following reply repeats its full text', () => {
+  const row = (id: string, role: Message['role'], text: string, origin: Message['origin'] = null): Message =>
+    ({ id, conversationId: 'c', role, text, origin, toolCalls: [], tool: null, attachments: [], createdAt: 1 });
+  const messages = [
+    row('n', 'note', '이번 주에는 세 가지 요청이 들어왔어요.'),
+    row('a', 'assistant', '**이번 주에는**  세 가지 요청이 들어왔어요!'),
+    row('w', 'user', '아침 브리핑\n\n요청 2건을 검토했습니다.', 'schedule'),
+    row('b', 'assistant', '아침 브리핑\n\n요청 3건을 검토했습니다.'),
+  ];
+  const html = renderToStaticMarkup(createElement(Transcript, { messages, speaker: () => '기록' }));
+  expect(html.match(/data-kind="note"/g)).toHaveLength(1);
+  expect(html).toContain('요청 2건을 검토했습니다.');
+  expect(html).toContain('요청 3건을 검토했습니다.');
 });
 
 it('preserves a linked image destination without nesting anchors or loading the image', () => {

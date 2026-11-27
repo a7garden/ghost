@@ -93,6 +93,8 @@ export function PiToolFields({ value, change, tools }: Editor<PiSettings['toolAl
   </>;
 }
 
-export function PiDisclosure({ label, children }: { label: string; children: ReactNode }) {
-  return <details className="pi-disclosure"><summary>{label}</summary>{children}</details>;
+export function PiDisclosure({ label, value, children }: { label: string; value?: ReactNode; children: ReactNode }) {
+  return <details className="pi-disclosure"><summary>
+    <span>{label}</span>{value !== undefined && <span className="settings-list__value">{value}</span>}
+  </summary>{children}</details>;
 }

@@ -1,21 +1,33 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Download, KeyRound, LogIn, ShieldOff, Trash2 } from 'lucide-react';
-import { Button, SettingsGroup, SettingsRow, InlineError, SelectField, Badge, SegmentedControl, Switch } from '../ui';
+import { Check, Download, KeyRound, LogIn, Minus, Plus, RefreshCw, ShieldOff } from 'lucide-react';
+import { Button, SettingsGroup, InlineError, SelectField, SegmentedControl, Switch } from '../ui';
 import type { LocalAuthResult, LocalAuthSource, Provider, ProviderPreset, Thinking } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
+import { StateGlyph } from '../components/agent/StateGlyph';
 import { ChatGptLogin } from './ChatGptLogin';
 import { LocalAuthImport } from './LocalAuthImport';
-import { NO_MODEL, modelFromKey, modelSelectOptions } from './ModelPicker';
+import { NO_MODEL, modelDisplayName, modelFromKey, modelSelectOptions, modelShortName } from './ModelPicker';
 import { ProviderEditor, type ProviderSave } from './ProviderEditor';
-import { ProviderQuotaGroup } from './ProviderQuota';
+import { ProviderUsage, useProviderQuotas } from './ProviderQuota';
 import { FallbackSteps, editFallbacks, type FallbackAction } from '../features/fallbacks';
 import { oauthName, OAUTH_KINDS } from '../uiText';
+import '../features/SettingsPages.css';
+import './ModelSettings.css';
+
+const roles = [
+  { field: 'reviewModel', label: '검토 모델', hint: '맡긴 일의 결과 판정', empty: '선택 안 함' },
+  { field: 'memoryModel', label: '기억 모델', hint: 'Ghost의 기억 정리', empty: '기본 모델 따름' },
+  { field: 'suggestionModel', label: '제안 모델', hint: '', empty: '기본 모델 따름' },
+] as const;
+
+type ModelField = 'defaultModel' | typeof roles[number]['field'];
+type Change = ModelField | 'thinking' | 'fallbacks' | 'suggestions' | 'delete';
 
 export function ModelSettings() {
   const { store, client } = useHost();
-  const { state } = useHostState(store);
+  const { state, connection } = useHostState(store);
   const settings = state?.settings;
   const [catalog, setCatalog] = useState<ProviderPreset[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true), [catalogError, setCatalogError] = useState(''), [catalogAttempt, setCatalogAttempt] = useState(0);
@@ -24,12 +36,20 @@ export function ModelSettings() {
   const [login, setLogin] = useState<Provider>();
   const [importAuth, setImportAuth] = useState(false);
   const [pending, setPending] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const [lastChange, setLastChange] = useState<Change>();
   const [savedProvider, setSavedProvider] = useState<{ id: string; message: string }>();
   const returnFocus = useRef<HTMLElement | null>(null);
   const savedRow = useRef<HTMLDivElement>(null);
   const focusAfterSave = useRef(false);
   const options = modelSelectOptions(settings);
-  const providerIds = settings?.providers.map(provider => provider.id) ?? [];
+  const providers = settings?.providers ?? [];
+  const providerIds = providers.map(provider => provider.id);
+  const { quotas, error: quotaError, loading: quotaLoading, now, refresh: refreshQuota } = useProviderQuotas();
+  const quotasById = new Map(quotas.map(quota => [quota.id, quota]));
+  const standaloneQuotas = quotas.filter(quota => !providerIds.includes(quota.id));
+  const primary = settings?.defaultModel ?? null;
+  const fallbacks = settings?.defaultFallbacks ?? [];
+  const setupLocked = pending !== '' || !!editor || !!login || importAuth;
   const adding = !!editor && !editor.initial;
 
   useEffect(() => {
@@ -56,13 +76,13 @@ export function ModelSettings() {
     return () => { alive = false; };
   }, [client, catalogAttempt]);
 
-  const run = async (label: string, work: () => Promise<unknown>, done: string) => {
-    setPending(label); setError(''); setNotice('');
+  const run = async (label: Change, work: () => Promise<unknown>, done: string) => {
+    setLastChange(label); setPending(label); setError(''); setNotice('');
     try { await work(); setNotice(done); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '요청을 처리하지 못했습니다.'); }
     finally { setPending(''); }
   };
-  const roleCommand = (field: 'defaultModel' | 'reviewModel' | 'memoryModel' | 'suggestionModel', key: string) => {
+  const roleCommand = (field: ModelField, key: string) => {
     const model = modelFromKey(settings, key) ?? null;
     if (field === 'defaultModel') void run(field, () => client.send({ type: 'settings.update', defaultModel: model }), '모델을 저장했습니다.');
     else if (field === 'reviewModel') void run(field, () => client.send({ type: 'settings.update', reviewModel: model }), '모델을 저장했습니다.');
@@ -95,91 +115,143 @@ export function ModelSettings() {
     setSavedProvider({ id: result.providerId, message: `${source.agentName}에서 인증 정보를 가져왔습니다.` });
   };
 
-  return <section className="flex min-w-0 flex-col gap-6" aria-label="모델 설정">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <h2 className="section-title">제공자</h2>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" type="button" aria-expanded={importAuth} disabled={pending !== '' || !settings || !!editor || !!login || importAuth}
-          onClick={event => { beginSetup(event.currentTarget); setImportAuth(true); }}><Download size={15}/>다른 에이전트에서 가져오기</Button>
-        <Button variant="add" type="button" aria-expanded={adding} disabled={pending !== '' || !settings || catalogLoading || !catalog.length || !!editor || !!login || importAuth}
-          onClick={event => { beginSetup(event.currentTarget); setEditor({}); }}>{catalogLoading ? '목록 불러오는 중…' : '제공자 추가'}</Button>
+  const modelField = (field: ModelField, label: string, empty: string) => {
+    const ref = settings?.[field];
+    const value = ref ? `${ref.provider}/${ref.model}` : NO_MODEL;
+    const choices = field === 'defaultModel'
+      ? options.map(option => option.value !== value && fallbacks.some(model => option.value === `${model.provider}/${model.model}`)
+        ? { ...option, disabled: true } : option)
+      : options;
+    return <SelectField label={label} className="model-select" value={value} disabled={pending !== '' || !settings} onValueChange={key => roleCommand(field, key)}
+      options={[
+        { value: NO_MODEL, label: empty },
+        ...(ref && !choices.some(option => option.value === value) ? [{ value, label: `${modelDisplayName(settings, ref)} · 목록에 없음`, disabled: true }] : []),
+        ...choices,
+      ]}/>;
+  };
+
+  const ready = state?.runtime.ready;
+  const feedback = !remove && (error ? <InlineError>{error}</InlineError>
+    : notice && <p className="m-0 flex items-start gap-1.5 text-caption text-success" role="status"><Check size={14} className="mt-0.5 flex-none"/>{notice}</p>);
+  const roleChanged = lastChange === 'suggestions' || roles.some(role => role.field === lastChange);
+  return <section className="settings-ledger model-settings" aria-label="모델 설정">
+    <div className="settings-verdict" data-tone={ready === false ? 'warning' : undefined} role="status">
+      <span aria-hidden="true"><StateGlyph state={ready ? 'done' : ready === false ? 'attention' : 'queued'} size={20}/></span>
+      <div className="settings-verdict__copy">
+        <strong>{state
+          ? ready ? 'Ghost가 실행할 수 있습니다' : 'Ghost가 실행할 수 없습니다'
+          : '실행 상태를 확인하지 못했습니다'}</strong>
+        {ready && primary && <span className="model-verdict__model"> · 기본 모델 {modelShortName(settings, primary)}</span>}
+        {state && ready === false && <small>{state.runtime.detail}</small>}
+        {state && connection !== 'live' && <small>마지막으로 받은 설정 기준</small>}
       </div>
     </div>
-    {catalogError && <InlineError pending={catalogLoading} onRetry={() => setCatalogAttempt(value => value + 1)} retryLabel="다시 불러오기">{catalogError}</InlineError>}
-    {importAuth && <LocalAuthImport onClose={closeSetup} onImported={authImported}/>}
-    {adding && <ProviderEditor presets={catalog} providerIds={providerIds} busy={pending !== ''} onClose={closeSetup} onSave={saveProvider}/>}
-    {(settings?.providers.length ?? 0) > 0 && <SettingsGroup title={<span className="sr-only">제공자 목록</span>}>
-      {settings!.providers.map(provider => <div key={provider.id} className="provider-record" tabIndex={-1} ref={provider.id === savedProvider?.id ? savedRow : undefined}>
-      <SettingsRow
-        label={<span className="flex min-w-0 flex-wrap items-center gap-2 text-ui font-semibold text-ink [overflow-wrap:anywhere]">{provider.name}
-          {provider.hasCredential
-            ? <Badge variant="outline"><KeyRound aria-hidden="true"/>{provider.authType === 'oauth' ? `${oauthName(provider.kind)} 인증 저장됨` : 'API 키 저장됨'}</Badge>
-            : <Badge variant="warning"><ShieldOff aria-hidden="true"/>인증 정보 없음</Badge>}
-        </span>}
-        description={<>
-          {provider.models.length ? `${provider.models.slice(0, 2).map(model => model.name || model.id).join(', ')}${provider.models.length > 2 ? ` 외 ${provider.models.length - 2}개` : ''}` : '등록된 모델 없음'}
-          {provider.baseUrl && <span className="mt-0.5 block [overflow-wrap:anywhere]">{provider.baseUrl}</span>}
-          {provider.id === savedProvider?.id && login?.id !== provider.id && <span className="mt-0.5 block text-success" role="status">{savedProvider.message}</span>}
-        </>}>
-        <span className="flex flex-wrap items-center gap-1">
-          {OAUTH_KINDS.has(provider.kind) && !provider.baseUrl && (!provider.hasCredential || provider.authType === 'oauth') && <Button variant="ghost" size="sm" type="button"
-            disabled={pending !== '' || !!editor || !!login || importAuth} aria-expanded={login?.id === provider.id}
-            aria-label={`${provider.name} ${oauthName(provider.kind)}로 로그인`} onClick={event => { beginSetup(event.currentTarget); setLogin(provider); }}><LogIn size={14}/>{provider.authType === 'oauth' ? '다시 로그인' : `${oauthName(provider.kind)} 로그인`}</Button>}
-          <Button variant="ghost" size="sm" type="button" disabled={pending !== '' || !!login || importAuth || (!!editor && editor.initial?.id !== provider.id)}
-            aria-expanded={editor?.initial?.id === provider.id} aria-label={`${provider.name} 설정`}
-            onClick={event => { if (editor?.initial?.id === provider.id) closeSetup(); else { beginSetup(event.currentTarget); setEditor({ initial: provider }); } }}>설정<ChevronRight size={14}/></Button>
-          <Button variant="ghost" size="icon" type="button" aria-label={`${provider.name} 제공자 삭제`} disabled={pending !== '' || !!editor || !!login || importAuth} onClick={() => { setError(''); setRemove(provider); }}><Trash2 size={15}/></Button>
-        </span>
-      </SettingsRow>
-      {editor?.initial?.id === provider.id && <ProviderEditor initial={editor.initial} presets={catalog} providerIds={providerIds}
-        busy={pending !== ''} onClose={closeSetup} onSave={saveProvider}/>}
-      {login?.id === provider.id && <ChatGptLogin provider={login} onClose={closeSetup}/>}
-      </div>)}
-    </SettingsGroup>}
-    {settings && !settings.providers.length && !adding && !importAuth && !catalogLoading && catalog.length > 0 &&
-      <p className="m-0 text-caption text-ink-2">연결된 제공자가 없습니다.</p>}
-    {error && <InlineError>{error}</InlineError>}
-    {notice && <p className="m-0 flex items-start gap-1.5 text-caption text-success" role="status"><Check size={14} className="mt-0.5 flex-none"/>{notice}</p>}
-    <ProviderQuotaGroup/>
-    <SettingsGroup title="모델 선택">
-      <SettingsRow label="기본 모델" description="별도로 모델을 지정하지 않은 Ghost가 사용합니다.">
-        <SelectField label="기본 모델" className="w-[240px] max-w-full" value={settings?.defaultModel ? `${settings.defaultModel.provider}/${settings.defaultModel.model}` : NO_MODEL}
-          disabled={pending !== '' || !settings} onValueChange={key => roleCommand('defaultModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
-      </SettingsRow>
-      {settings?.defaultModel && <SettingsRow label="생각 수준" description="답하기 전에 추론하는 정도">
-        <SegmentedControl aria-label="생각 수준" value={settings.defaultModel.thinking ?? 'off'} onValueChange={thinkingCommand}
-          options={(['off', 'low', 'medium', 'high'] as const).map(value => ({ value, label: { off: '끔', low: '낮음', medium: '중간', high: '높음' }[value], disabled: pending !== '' }))}/>
-      </SettingsRow>}
-      <SettingsRow className="ghost-settings-row--stack" label="기본 대체 모델" description="연결 오류·사용 한도에 걸리면 차례로 이어갑니다. 대체 모델을 따로 정한 Ghost는 자기 목록을 씁니다.">
-        <div className="model-route" aria-busy={pending === 'fallbacks'}>
-          <ol className="model-route__steps" aria-label="기본 대체 모델 순서">
-            <FallbackSteps fallbacks={settings?.defaultFallbacks ?? []} primary={settings?.defaultModel ?? null} pending={pending !== '' || !settings} onAction={fallbackCommand}/>
-          </ol>
-        </div>
-      </SettingsRow>
-      <SettingsRow label="검토 모델" description="맡긴 일의 결과를 판정할 때 씁니다.">
-        <SelectField label="검토 모델" className="w-[240px] max-w-full" value={settings?.reviewModel ? `${settings.reviewModel.provider}/${settings.reviewModel.model}` : NO_MODEL}
-          disabled={pending !== '' || !settings} onValueChange={key => roleCommand('reviewModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
-      </SettingsRow>
-      <SettingsRow label="기억 모델" description="Ghost의 기억을 정리할 때 씁니다. 선택하지 않으면 기본 모델을 따릅니다.">
-        <SelectField label="기억 모델" className="w-[240px] max-w-full" value={settings?.memoryModel ? `${settings.memoryModel.provider}/${settings.memoryModel.model}` : NO_MODEL}
-          disabled={pending !== '' || !settings} onValueChange={key => roleCommand('memoryModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
-      </SettingsRow>
-      <SettingsRow label="다음 메시지 제안" description="답이 끝나면 보낼 만한 다음 메시지를 입력창에 띄웁니다. 제안마다 요청이 한 번 더 나갑니다." htmlFor="suggestions-switch">
-        <Switch id="suggestions-switch" checked={settings?.nextMessageSuggestions !== false} disabled={pending !== '' || !settings}
-          onCheckedChange={checked => void run('suggestions', () => client.send({ type: 'settings.update', nextMessageSuggestions: checked }), checked ? '다음 메시지를 제안합니다.' : '다음 메시지를 제안하지 않습니다.')}/>
-      </SettingsRow>
-      {settings?.nextMessageSuggestions !== false && <SettingsRow label="제안 모델" description="선택하지 않으면 기본 모델을 따릅니다. 빠른 모델이면 제안이 일찍 뜹니다.">
-        <SelectField label="제안 모델" className="w-[240px] max-w-full" value={settings?.suggestionModel ? `${settings.suggestionModel.provider}/${settings.suggestionModel.model}` : NO_MODEL}
-          disabled={pending !== '' || !settings} onValueChange={key => roleCommand('suggestionModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
-      </SettingsRow>}
+
+    <SettingsGroup className="model-providers" title="제공자" actions={<>
+      {quotas.length > 0 && <Button variant="ghost" size="icon" type="button" aria-label="사용량 새로고침" title="사용량 새로고침"
+        disabled={quotaLoading} onClick={refreshQuota}><RefreshCw size={15} aria-hidden="true"/></Button>}
+      <Button variant="ghost" type="button" aria-expanded={importAuth} disabled={setupLocked || !settings}
+        onClick={event => { beginSetup(event.currentTarget); setImportAuth(true); }}><Download size={15} aria-hidden="true"/>다른 에이전트에서 가져오기</Button>
+      <Button variant="add" type="button" aria-expanded={adding} disabled={setupLocked || !settings || catalogLoading || !catalog.length}
+        onClick={event => { beginSetup(event.currentTarget); setEditor({}); }}>{catalogLoading ? '목록 불러오는 중…' : '제공자 추가'}</Button>
+    </>}>
+      {catalogError && <InlineError pending={catalogLoading} onRetry={() => setCatalogAttempt(value => value + 1)} retryLabel="다시 불러오기">{catalogError}</InlineError>}
+      {importAuth && <LocalAuthImport onClose={closeSetup} onImported={authImported}/>}
+      {adding && <ProviderEditor presets={catalog} providerIds={providerIds} busy={pending !== ''} onClose={closeSetup} onSave={saveProvider}/>}
+      {(providers.length > 0 || standaloneQuotas.length > 0) && <div className="provider-ledger" role="list" aria-label="제공자 목록">
+        {providers.map(provider => {
+          const editing = editor?.initial?.id === provider.id;
+          const signingIn = login?.id === provider.id;
+          const quota = quotasById.get(provider.id);
+          return <div key={provider.id} className="provider-record" role="listitem" tabIndex={-1}
+            ref={provider.id === savedProvider?.id ? savedRow : undefined}>
+            <div className="provider-ledger__row" data-selected={editing || signingIn || undefined} data-attention={!provider.hasCredential || undefined}>
+              <span className="provider-ledger__mark" aria-hidden="true">{provider.hasCredential ? <KeyRound size={16}/> : <ShieldOff size={16}/>}</span>
+              <div className="provider-ledger__copy">
+                <span className="model-row-title">{provider.name}</span>
+                <span className="model-meta">
+                  {provider.hasCredential ? provider.authType === 'oauth' ? `${oauthName(provider.kind)} 인증 저장됨` : 'API 키 저장됨' : '인증 정보 없음'}
+                  {' · '}모델 {provider.models.length}개
+                </span>
+                {provider.id === savedProvider?.id && !signingIn && <small className="model-meta text-success" role="status">{savedProvider.message}</small>}
+              </div>
+              {quota && <ProviderUsage quota={quota} now={now}/>}
+              <div className="provider-ledger__actions">
+                {OAUTH_KINDS.has(provider.kind) && !provider.baseUrl && (!provider.hasCredential || provider.authType === 'oauth') && <Button variant="ghost" size="sm" type="button"
+                  disabled={setupLocked} aria-expanded={signingIn} aria-label={`${provider.name} ${oauthName(provider.kind)}로 로그인`}
+                  onClick={event => { beginSetup(event.currentTarget); setLogin(provider); }}><LogIn size={14} aria-hidden="true"/>{provider.authType === 'oauth' ? '다시 로그인' : `${oauthName(provider.kind)} 로그인`}</Button>}
+                <Button variant="ghost" size="sm" type="button" disabled={pending !== '' || !!login || importAuth || (!!editor && !editing)}
+                  aria-expanded={editing} aria-label={`${provider.name} 설정`}
+                  onClick={event => { if (editing) closeSetup(); else { beginSetup(event.currentTarget); setEditor({ initial: provider }); } }}>
+                  설정{editing ? <Minus size={14} aria-hidden="true"/> : <Plus size={14} aria-hidden="true"/>}
+                </Button>
+              </div>
+            </div>
+            {editing && editor?.initial && <ProviderEditor initial={editor.initial} presets={catalog} providerIds={providerIds} busy={pending !== ''}
+              onClose={closeSetup} onSave={saveProvider} onDelete={() => { setError(''); setRemove(provider); }}/>}
+            {signingIn && login && <ChatGptLogin provider={login} onClose={closeSetup}/>}
+          </div>;
+        })}
+        {standaloneQuotas.map(quota => <div key={quota.id} className="provider-record" role="listitem">
+          <div className="provider-ledger__row">
+            <span className="provider-ledger__mark" aria-hidden="true"><KeyRound size={16}/></span>
+            <div className="provider-ledger__copy"><span className="model-row-title">{quota.name}</span>
+              {quota.id === 'claude-code' && <span className="model-meta">Claude Code 로그인</span>}
+            </div>
+            <ProviderUsage quota={quota} now={now}/>
+          </div>
+        </div>)}
+      </div>}
+      {settings && !providers.length && !adding && !importAuth && !catalogLoading && <p className="model-meta">연결된 제공자가 없습니다.</p>}
+      {quotaError && <InlineError pending={quotaLoading} onRetry={refreshQuota} retryLabel="다시 불러오기">{quotaError}</InlineError>}
+      {lastChange === 'delete' && feedback}
     </SettingsGroup>
-    {remove && <Modal title="제공자 삭제" onClose={() => pending === '' && setRemove(undefined)}>
+
+    <SettingsGroup className="model-route-group" title="모델 경로">
+      <div className="model-route" aria-busy={pending === 'fallbacks' || pending === 'defaultModel'}>
+        <ol className="model-route__steps" aria-label="기본 대체 모델 순서">
+          <li className="model-route__step" data-primary>
+            <span className="model-route__node" aria-hidden="true"><span/></span>
+            <span className="model-row-title">기본 모델</span>
+            {modelField('defaultModel', '기본 모델', '선택 안 함')}
+          </li>
+          <FallbackSteps fallbacks={fallbacks} primary={primary} pending={pending !== '' || !settings} onAction={fallbackCommand}/>
+        </ol>
+        <p className="model-meta model-route-caption">연결 오류나 사용 한도에 걸리면 대체 모델을 순서대로 씁니다. Ghost별 경로가 있으면 그 경로를 우선합니다.</p>
+      </div>
+      {primary && <div className="model-thinking">
+        <span className="model-row-title" title="답하기 전에 추론하는 정도">생각 수준</span>
+        <SegmentedControl aria-label="생각 수준" value={primary.thinking ?? 'off'} onValueChange={thinkingCommand}
+          options={(['off', 'low', 'medium', 'high'] as const).map(value => ({ value, label: { off: '끔', low: '낮음', medium: '중간', high: '높음' }[value], disabled: pending !== '' }))}/>
+      </div>}
+      {lastChange !== 'delete' && !roleChanged && feedback}
+    </SettingsGroup>
+
+    <SettingsGroup className="model-role-group" title="역할별 모델">
+      <label className="model-thinking model-suggestions" htmlFor="suggestions-switch">
+        <span className="model-row-title">다음 메시지 제안
+          <small className="model-meta" id="suggestions-extra-request">제안마다 요청이 한 번 더 나갑니다.</small>
+        </span>
+        <Switch id="suggestions-switch" aria-label="다음 메시지 제안" aria-describedby="suggestions-extra-request" checked={settings?.nextMessageSuggestions !== false} disabled={pending !== '' || !settings}
+          onCheckedChange={checked => void run('suggestions', () => client.send({ type: 'settings.update', nextMessageSuggestions: checked }), checked ? '다음 메시지를 제안합니다.' : '다음 메시지를 제안하지 않습니다.')}/>
+      </label>
+      <table className="model-roles" aria-label="역할별 현재 모델">
+        <tbody>{roles.filter(role => role.field !== 'suggestionModel' || settings?.nextMessageSuggestions !== false).map(role =>
+          <tr key={role.field}>
+            <th scope="row"><span className="model-row-title">{role.label}</span>{role.hint && <small className="model-meta">{role.hint}</small>}</th>
+            <td>{modelField(role.field, role.label, role.empty)}</td>
+          </tr>)}</tbody>
+      </table>
+      {roleChanged && feedback}
+    </SettingsGroup>
+    {remove && <Modal title="제공자 삭제" focusClose onClose={() => { if (!pending) { setRemove(undefined); setError(''); } }}>
       <p className="m-0">{remove.name}의 서버 설정과 저장된 인증 정보를 삭제합니다.</p>
       {error && <div className="mt-3"><InlineError>{error}</InlineError></div>}
       <div className="mt-4 flex justify-end gap-2">
-        <Button variant="outline" type="button" disabled={pending !== ''} onClick={() => setRemove(undefined)}>취소</Button>
-        <Button variant="destructive" type="button" disabled={pending !== ''} onClick={() => void run('delete', async () => { await client.send({ type: 'provider.delete', providerId: remove.id }); setRemove(undefined); }, '제공자 설정을 삭제했습니다.')}>삭제</Button>
+        <Button variant="outline" type="button" disabled={pending !== ''} onClick={() => { setRemove(undefined); setError(''); }}>취소</Button>
+        <Button variant="destructive" type="button" disabled={pending !== ''} onClick={() => void run('delete', async () => {
+          await client.send({ type: 'provider.delete', providerId: remove.id }); setRemove(undefined); setEditor(undefined);
+        }, '제공자 설정을 삭제했습니다.')}>삭제</Button>
       </div>
     </Modal>}
   </section>;

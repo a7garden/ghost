@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
 import type { ProviderQuota, ProviderQuotaWindow } from '@ghost/contract';
-import { Badge, Button, InlineError, SettingsGroup, SettingsRow } from '../ui';
+import { InlineError } from '../ui';
 import { useHost } from '../host/context';
 import { absoluteTime, untilTime, useNow } from '../features/time';
 
@@ -12,21 +11,21 @@ const barTone = (percent: number) => percent >= 95 ? 'bg-destructive' : percent 
 
 function Window({ window, now }: { window: ProviderQuotaWindow; now: number }) {
   const percent = Math.round(window.usedPercent);
-  return <li className="flex min-w-0 items-center gap-3 text-caption">
-    <span className="w-16 flex-none truncate text-ink-2 sm:w-20" title={window.label}>{window.label}</span>
-    <span className="h-1.5 w-20 flex-none overflow-hidden rounded-pill bg-inset sm:w-28" role="meter" aria-label={`${window.label} 사용량`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
-      <span className={`block h-full rounded-pill ${barTone(window.usedPercent)}`} style={{ width: `${Math.max(percent, window.usedPercent > 0 ? 2 : 0)}%` }}/>
+  return <li className="model-quota__window">
+    <span>{window.label}</span>
+    <span className="model-quota__meter" role="meter" aria-label={`${window.label} 사용량`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
+      <span className={barTone(window.usedPercent)} style={{ width: `${Math.max(percent, window.usedPercent > 0 ? 2 : 0)}%` }}/>
     </span>
-    <span className="w-9 flex-none text-right font-mono tabular-nums text-ink">{percent}%</span>
-    <span className="w-20 flex-none truncate text-ink-3 sm:w-24" title={window.resetsAt === null ? undefined : absoluteTime(window.resetsAt)}>{window.resetsAt === null ? '' : `${untilTime(window.resetsAt, now)} 초기화`}</span>
+    <span className="model-quota__percent">{percent}%</span>
+    {window.resetsAt !== null && <time dateTime={new Date(window.resetsAt).toISOString()} title={absoluteTime(window.resetsAt)}>{untilTime(window.resetsAt, now)} 초기화</time>}
   </li>;
 }
 
-/** 구독 사용량. 제공자 계정에서 읽어 온 값이며, 읽을 수 있는 제공자만 나온다. */
-export function ProviderQuotaGroup() {
+/** Quota readings are joined to provider rows by the Host's provider id. */
+export function useProviderQuotas() {
   const { client } = useHost();
   const now = useNow();
-  const [quotas, setQuotas] = useState<ProviderQuota[] | null>(null);
+  const [quotas, setQuotas] = useState<ProviderQuota[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -43,15 +42,15 @@ export function ProviderQuotaGroup() {
     return () => clearInterval(timer);
   }, [load]);
 
-  if (!error && (quotas === null || quotas.length === 0)) return null;
-  return <>
-    <SettingsGroup title="사용량" actions={<Button variant="ghost" size="icon" type="button" aria-label="사용량 새로고침" disabled={loading} onClick={() => void load(true)}><RefreshCw size={15} className={loading ? 'animate-spin' : undefined}/></Button>}>
-      {(quotas ?? []).map(quota => <SettingsRow key={quota.id}
-        label={<span className="flex min-w-0 flex-wrap items-center gap-2 text-ui font-semibold text-ink [overflow-wrap:anywhere]">{quota.name}{quota.plan && <Badge variant="outline">{quota.plan}</Badge>}</span>}
-        description={quota.error ? <span className="text-warning">{quota.error}</span> : undefined}>
-        {quota.windows.length > 0 && <ul className="m-0 flex min-w-0 list-none flex-col gap-1.5 p-0">{quota.windows.map(window => <Window key={window.label} window={window} now={now}/>)}</ul>}
-      </SettingsRow>)}
-    </SettingsGroup>
-    {error && <InlineError pending={loading} onRetry={() => void load(true)} retryLabel="다시 불러오기">{error}</InlineError>}
-  </>;
+  return { quotas, error, loading, now, refresh: () => void load(true) };
+}
+
+export function ProviderUsage({ quota, now }: { quota: ProviderQuota; now: number }) {
+  return <div className="model-quota">
+    {quota.plan && <span className="model-meta">{quota.plan}</span>}
+    {quota.windows.length > 0 && <ul className="model-quota__windows" aria-label={`${quota.name} 사용량`}>
+      {quota.windows.map(window => <Window key={window.label} window={window} now={now}/>)}
+    </ul>}
+    {quota.error && <InlineError>{quota.error}</InlineError>}
+  </div>;
 }

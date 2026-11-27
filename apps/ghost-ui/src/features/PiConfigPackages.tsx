@@ -1,9 +1,11 @@
 import { useId, useState } from 'react';
+import { CircleAlert, Package } from 'lucide-react';
 import type { PiPackage, PiPackageFlags, PiPackageOverrides } from '@ghost/contract';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useHost } from '../host/context';
 import { Button, InlineError, Input, SettingsGroup } from '../ui';
 import { codingError } from './CodingSessionModel';
+import './SettingsLists.css';
 
 const flags: { key: keyof PiPackageFlags; label: string }[] = [
   { key: 'extensions', label: '확장' }, { key: 'skills', label: '스킬' }, { key: 'prompts', label: '프롬프트 템플릿' },
@@ -17,13 +19,21 @@ export function PiPackageRows({ items, disabled, session, change, remove }: {
   change?(item: PiPackage, key: keyof PiPackageFlags, value: boolean | undefined): void;
   remove?(item: PiPackage): void;
 }) {
-  return items.length ? <ul className="pi-packages">
-    {items.map(item => <li key={item.id} className="pi-package">
-      <div className="pi-package__title"><strong>{item.name}</strong>{item.version && <span className="pi-meta">{item.version}</span>}
-        {remove && <Button type="button" size="sm" variant="ghost" disabled={disabled} aria-label={`${item.name} 제거`} onClick={() => remove(item)}>제거</Button>}
+  const sorted = items.slice().sort((a, b) => Number(Boolean(b.error)) - Number(Boolean(a.error)));
+  return items.length ? <ul className="settings-list pi-packages" role="list">
+    {sorted.map(item => <li key={item.id} data-tone={item.error ? 'danger' : undefined}>
+      <div className="settings-list__row">
+        <span className="settings-list__mark">{item.error ? <CircleAlert size={16} aria-hidden="true"/> : <Package size={16} aria-hidden="true"/>}</span>
+        <div className="settings-list__copy">
+          <h3 className="settings-list__title">{item.name}</h3>
+          <p className="settings-list__meta"><span className="settings-list__state">{item.error ? `읽기 실패 · ${item.error}` : '설치됨'}</span>
+            {item.version && ` · ${item.version}`} · <code>{item.source}</code>
+          </p>
+        </div>
+        {remove && <div className="settings-list__actions"><Button type="button" size="sm" variant="ghost" disabled={disabled}
+          aria-label={`${item.name} 제거`} onClick={() => remove(item)}>제거</Button></div>}
       </div>
-      <code className="pi-package__source">{item.source}</code>
-      {item.error && <InlineError>{item.error}</InlineError>}
+      <div className="settings-list__branch">
       {[[item.tools, '도구'], [item.commands, '명령'], [item.skills, '스킬'], [item.prompts, '템플릿']].map(([names, label]) =>
         Array.isArray(names) && names.length > 0 && <div className="pi-package__names" key={String(label)}><span>{label}</span><code>{names.join(', ')}</code></div>)}
       <div className="pi-package__flags">
@@ -40,6 +50,7 @@ export function PiPackageRows({ items, disabled, session, change, remove }: {
             </select> : <span className="pi-meta">{labels[Number(stored ?? item.enabled[key])]}</span>}
           </label>;
         })}
+      </div>
       </div>
     </li>)}
   </ul> : <p className="pi-meta">설치된 Pi 패키지가 없습니다.</p>;
@@ -65,8 +76,12 @@ export function PiConfigPackages({ items, canManage, setItems }: {
     finally { setPending(false); }
   }
 
-  return <SettingsGroup title="Pi 패키지" className="pi-settings" actions={canManage && <Button type="button" size="sm" variant="outline" aria-expanded={installOpen} disabled={pending}
-    onClick={() => { setInstallOpen(!installOpen); setConfirm(false); setError(''); }}>{installOpen ? '설치 닫기' : '패키지 설치'}</Button>}>
+  const failed = items.filter(item => item.error).length;
+  return <SettingsGroup title="Pi 패키지" className="pi-settings" actions={canManage && <div className="settings-list__actions">
+    <Button type="button" size="sm" variant="outline" aria-expanded={installOpen} disabled={pending}
+      onClick={() => { setInstallOpen(!installOpen); setConfirm(false); setError(''); }}>{installOpen ? '설치 닫기' : '패키지 설치'}</Button>
+  </div>}>
+    {failed > 0 && <p className="pi-meta" role="status">{items.length}개 설치됨 · 확인 필요 {failed}</p>}
     {installOpen && <form className="pi-install" onSubmit={event => {
       event.preventDefault();
       if (!source.trim() || !confirm || pending) return;

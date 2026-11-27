@@ -15,10 +15,9 @@ export function chatPendingSummary(decisions: Decision[], later: Record<string, 
   due: string | null;
 } {
   const [first] = ownerOrder(decisions, later);
-  const rest = decisions.length - 1;
   return {
     count: `확인 필요 ${decisions.length}건`,
-    lead: `${decisionHeading(first, state)}${rest > 0 ? ` 외 ${rest}건` : ''}`,
+    lead: decisionHeading(first, state),
     due: deadlineText(first, now),
   };
 }
@@ -38,11 +37,8 @@ export function ChatDecisions({ state, navigate, decisions, onOpenWork }: {
   const later = useLater();
   const now = useNow();
   const deck = <DecisionDeck state={state} navigate={navigate} decisions={decisions} onOpenWork={onOpenWork} docked/>;
-  if (!compact) return deck;
-  // Nothing waits and nothing is unfolded: the dock is the composer alone.
-  if (!open && decisions.length === 0) return deck;
-  const summary = decisions.length > 0 ? chatPendingSummary(decisions, later, state, now) : null;
-  return <div className="chat-decisions" data-open={open || undefined}>
+  const summary = compact && decisions.length > 0 ? chatPendingSummary(decisions, later, state, now) : null;
+  return <div className="chat-decisions" data-compact={compact || undefined} data-open={compact && open || undefined}>
     {summary && <button type="button" className="chat-decisions__row" aria-expanded={open} aria-controls={bodyId}
       onClick={() => setDisclosure(open ? 'closed' : 'open')}>
       <CircleAlert size={16} aria-hidden="true"/>
@@ -51,6 +47,6 @@ export function ChatDecisions({ state, navigate, decisions, onOpenWork }: {
       {summary.due && <span className="chat-decisions__due">{summary.due}</span>}
       <span aria-hidden="true" className="fold-mark"/>
     </button>}
-    <div className="chat-decisions__body" id={bodyId} hidden={!open}>{disclosure !== 'unopened' && deck}</div>
+    <div className="chat-decisions__body" id={bodyId} hidden={compact && !open}>{(!compact || disclosure !== 'unopened') && deck}</div>
   </div>;
 }

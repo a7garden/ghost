@@ -70,7 +70,7 @@ test('model settings expose the next-message switch and model', async ({ page })
   }
 });
 
-test('the sidebar shows the lone main Ghost without empty groups or pin actions', async ({ page }, info) => {
+test('the roster shows the lone main Ghost without a pool or pin actions', async ({ page }, info) => {
   await openScreen(page, { name: 'single Ghost roster', route: () => info.project.name === 'iphone' ? '/workspace' : '/', waits: () => ['비행 기록'], prepare: async page => {
     await page.route('**/api/state', async route => {
       const response = await route.fetch();
@@ -78,12 +78,13 @@ test('the sidebar shows the lone main Ghost without empty groups or pin actions'
       await route.fulfill({ response, json: { ...state, ghosts: state.ghosts.filter(ghost => ghost.isDefault) } });
     });
   } }, 'light');
-  const roster = page.getByRole('navigation', { name: '작업실', exact: true }).filter({ visible: true });
-  const main = roster.locator('.presence-row__main').filter({ hasText: '도우미' });
+  const phone = info.project.name === 'iphone';
+  const roster = phone ? page.getByRole('region', { name: '대화', exact: true })
+    : page.getByRole('navigation', { name: '작업실', exact: true }).filter({ visible: true });
+  const main = roster.locator(phone ? 'button.roster-row' : '.presence-row__main').filter({ hasText: '도우미' });
   await expect(main).toBeVisible();
-  await expect(main).not.toContainText('메인');
-  await expect(roster.getByText('고정', { exact: true })).toHaveCount(0);
-  await expect(roster.getByRole('button', { name: /^Ghost 목록/ })).toHaveCount(0);
+  if (!phone) await expect(main.locator('.presence-row__main-mark')).toHaveCount(0);
+  await expect(roster.locator('.sidebar-pool-toggle')).toHaveCount(0);
   await page.screenshot({ path: info.outputPath('single-main-sidebar.png'), animations: 'disabled', caret: 'hide' });
   if (info.project.name === 'desktop') {
     await main.click({ button: 'right' });
@@ -126,7 +127,10 @@ for (const theme of ['light', 'dark'] as const) {
               { label: '5시간', usedPercent: 14, resetsAt: fixedNow + 3 * hour },
               { label: '주간', usedPercent: 60, resetsAt: fixedNow + 72 * hour },
             ] } satisfies ProviderQuota;
-            await page.route('**/api/providers/quota*', route => route.fulfill({ json: info.project.name === 'desktop' ? [quota] : [] }));
+            const providerQuota = { ...quota, id: 'visual_mock', name: 'Visual Mock', plan: null,
+              windows: [{ label: '월간', usedPercent: 92, resetsAt: fixedNow + 72 * hour }],
+            } satisfies ProviderQuota;
+            await page.route('**/api/providers/quota*', route => route.fulfill({ json: info.project.name === 'desktop' ? [quota, providerQuota] : [providerQuota] }));
           }
           if (tab === 'team') {
             const { defaultGhostId, fixedNow } = readRunState();
@@ -138,9 +142,13 @@ for (const theme of ['light', 'dark'] as const) {
           }
         } }, theme);
         await expect(page.locator('.ghost-settings__content-inner')).not.toBeEmpty();
-        if (tab === 'models' && info.project.name === 'desktop') {
-          await expect(page.getByRole('meter', { name: '5시간 사용량' })).toHaveAttribute('aria-valuenow', '14');
-          await expect(page.getByRole('meter', { name: '주간 사용량' })).toHaveAttribute('aria-valuenow', '60');
+        if (tab === 'models') {
+          const provider = page.getByRole('listitem').filter({ hasText: 'Visual Mock' });
+          await expect(provider.getByRole('meter', { name: '월간 사용량' })).toHaveAttribute('aria-valuenow', '92');
+          if (info.project.name === 'desktop') {
+            await expect(page.getByRole('meter', { name: '5시간 사용량' })).toHaveAttribute('aria-valuenow', '14');
+            await expect(page.getByRole('meter', { name: '주간 사용량' })).toHaveAttribute('aria-valuenow', '60');
+          }
         }
         if (tab === 'coding') await expect(page.getByRole('heading', { name: '내장 코딩 기본값' })).toBeVisible();
         await capture(page, `settings-${tab}`, theme, info.project.name);
@@ -166,6 +174,9 @@ for (const theme of ['light', 'dark'] as const) {
           expect(await toggle.evaluate(element => getComputedStyle(element, '::before').height)).toBe('22px');
         }
         if (tab === 'team') {
+          const roster = page.getByRole('list', { name: '설정할 Ghost' });
+          if (info.project.name === 'iphone') await roster.getByRole('button', { name: '도우미', exact: true }).tap();
+          else await expect(roster.getByRole('button', { name: '도우미', exact: true })).toHaveAttribute('aria-pressed', 'true');
           for (const name of ['페르소나', '도구', '운영']) {
             const panel = page.locator('.ghost-panel').filter({ has: page.getByText(name, { exact: true }) });
             await panel.first().scrollIntoViewIfNeeded();
@@ -192,6 +203,7 @@ for (const theme of ['light', 'dark'] as const) {
           await editor.getByRole('button', { name: '취소', exact: true }).click();
         }
         if (tab === 'connections') {
+          await page.getByRole('textbox', { name: '서비스 추가', exact: true }).fill('iCloud');
           await page.getByRole('button', { name: 'iCloud 연결', exact: true }).click();
           const setup = page.getByRole('region', { name: '이메일 연결', exact: true });
           await expect(setup).toBeVisible();
@@ -230,12 +242,22 @@ for (const theme of ['light', 'dark'] as const) {
     test('live reply tool trail and thread', async ({ page }, info) => {
       const state = await openScreen(page, { name: 'live', route: state => `/ghosts/${state.defaultGhostId}`, waits: () => [], prepare: mockConversationActivity }, theme);
       await expect(page.getByText('자료를 비교하고 있어요.', { exact: false })).toBeVisible();
+      const transcript = page.locator('.ghost-conversation__transcript');
+      const head = page.locator('.chat-head');
+      if (info.project.name === 'iphone') {
+        await expect(head).toHaveCount(0);
+        await expect(page.locator('.chat-title-tools .chat-tools')).toBeVisible();
+      } else {
+        await expect(head.getByRole('heading')).toBeVisible();
+        const headBounds = (await head.boundingBox())!;
+        expect(headBounds.y + headBounds.height).toBeLessThanOrEqual((await transcript.boundingBox())!.y);
+      }
       await capture(page, 'conversation-live', theme, info.project.name);
-      await page.locator('.trail:not([data-live]) > summary').click();
-      await expect(page.getByText('세 가지 자료를 읽고 중요한 차이를 정리했습니다.')).toBeVisible();
+      const trail = page.locator('.transcript-activity .trail').filter({ hasText: '세 가지 자료를 읽고 중요한 차이를 정리했습니다.' });
+      await trail.locator('summary').click();
+      await expect(trail.locator('pre').first()).toBeInViewport();
       await capture(page, 'tool-trail', theme, info.project.name);
       const jump = page.getByRole('button', { name: '최신 메시지', exact: true });
-      const transcript = page.locator('.ghost-conversation__transcript');
       await transcript.dispatchEvent('touchmove');
       await transcript.evaluate(element => { element.scrollTop = 0; });
       await expect(jump).toBeVisible();
