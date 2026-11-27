@@ -336,11 +336,13 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
         </div>}
         {handoff && <div className="decision__actions">
           <Button variant="ghost" disabled={busy} onClick={() => resolve('deny')}>{labels.deny}</Button>
-          <Button disabled={busy} onClick={() => resolve('answer', handoffDoneAnswer)}>{handoffDoneAnswer}</Button>
+          <Button disabled={busy} onClick={() => resolve('answer', handoffDoneAnswer)}>
+            {handoff.live ? busy ? '돌려주는 중…' : 'Ghost에게 돌려주기' : handoffDoneAnswer}
+          </Button>
         </div>}
         {options.length > 0 || handoff
           ? <>
-            {!customOpen && <p className="decision__answer-hint">답변을 직접 적으려면 「직접 답하기」를 펼쳐 주세요.</p>}
+            {!handoff?.live && !customOpen && <p className="decision__answer-hint">답변을 직접 적으려면 「직접 답하기」를 펼쳐 주세요.</p>}
             <details className="decision__custom" open={customOpen} onToggle={event => setCustomOpen(event.currentTarget.open)}><summary>직접 답하기</summary>
               <AnswerField answer={answer} onChange={setAnswer} busy={busy} onSend={() => resolve('answer', answer)}/>
             </details>

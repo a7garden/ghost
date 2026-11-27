@@ -12,10 +12,11 @@ import { OutgoingMessage } from '../components/OutgoingMessage';
 import { quoteForReply } from '../components/MessageMenu';
 import { ChatComposer } from './ChatComposer';
 import { lastReply, useNextSuggestions } from './nextSuggestions';
-import { chatDecisions } from './Decision';
+import { chatDecisions, DecisionCard } from './Decision';
 import { ChatDecisions } from './ChatDecisions';
 import { BrowserLiveView } from './BrowserLiveView';
 import { BrowserPaneContext } from './BrowserPaneContext';
+import { browserHandoffProposal } from './decisionText';
 import { GhostDesignEditor } from './GhostDesign';
 import { ThreadPanel } from './ThreadPanel';
 import { GhostAgenda } from './GhostAgenda';
@@ -117,7 +118,6 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
     setRecoveredMessage(previous => recoverMessage(previous, command, requestId));
     inputRef.current?.focus();
   };
-  useEffect(() => { if (!touch) inputRef.current?.focus(); }, [conversationId, touch]);
 
   const run = async (fn: () => Promise<unknown>) => { setError(''); try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다.'); } };
   const stop = () => { if (conversationId) void run(() => client.send({ type: 'message.cancel', conversationId })); };
@@ -137,17 +137,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   const browserCapable = ghost.tools.some(tool => tool.startsWith('browser_'));
   const browserSession = useBrowserSession(conversationId, browserCapable);
   const [browserOpen, setBrowserOpen] = useState(false);
-  // A handoff waiting on the owner opens the live view by itself, once per question.
-  const handoffSeen = useRef<string | null>(null);
-  useEffect(() => {
-    setBrowserOpen(false);
-    handoffSeen.current = null;
-  }, [conversationId]);
-  useEffect(() => {
-    const handoffId = browserSession?.handoffDecisionId ?? null;
-    if (handoffId && handoffSeen.current !== handoffId) { handoffSeen.current = handoffId; setBrowserOpen(true); }
-    if (!handoffId) handoffSeen.current = null;
-  }, [browserSession?.handoffDecisionId]);
+  const [dismissedHandoffId, setDismissedHandoffId] = useState<string | null>(null);
+  useEffect(() => { setBrowserOpen(false); }, [conversationId]);
   const currentConversation = conversations.find(conversation => conversation.id === conversationId);
   const busy = Boolean(currentConversation?.busy);
   const running = busy || Boolean(live?.running);
@@ -160,6 +151,23 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   const pending = chatDecisions(state, ghost.id, conversationId)
     .filter(decision => projectId === undefined || decision.workId === null || decisionScopeId(decision, state) === projectId);
   const decisions = threadId ? pending.filter(decision => decision.workId !== threadId) : pending;
+  // The request and its browser belong in the same pane, including when that pane covers the chat.
+  const liveHandoff = !threadId && decisions.find(decision =>
+    decision.conversationId === conversationId && browserHandoffProposal(decision)?.live);
+  const activeHandoff = liveHandoff && liveHandoff.id !== dismissedHandoffId ? liveHandoff : null;
+  const paneOpen = Boolean(activeHandoff || browserOpen);
+  const handoffOpen = Boolean(activeHandoff);
+  useEffect(() => {
+    if (!touch && !handoffOpen) inputRef.current?.focus();
+  }, [conversationId, touch, handoffOpen]);
+  const closeBrowser = () => {
+    setBrowserOpen(false);
+    if (activeHandoff) setDismissedHandoffId(activeHandoff.id);
+  };
+  const openBrowser = () => {
+    if (liveHandoff) setDismissedHandoffId(null);
+    else setBrowserOpen(true);
+  };
   const currentTool = live?.tools.at(-1)?.name;
   const nowDoing = currentTool ? toolLabels[currentTool as GhostTool] ?? currentTool
     : live?.thinking && !live.partial ? '생각 중' : '응답 중';
@@ -201,9 +209,9 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
       onOpenWork={openThread} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
       onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
     <GhostAgenda ghost={ghost} state={state} navigate={navigate} projectId={projectId}/>
-    {conversationId && browserCapable && (browserSession || browserOpen) &&
-      <button type="button" className="chat-tool chat-browser" aria-pressed={browserOpen} data-live={browserSession ? '' : undefined}
-        aria-label="브라우저 화면" title="브라우저 화면" onClick={() => setBrowserOpen(value => !value)}>
+    {conversationId && ((browserCapable && browserSession) || liveHandoff || paneOpen) &&
+      <button type="button" className="chat-tool chat-browser" aria-pressed={paneOpen} data-live={browserSession || liveHandoff ? '' : undefined}
+        aria-label="브라우저 화면" title="브라우저 화면" onClick={paneOpen ? closeBrowser : openBrowser}>
         <Monitor aria-hidden="true"/>
       </button>}
   </div>;
@@ -224,8 +232,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         {tools}
       </div> : null}
       composer={<>
-        <BrowserPaneContext.Provider value={conversationId ? { conversationId, open: () => setBrowserOpen(true) } : null}>
-          <ChatDecisions state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread}/>
+        <BrowserPaneContext.Provider value={liveHandoff ? { conversationId: liveHandoff.conversationId, open: openBrowser } : null}>
+          <ChatDecisions state={state} navigate={navigate} decisions={activeHandoff ? decisions.filter(decision => decision.id !== activeHandoff.id) : decisions} onOpenWork={openThread}/>
         </BrowserPaneContext.Provider>
         <ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft}
           recoveredMessage={recoveredMessage} setRecoveredMessage={setRecoveredMessage} inputRef={inputRef} initialScopeIds={initialScopeIds}
@@ -252,17 +260,21 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
           await client.send({ type: 'message.send', conversationId: message.conversationId, text }, requestId);
         } : undefined}/>
     </Conversation>
-    {browserOpen && conversationId && <aside className="browser-pane" aria-label="브라우저 화면">
+    {paneOpen && conversationId && <aside className="browser-pane" aria-label="브라우저 화면">
       <header className="browser-pane__head">
         <Monitor size={16} aria-hidden="true"/>
-        <h2>브라우저</h2>
-        {browserSession && <span className="browser-pane__engine">{browserSession.engine === 'obscura' ? 'Obscura' : 'Chrome'}</span>}
-        <button type="button" className="shell-icon-button" aria-label="브라우저 화면 닫기" title="닫기" onClick={() => setBrowserOpen(false)}><X aria-hidden="true"/></button>
+        <h2>{activeHandoff ? '브라우저 직접 조작' : '브라우저'}</h2>
+        {!activeHandoff && browserSession && <span className="browser-pane__engine">{browserSession.engine === 'obscura' ? 'Obscura' : 'Chrome'}</span>}
+        <button type="button" className="shell-icon-button" aria-label="브라우저 화면 닫기" title="닫기" onClick={closeBrowser}><X aria-hidden="true"/></button>
       </header>
-      <div className="browser-pane__body">
-        {browserSession
-          ? <BrowserLiveView key={conversationId} conversationId={conversationId}/>
-          : <p className="browser-pane__empty">브라우저 세션 없음</p>}
+      <div className="browser-pane__body" data-handoff={activeHandoff ? '' : undefined}>
+        {activeHandoff
+          ? <DecisionCard key={activeHandoff.id} decision={activeHandoff} ghostName={names.get(activeHandoff.ghostId) ?? ghost.name}
+              workTitle={state.works.find(item => item.id === activeHandoff.workId)?.title}
+              onOpenWork={openThread} onResolved={closeBrowser} autoFocus/>
+          : browserSession
+            ? <BrowserLiveView key={conversationId} conversationId={conversationId}/>
+            : <p className="browser-pane__empty">브라우저 세션 없음</p>}
       </div>
     </aside>}
     {panelId && <ThreadPanel key={panelId} workId={panelId} state={state} closing={panelClosing} onClosed={() => setPanelId(null)}

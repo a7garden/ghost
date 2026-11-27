@@ -27,8 +27,8 @@
 
 @media (max-width: 34rem) {
   .handoff__login { flex-wrap: wrap; row-gap: 8px; padding: 10px 10px 10px 12px; }
-  .handoff__fields { flex-basis: 100%; }
-  .handoff__chip { flex: 1; }
+  .handoff__login:not([data-source]) .handoff__fields { flex-basis: 100%; }
+  .handoff__login:not([data-source]) .handoff__chip { flex: 1; }
 }
-@media (hover: none), (pointer: coarse) { .handoff__chip { height: 36px; } }
+@media (hover: none), (pointer: coarse) { .handoff__chip { height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .handoff__saved { animation: none; } .handoff__chip { transition: none; } }

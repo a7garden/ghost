@@ -35,12 +35,11 @@ export function shadeHint(shelf: BrowserLoginShelf): string | null {
  * focused page field, Shade logins to bring along, and a line when the Host has saved the login the owner completed.
  * The shelf is metadata; typing a value goes Host → page and never through this component.
  */
-function useLoginShelf(conversationId: string, enabled: boolean) {
+function useLoginShelf(conversationId: string) {
   const { client } = useHost();
   const [shelf, setShelf] = useState<BrowserLoginShelf | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   useEffect(() => {
-    if (!enabled) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
@@ -52,16 +51,33 @@ function useLoginShelf(conversationId: string, enabled: boolean) {
     };
     void tick();
     return () => { disposed = true; clearTimeout(timer); };
-  }, [client, conversationId, enabled, refreshTick]);
+  }, [client, conversationId, refreshTick]);
   const refresh = useCallback(() => setRefreshTick(value => value + 1), []);
   return { shelf, refresh };
 }
 
 export function HandoffPanel({ decision, handoff, busy }: { decision: Decision; handoff: BrowserHandoff; busy: boolean }) {
-  const { client } = useHost();
   const browserPane = useContext(BrowserPaneContext);
-  const pending = decision.state === 'pending';
-  const { shelf, refresh } = useLoginShelf(decision.conversationId, pending);
+  const host = handoffHost(handoff.url ?? '');
+  return <div className="handoff">
+    {!handoff.live && <p className="handoff__site">
+      <Monitor size={14} aria-hidden="true"/>
+      <span className="handoff__host">{host || 'Mac의 Chrome 창'}</span>
+      <span className="handoff__where">Mac의 Chrome 창에서 마무리해 주세요</span>
+    </p>}
+    {handoff.reason.trim() && handoff.reason.trim() !== decision.detail.trim() && <p className="decision__request-reason">{handoff.reason}</p>}
+    {decision.state === 'pending' && handoff.live && (browserPane?.conversationId === decision.conversationId
+      ? <Button type="button" variant="outline" className="justify-self-start rounded-pill" disabled={busy} onClick={browserPane.open}>브라우저 화면 열기</Button>
+      : <>
+        <BrowserLiveView conversationId={decision.conversationId} compact/>
+        <HandoffLoginShelf conversationId={decision.conversationId} busy={busy}/>
+      </>)}
+  </div>;
+}
+
+function HandoffLoginShelf({ conversationId, busy }: { conversationId: string; busy: boolean }) {
+  const { client } = useHost();
+  const { shelf, refresh } = useLoginShelf(conversationId);
   const [filled, setFilled] = useState<Record<string, true>>({});
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -72,7 +88,7 @@ export function HandoffPanel({ decision, handoff, busy }: { decision: Decision; 
     const key = `${item.id}:${field}`;
     setWorking(key); setError('');
     try {
-      await client.browserFill(decision.conversationId, { itemId: item.id, field });
+      await client.browserFill(conversationId, { itemId: item.id, field });
       setFilled(prev => ({ ...prev, [key]: true }));
       timers.current.push(setTimeout(() => setFilled(prev => { const { [key]: _done, ...rest } = prev; return rest; }), FILLED_MS));
     } catch (reason) { setError(reason instanceof Error ? reason.message : '입력하지 못했어요.'); }
@@ -80,25 +96,17 @@ export function HandoffPanel({ decision, handoff, busy }: { decision: Decision; 
   };
   const bringIn = async (item: ShadeLogin) => {
     setWorking(`shade:${item.id}`); setError('');
-    try { await client.importShadeLogin(decision.conversationId, item.id); refresh(); }
+    try { await client.importShadeLogin(conversationId, item.id); refresh(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Shade에서 가져오지 못했어요.'); }
     finally { setWorking(null); }
   };
 
-  const host = handoffHost(shelf?.origin ?? handoff.url ?? '');
-  const hint = shelf ? shadeHint(shelf) : null;
-  const logins = pending && handoff.live && shelf ? shelf : null;
-  return <div className="handoff">
-    {/* The live view's own bar names the page; only the Mac window needs the site said. */}
-    {!handoff.live && <p className="handoff__site">
-      <Monitor size={14} aria-hidden="true"/>
-      <span className="handoff__host">{host || 'Mac의 Chrome 창'}</span>
-      <span className="handoff__where">Mac의 Chrome 창에서 마무리해 주세요</span>
-    </p>}
-    {handoff.reason.trim() && handoff.reason.trim() !== decision.detail.trim() && <p className="decision__request-reason">{handoff.reason}</p>}
-
-    {logins && (logins.items.length > 0 || logins.shade.items.length > 0) && <ul className="handoff__logins" aria-label="이 사이트의 저장된 로그인">
-      {logins.items.map(item => <li key={item.id} className="handoff__login">
+  if (!shelf) return null;
+  const hint = shadeHint(shelf);
+  return <>
+    {shelf.items.length > 0 && <p className="handoff__hint">브라우저에서 입력할 칸을 누른 뒤, 아래에서 채울 값을 고르세요.</p>}
+    {(shelf.items.length > 0 || shelf.shade.items.length > 0) && <ul className="handoff__logins" aria-label="이 사이트의 저장된 로그인">
+      {shelf.items.map(item => <li key={item.id} className="handoff__login">
         <KeyRound size={14} aria-hidden="true"/>
         <span className="handoff__who">{item.username || item.title}</span>
         <span className="handoff__fields" role="group" aria-label={`${item.username || item.title} 입력`}>
@@ -110,7 +118,7 @@ export function HandoffPanel({ decision, handoff, busy }: { decision: Decision; 
           })}
         </span>
       </li>)}
-      {logins.shade.items.map(item => <li key={item.id} className="handoff__login" data-source="shade">
+      {shelf.shade.items.map(item => <li key={`shade:${item.id}`} className="handoff__login" data-source="shade">
         <KeyRound size={14} aria-hidden="true"/>
         <span className="handoff__who">{item.username || item.title}<span className="handoff__source">Shade</span></span>
         <span className="handoff__fields">
@@ -119,12 +127,8 @@ export function HandoffPanel({ decision, handoff, busy }: { decision: Decision; 
         </span>
       </li>)}
     </ul>}
-    {pending && handoff.live && hint && <p className="handoff__hint"><Lock size={13} aria-hidden="true"/>{hint}</p>}
+    {hint && <p className="handoff__hint"><Lock size={13} aria-hidden="true"/>{hint}</p>}
     {error && <InlineError>{error}</InlineError>}
-    {pending && shelf?.saved && <p className="handoff__saved" role="status"><CircleCheck size={15} aria-hidden="true"/>{savedLine(shelf.saved)}</p>}
-
-    {pending && handoff.live && (browserPane?.conversationId === decision.conversationId
-      ? <Button type="button" variant="outline" className="h-[34px] justify-self-start rounded-pill px-4" disabled={busy} onClick={browserPane.open}>브라우저 화면 열기</Button>
-      : <BrowserLiveView conversationId={decision.conversationId} compact/>)}
-  </div>;
+    {shelf.saved && <p className="handoff__saved" role="status"><CircleCheck size={15} aria-hidden="true"/>{savedLine(shelf.saved)}</p>}
+  </>;
 }

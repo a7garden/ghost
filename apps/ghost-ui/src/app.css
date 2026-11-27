@@ -295,6 +295,9 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 .browser-pane__engine { flex: none; color: var(--ghost-ink3); font: 500 11px/1 var(--font-mono); }
 .browser-pane__body { display: flex; flex: 1; min-height: 0; padding: 12px 16px 16px; }
 .browser-pane__body > .browser-live { flex: 1; }
+.browser-pane__body[data-handoff] { display: block; overflow-y: auto; overscroll-behavior: contain; }
+.browser-pane__body[data-handoff] > .decision { padding: 0; border: 0; background: none; }
+.browser-pane__body[data-handoff] > .decision:focus-visible { outline-offset: 4px; }
 .browser-pane__empty { margin: auto; color: var(--ghost-ink3); font-size: var(--text-ui); }
 .chat-browser[data-live] { color: var(--ghost-signal-ink); }
 @media (max-width: 64rem) {

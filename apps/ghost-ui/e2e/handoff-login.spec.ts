@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import type { BrowserLoginShelf } from '@ghost/contract';
+import type { BrowserLoginShelf, CommandBody, State } from '@ghost/contract';
 import { readRunState } from './run-state';
 import { mockShadeApi, mockStateDecisions, mockVaultApi, visualDecisions, visualHandoffDecisionId } from './mocks';
 import { mockBrowserLiveStream, releaseBrowserFrame } from './iphone-fixtures';
@@ -85,6 +85,63 @@ test('a failed fill shows the Host message', async ({ page }) => {
   await page.route(`**/api/browser/sessions/${conversationId()}/fill`, route => route.fulfill({ status: 403, json: { ok: false, error: { code: 'forbidden', message: '이 사이트의 로그인이 아니에요.' } } }));
   await page.getByRole('button', { name: 'owner@example.com 비밀번호 입력' }).click();
   await expect(page.getByRole('alert')).toHaveText('이 사이트의 로그인이 아니에요.');
+});
+
+test.describe('phone conversation', () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 });
+
+  test('takes over, fills a saved login and returns control without leaving the browser pane', async ({ page }, testInfo) => {
+    const { baseUrl, defaultGhostId, conversationA } = readRunState();
+    const handoff = visualDecisions().find(decision => decision.id === visualHandoffDecisionId)!;
+    const commands: CommandBody['command'][] = [];
+    await page.route('**/api/state', async route => {
+      const response = await route.fetch();
+      const state = await response.json() as State;
+      await route.fulfill({ response, json: { ...state, decisions: [...state.decisions, {
+        ...handoff, ghostId: defaultGhostId, conversationId: conversationA, title: '구독 서비스 로그인',
+        detail: '사이트에서 로그인해 주세요.',
+        proposal: { browserHandoff: { ...handoff.proposal?.browserHandoff, live: true, reason: '사이트에서 로그인해 주세요.' } },
+      }] } });
+    });
+    await page.route('**/api/commands', async route => {
+      commands.push((route.request().postDataJSON() as CommandBody).command);
+      await route.fulfill({ json: { ok: true } });
+    });
+    await mockBrowserLiveStream(page, conversationA, { url: 'https://subscribe.example.com/join', title: 'Join' });
+    const endpoint = `**/api/browser/sessions/${conversationA}`;
+    await page.route(`${endpoint}/login`, route => route.fulfill({ json: shelf() }));
+    await page.route(`${endpoint}/input`, route => route.fulfill({ json: { ok: true } }));
+    await page.route(`${endpoint}/fill`, route => route.fulfill({ json: { ok: true } }));
+
+    await page.goto(`${baseUrl}/#/ghosts/${defaultGhostId}`);
+    const pane = page.getByRole('complementary', { name: '브라우저 화면' });
+    const canvas = pane.getByRole('img', { name: /클릭해 조작/ });
+    const fill = pane.getByRole('button', { name: 'owner@example.com 비밀번호 입력' });
+    const done = pane.getByRole('button', { name: 'Ghost에게 돌려주기' });
+    await expect(fill).toBeVisible();
+    await expect(done).toBeInViewport({ ratio: 1 });
+    await pane.getByRole('button', { name: '브라우저 화면 닫기' }).tap();
+    await expect(pane).toHaveCount(0);
+    expect(commands).toEqual([]);
+
+    await page.getByRole('button', { name: '브라우저 화면', exact: true }).tap();
+    const frame = await canvas.evaluate(element => ({ width: Math.max(320, element.clientWidth), height: Math.max(240, element.clientHeight) }));
+    await releaseBrowserFrame(page, frame);
+    await expect(pane.getByRole('button', { name: '새로고침' })).toBeEnabled();
+    await expect(page.getByRole('img', { name: /클릭해 조작/ })).toHaveCount(1);
+    await pane.screenshot({ path: testInfo.outputPath('phone-handoff.png') });
+
+    const focused = page.waitForRequest(request => request.url().endsWith('/input') && request.postDataJSON()?.event === 'up');
+    await canvas.tap();
+    await focused;
+    const filling = page.waitForRequest(request => request.url().endsWith('/fill'));
+    await fill.tap();
+    expect((await filling).postDataJSON()).toEqual({ itemId: 'v-login', field: 'password' });
+    await expect(fill).toHaveText('입력함');
+    await done.tap();
+    await expect(pane).toHaveCount(0);
+    expect(commands).toEqual([{ type: 'decision.resolve', decisionId: handoff.id, outcome: 'answer', answer: '다 했어요' }]);
+  });
 });
 
 test('the vault shows Shade and lets the owner stop mirroring new logins', async ({ page }) => {
