@@ -3,6 +3,9 @@
   .ghost-settings--frame .ghost-settings__content { padding-inline: clamp(16px, 2.6vw, 36px); }
   .ghost-settings--frame .ghost-settings__page-title { margin: 0 0 16px; font-weight: 600; }
   .ghost-settings--frame .ghost-settings__navigation { padding: 24px 8px 20px; }
+  .ghost-settings--frame .ghost-settings__search { min-width: 0; width: 100%; min-height: 32px; margin: 0 0 12px; padding: 0 8px; border: 1px solid var(--ghost-line); border-radius: var(--radius-control); background: var(--ghost-inset); color: var(--ghost-ink); font-size: 13px; }
+  .ghost-settings--frame .ghost-settings__search::placeholder { color: var(--ghost-ink3); }
+  .ghost-settings--frame .ghost-settings__search-empty { margin: 12px 8px 0; color: var(--ghost-ink3); font-size: 13px; }
   .ghost-settings--frame .ghost-settings__section-list { gap: 0; }
   .ghost-settings--frame .ghost-settings__group-label { margin: 14px 8px 4px; }
   .ghost-settings--frame .ghost-settings__section-list > .ghost-settings__group-label:first-child { margin-top: 0; }
@@ -21,7 +24,9 @@
   .ghost-settings--frame .ghost-settings__section:has([data-tone="danger"]) { --settings-nav-rule: var(--ghost-danger); }
   .ghost-settings--frame .ghost-settings__section:has([data-tone="signal"]) { --settings-nav-rule: var(--ghost-signal); }
   .ghost-settings--frame .ghost-settings__section[aria-selected="true"] { border-inline-start-color: var(--settings-nav-rule); }
-  .ghost-settings__section-label { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ghost-settings__section-copy { display: grid; flex: 1; gap: 1px; min-width: 0; }
+  .ghost-settings__section-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ghost-settings__section-value { overflow: hidden; color: var(--ghost-ink3); font-size: 12px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
   .ghost-settings__section-status { flex: none; }
   .settings-status { display: inline-flex; align-items: center; gap: 2px; }
   .settings-status__count { color: var(--ghost-ink3); font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -40,6 +45,7 @@
     }
     .ghost-settings--frame .ghost-settings__section + .ghost-settings__section { border-block-start: 0; }
     .ghost-settings--frame .ghost-settings__section[aria-selected="true"] { border-block-end-color: var(--settings-nav-rule); }
+    .ghost-settings--frame .ghost-settings__section-value { display: none; }
   }
   @media (max-width: 55.999rem) {
     :root:not([data-desktop-shell]) .ghost-settings--frame[data-compact-detail] .ghost-settings__content { padding-inline: 0; }
@@ -56,32 +62,24 @@
     :root:not([data-desktop-shell]) .shell:has(.ghost-settings--frame) .title-nav__crumb:first-child:not(:last-child) { display: flex; }
   }
 
+  /* Phone settings index. Row metrics and separators come from mobile.css; these carry the
+     aligned columns and the copy each row reads. */
   .compact-settings-list .settings-index__rows { min-width: 0; }
-  .compact-settings-list .settings-index__rows:has(> :nth-child(2)) {
-    border: 1px solid var(--ghost-line);
-    border-radius: var(--radius-control);
-    background: var(--ghost-surface);
-  }
-  :root:not([data-desktop-shell]) .compact-settings-list .settings-index-row {
-    display: grid;
-    grid-template-columns: 20px minmax(0, 1fr) auto auto;
-    min-height: 46px;
-    padding: 6px 10px;
-    gap: 10px;
-    border-block-end: 0;
-  }
-  .compact-settings-list .settings-index-row + .settings-index-row { border-block-start: 1px solid var(--ghost-line); }
-  .settings-index__rows > .settings-index-row:first-child { border-start-start-radius: var(--radius-control); border-start-end-radius: var(--radius-control); }
-  .settings-index__rows > .settings-index-row:last-child { border-end-start-radius: var(--radius-control); border-end-end-radius: var(--radius-control); }
-  :root:not([data-desktop-shell]) .compact-settings-list .settings-index-row:is(:hover, :focus-visible) { background: var(--ghost-hover); }
+  .compact-settings-list .settings-index-row { grid-template-columns: 20px minmax(0, 1fr) auto; }
   .settings-index-row:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
   .settings-index-row__icon { display: grid; place-items: center; }
   .compact-settings-list .settings-index-row__icon .state-glyph > svg { color: inherit; }
   .settings-index-row__copy { display: grid; gap: 1px; min-width: 0; }
-  .settings-index-row__title { font-size: 15px; font-weight: 560; line-height: 1.35; }
+  .settings-index-row__title { overflow: hidden; font-size: 15px; font-weight: 560; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; }
   .settings-index-row__value { overflow: hidden; color: var(--ghost-ink3); font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
-  .settings-index-row__arrow { grid-column: 4; color: var(--ghost-ink3); }
+  .settings-index-row__arrow { color: var(--ghost-ink3); }
   :root:not([data-desktop-shell]) .compact-settings-list .settings-index-fold > summary { display: flex; min-height: 44px; align-items: center; gap: 8px; }
   .settings-index-fold > summary::before { content: '+' / ''; }
   .settings-index-fold[open] > summary::before { content: '−' / ''; }
+}
+
+/* mobile.css draws the phone row as an unlayered flex list; the aligned grid needs the same
+   unlayered weight to win it back. */
+@media (max-width: 55.999rem) {
+  :root:not([data-desktop-shell]) .compact-settings-list button.settings-index-row { display: grid; }
 }

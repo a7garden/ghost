@@ -94,16 +94,18 @@ export function Conversations({ state, navigate, openGhost }: { state: State; na
         const row = `roster-ghost-${ghost.id}`;
         const count = liveByGhost.get(ghost.id) ?? 0;
         const open = () => { remember(row); openGhost(ghost.id); };
+        const subject = presence.state === 'attention' ? presence.line : null;
+        const identity = <span className="roster-row__name"><span className="truncate">{ghost.name}</span>
+          {ghost.isDefault && roster.length > 1 && <span className="presence-row__main-mark">메인</span>}
+        </span>;
         return <li key={ghost.id}>
           <RosterGhostMenu ghost={ghost} pinned={pinOrder.has(ghost.id)} togglePinned={togglePinned} onOpen={open}
             navigate={path => { remember(row); navigate(path); }}>
             <button id={row} type="button" className="roster-row" data-tone={presence.state} onClick={open}>
               <PresenceAvatar ghostId={ghost.id} state={presence.state} size={32}/>
               <span className="roster-row__copy">
-                <span className="roster-row__name"><span className="truncate">{ghost.name}</span>
-                  {ghost.isDefault && <span className="presence-row__main-mark">메인</span>}
-                </span>
-                {line && <span className="roster-row__meta">{line}</span>}
+                {subject ? <><span className="roster-row__subject">{subject}</span>{identity}</>
+                  : <>{identity}{line && <span className="roster-row__meta">{line}</span>}</>}
               </span>
               {count > 0 ? <span className="roster-row__value"><span className="sr-only">맡긴 일 진행 중 </span>{count}건</span>
                 : at !== undefined && <time className="roster-row__value" dateTime={new Date(at).toISOString()} title={absoluteTime(at)}>{relativeTime(at, now)}</time>}
@@ -133,7 +135,7 @@ export function Conversations({ state, navigate, openGhost }: { state: State; na
               <span className="roster-row__name"><span className="truncate">{scope.name}</span></span>
               <span className="roster-row__meta">{receiver}{scope.state === 'paused' ? ' · 일시 중지' : ''}</span>
             </span>
-            <span className="roster-row__value"><span className="sr-only">맡긴 일 진행 중 </span>{liveByScope.get(scope.id) ?? 0}건</span>
+            {liveByScope.has(scope.id) && <span className="roster-row__value"><span className="sr-only">맡긴 일 진행 중 </span>{liveByScope.get(scope.id)}건</span>}
           </a></li>;
         })}
       </ul>}

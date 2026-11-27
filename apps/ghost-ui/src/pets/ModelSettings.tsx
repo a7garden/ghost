@@ -8,7 +8,7 @@ import { Modal } from '../components/Modal';
 import { StateGlyph } from '../components/agent/StateGlyph';
 import { ChatGptLogin } from './ChatGptLogin';
 import { LocalAuthImport } from './LocalAuthImport';
-import { NO_MODEL, modelDisplayName, modelFromKey, modelSelectOptions, modelShortName } from './ModelPicker';
+import { NO_MODEL, modelDisplayName, modelFromKey, modelSelectOptions } from './ModelPicker';
 import { ProviderEditor, type ProviderSave } from './ProviderEditor';
 import { ProviderUsage, useProviderQuotas } from './ProviderQuota';
 import { FallbackSteps, editFallbacks, type FallbackAction } from '../features/fallbacks';
@@ -134,6 +134,27 @@ export function ModelSettings() {
   const feedback = !remove && (error ? <InlineError>{error}</InlineError>
     : notice && <p className="m-0 flex items-start gap-1.5 text-caption text-success" role="status"><Check size={14} className="mt-0.5 flex-none"/>{notice}</p>);
   const roleChanged = lastChange === 'suggestions' || roles.some(role => role.field === lastChange);
+  const modelRoute = (
+    <SettingsGroup className="model-route-group" title="모델 경로">
+      <div className="model-route" aria-busy={pending === 'fallbacks' || pending === 'defaultModel'}>
+        <ol className="model-route__steps" aria-label="기본 대체 모델 순서">
+          <li className="model-route__step" data-primary>
+            <span className="model-route__node" aria-hidden="true"><span/></span>
+            <span className="model-row-title">기본 모델</span>
+            {modelField('defaultModel', '기본 모델', '선택 안 함')}
+          </li>
+          <FallbackSteps fallbacks={fallbacks} primary={primary} pending={pending !== '' || !settings} onAction={fallbackCommand}/>
+        </ol>
+        <p className="model-meta model-route-caption">연결 오류나 사용 한도에 걸리면 대체 모델을 순서대로 씁니다. Ghost별 경로가 있으면 그 경로를 우선합니다.</p>
+      </div>
+      {primary && <div className="model-thinking">
+        <span className="model-row-title" title="답하기 전에 추론하는 정도">생각 수준</span>
+        <SegmentedControl aria-label="생각 수준" value={primary.thinking ?? 'off'} onValueChange={thinkingCommand}
+          options={(['off', 'low', 'medium', 'high'] as const).map(value => ({ value, label: { off: '끔', low: '낮음', medium: '중간', high: '높음' }[value], disabled: pending !== '' }))}/>
+      </div>}
+      {lastChange !== 'delete' && !roleChanged && feedback}
+    </SettingsGroup>
+  );
   return <section className="settings-ledger model-settings" aria-label="모델 설정">
     <div className="settings-verdict" data-tone={ready === false ? 'warning' : undefined} role="status">
       <span aria-hidden="true"><StateGlyph state={ready ? 'done' : ready === false ? 'attention' : 'queued'} size={20}/></span>
@@ -141,12 +162,12 @@ export function ModelSettings() {
         <strong>{state
           ? ready ? 'Ghost가 실행할 수 있습니다' : 'Ghost가 실행할 수 없습니다'
           : '실행 상태를 확인하지 못했습니다'}</strong>
-        {ready && primary && <span className="model-verdict__model"> · 기본 모델 {modelShortName(settings, primary)}</span>}
         {state && ready === false && <small>{state.runtime.detail}</small>}
         {state && connection !== 'live' && <small>마지막으로 받은 설정 기준</small>}
       </div>
     </div>
 
+    {options.length > 0 && modelRoute}
     <SettingsGroup className="model-providers" title="제공자" actions={<>
       {quotas.length > 0 && <Button variant="ghost" size="icon" type="button" aria-label="사용량 새로고침" title="사용량 새로고침"
         disabled={quotaLoading} onClick={refreshQuota}><RefreshCw size={15} aria-hidden="true"/></Button>}
@@ -206,26 +227,7 @@ export function ModelSettings() {
       {quotaError && <InlineError pending={quotaLoading} onRetry={refreshQuota} retryLabel="다시 불러오기">{quotaError}</InlineError>}
       {lastChange === 'delete' && feedback}
     </SettingsGroup>
-
-    <SettingsGroup className="model-route-group" title="모델 경로">
-      <div className="model-route" aria-busy={pending === 'fallbacks' || pending === 'defaultModel'}>
-        <ol className="model-route__steps" aria-label="기본 대체 모델 순서">
-          <li className="model-route__step" data-primary>
-            <span className="model-route__node" aria-hidden="true"><span/></span>
-            <span className="model-row-title">기본 모델</span>
-            {modelField('defaultModel', '기본 모델', '선택 안 함')}
-          </li>
-          <FallbackSteps fallbacks={fallbacks} primary={primary} pending={pending !== '' || !settings} onAction={fallbackCommand}/>
-        </ol>
-        <p className="model-meta model-route-caption">연결 오류나 사용 한도에 걸리면 대체 모델을 순서대로 씁니다. Ghost별 경로가 있으면 그 경로를 우선합니다.</p>
-      </div>
-      {primary && <div className="model-thinking">
-        <span className="model-row-title" title="답하기 전에 추론하는 정도">생각 수준</span>
-        <SegmentedControl aria-label="생각 수준" value={primary.thinking ?? 'off'} onValueChange={thinkingCommand}
-          options={(['off', 'low', 'medium', 'high'] as const).map(value => ({ value, label: { off: '끔', low: '낮음', medium: '중간', high: '높음' }[value], disabled: pending !== '' }))}/>
-      </div>}
-      {lastChange !== 'delete' && !roleChanged && feedback}
-    </SettingsGroup>
+    {!options.length && modelRoute}
 
     <SettingsGroup className="model-role-group" title="역할별 모델">
       <label className="model-thinking model-suggestions" htmlFor="suggestions-switch">

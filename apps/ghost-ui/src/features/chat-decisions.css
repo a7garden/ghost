@@ -32,6 +32,25 @@
   .chat-decisions .decision__response { gap: 8px; }
   .chat-decisions .decision__answer-hint { display: none; }
 
+  /* 24px + 720px of transcript + 24px + 328px of decision + 24px = 70rem.
+     Move the same editor, never its DOM or draft, when no competing pane is open. */
+  @container (min-width: 70rem) {
+    .chat-layout:not(:has(> .thread-panel, > .browser-pane)):has(.chat-decisions :is(.decision, .chat-decisions__row, .deck__ack:not(:empty), [role='alert'])) {
+      & .ghost-conversation__column { margin-inline: 0 auto; }
+      /* Anchor the decision to .chat-layout rather than the composer dock. */
+      & .ghost-conversation__dock { position: static; }
+      & .chat-decisions {
+        position: absolute;
+        inset-inline-start: calc(var(--ghost-space-6) * 2 + var(--ghost-layout-document-max));
+        inline-size: min(26rem, calc(100% - var(--ghost-space-6) * 3 - var(--ghost-layout-document-max)));
+        inset-block-end: var(--ghost-space-4);
+        margin: 0;
+        max-block-size: calc(100% - var(--ghost-space-6) * 4);
+        --chat-decision-height: min(70dvh, 34rem);
+      }
+    }
+  }
+
   .chat-decisions__row {
     display: flex; flex: none; min-width: 0; min-height: 44px; align-items: center; gap: 8px;
     padding: 8px 6px; border: 0; border-block-start: 1px solid var(--ghost-line);
@@ -42,8 +61,9 @@
   .chat-decisions__row[aria-expanded='true'] { box-shadow: inset 2px 0 var(--ghost-amber); }
   .chat-decisions__row:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
   .chat-decisions__row > svg:first-child { flex: none; color: var(--ghost-amber-ink); }
-  .chat-decisions__count { flex: none; font-size: 15px; font-weight: 560; font-variant-numeric: tabular-nums; }
-  .chat-decisions__lead { flex: 1; min-width: 0; overflow: hidden; color: var(--ghost-ink3); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
+  /* The folded row's subject is the question itself; the count and deadline only qualify it. */
+  .chat-decisions__count { flex: none; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 550; font-variant-numeric: tabular-nums; }
+  .chat-decisions__lead { flex: 1; min-width: 0; overflow: hidden; color: var(--ghost-ink); font-size: 15px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
   .chat-decisions__due { flex: none; color: var(--ghost-amber-ink); font-size: var(--text-caption); font-weight: 550; }
   .chat-decisions__row > .fold-mark { flex: none; }
 

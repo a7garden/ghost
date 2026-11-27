@@ -470,12 +470,13 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 .chat-error { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 4px 6px 4px 12px; border-radius: var(--radius-card); color: var(--ghost-ink); background: var(--ghost-danger-tint); font-size: var(--text-caption); text-align: left; }
 .chat-error > svg { flex: none; color: var(--ghost-danger-ink); }
 .chat-error > span { min-width: 0; flex: 1; padding-block: 4px; overflow-wrap: anywhere; }
-.ghost-conversation__transcript-content:has(.chat-empty:only-child) { display: grid; min-height: 100%; align-content: center; }
-.chat-empty { width: min(100%, 21rem); margin-inline: auto; padding-block: var(--ghost-space-4); }
+.ghost-conversation__transcript-content:has(.chat-empty:only-child) { display: grid; min-height: 100%; align-content: end; }
+.chat-empty { width: min(100%, 36rem); padding-block: var(--ghost-space-4); }
 .chat-empty h2 { margin: 0 0 var(--ghost-space-4); color: var(--ghost-ink); font-size: var(--text-heading); font-weight: 650; letter-spacing: -.025em; }
-.chat-empty__starters { display: grid; gap: 4px; }
-.chat-empty__starters button { min-height: 36px; padding: 6px 12px; border: 0; border-radius: var(--radius-control); color: var(--ghost-ink2); background: var(--ghost-hover); font: 500 var(--text-ui)/1.4 var(--font-sans); text-align: start; cursor: pointer; }
-.chat-empty__starters button:hover { color: var(--ghost-ink); background: var(--ghost-hover2); }
+.chat-empty__starters { display: grid; border-block-end: 1px solid var(--ghost-line); }
+.chat-empty__starters button { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 4px; border: 0; border-block-start: 1px solid var(--ghost-line); color: var(--ghost-ink2); background: none; font: 500 var(--text-ui)/1.5 var(--font-sans); text-align: start; cursor: pointer; }
+.chat-empty__starters svg { flex: none; color: var(--ghost-ink3); }
+.chat-empty__starters button:is(:hover, :focus-visible) { color: var(--ghost-ink); background: var(--ghost-hover); }
 .chat-empty__starters button:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
 .chat-thinking { display: inline-flex; align-items: center; gap: 10px; color: var(--ghost-ink3); font-size: var(--text-ui); font-weight: 500; animation: fade-in var(--duration-slow) ease both; }
 .chat-thinking > span:not(.presence) { background: linear-gradient(90deg, var(--ghost-ink3) 0%, var(--ghost-ink) 50%, var(--ghost-ink3) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer-text 1.8s linear infinite; }

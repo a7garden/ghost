@@ -14,6 +14,8 @@ export interface SettingsLayoutSection {
   folded?: boolean
   /** A reported state or count alongside the section label. */
   status?: ReactNode
+  /** The section's current value (default model, theme, device count) read under the label. */
+  value?: ReactNode
 }
 
 export interface SettingsLayoutProps {
@@ -33,6 +35,10 @@ export interface SettingsLayoutProps {
   wide?: boolean
   /** Label of the toggle that opens the `folded` sections. */
   foldedLabel?: string
+  /** Label of the rail search; while typing, matched tabs (folded ones included) stay in place. */
+  searchLabel?: string
+  /** Shown when the rail search matches no section. */
+  searchEmptyLabel?: string
 }
 
 export interface SettingsGroupProps {
@@ -64,6 +70,8 @@ export function SettingsLayout({
   compactDetail = false,
   wide = false,
   foldedLabel,
+  searchLabel,
+  searchEmptyLabel,
 }: SettingsLayoutProps) {
   const instanceId = useId()
   const panelId = `${instanceId}-panel`
@@ -73,6 +81,7 @@ export function SettingsLayout({
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const [horizontalNavigation, setHorizontalNavigation] = useState(false)
   const [foldedOpen, setFoldedOpen] = useState(false)
+  const [query, setQuery] = useState("")
 
   useEffect(() => {
     const settings = settingsRef.current
@@ -99,7 +108,14 @@ export function SettingsLayout({
   const tabId = (sectionId: string) => `${instanceId}-tab-${sectionId}`
   const selectedSection = sections.find((section) => section.id === activeSection)
   const foldedVisible = foldedOpen || Boolean(selectedSection?.folded)
-  const shown = sections.filter((section) => !section.folded || foldedVisible)
+  const needle = query.trim().toLocaleLowerCase()
+  // The horizontal strip has no room to type in; filtering only runs in the vertical rail.
+  const searching = Boolean(searchLabel) && !horizontalNavigation && needle.length > 0
+  // Typing never moves the selection: the visible content follows the tab, not the query.
+  const shown = searching
+    ? sections.filter((section) => section.label.toLocaleLowerCase().includes(needle))
+    : sections.filter((section) => !section.folded || foldedVisible)
+  const activeVisible = shown.some((section) => section.id === activeSection)
 
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, sectionId: string) => {
     const previousKey = horizontalNavigation ? "ArrowLeft" : "ArrowUp"
@@ -121,11 +137,38 @@ export function SettingsLayout({
     requestAnimationFrame(() => tabRefs.current.get(selectedNextSection.id)?.focus())
   }
 
+  const focusActiveRailTab = () => {
+    const fallback = shown[0] ? tabRefs.current.get(shown[0].id) : undefined
+    ;(tabRefs.current.get(activeSection) ?? fallback)?.focus()
+  }
+
+  const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault()
+      if (query) setQuery("")
+      else focusActiveRailTab()
+    } else if (event.key === "ArrowDown" && shown.length > 0) {
+      event.preventDefault()
+      tabRefs.current.get(shown[0]!.id)?.focus()
+    }
+  }
+
   return (
     <div ref={settingsRef} className={["ghost-settings", className].filter(Boolean).join(" ")} data-compact-detail={compactDetail || undefined} data-wide={wide || undefined}>
       <div className="ghost-settings__layout">
         <nav className="ghost-settings__navigation" aria-label={strings.navigationLabel}>
           {title && <h1 className="ghost-settings__title">{title}</h1>}
+          {searchLabel && !horizontalNavigation && (
+            <input
+              className="ghost-settings__search"
+              type="search"
+              aria-label={searchLabel}
+              placeholder={searchLabel}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={onSearchKeyDown}
+            />
+          )}
           <div
             className="ghost-settings__section-list"
             role="tablist"
@@ -135,9 +178,10 @@ export function SettingsLayout({
             {shown.map((section, index) => {
               const isSelected = activeSection === section.id
               const previous = shown[index - 1]
-              const startsFold = Boolean(section.folded) && !previous?.folded
+              const startsFold = !searching && Boolean(section.folded) && !previous?.folded
               const statusId = section.status ? `${tabId(section.id)}-status` : undefined
-              const heading = !section.folded && section.group && section.group !== previous?.group ? section.group : null
+              const valueId = section.value ? `${tabId(section.id)}-value` : undefined
+              const heading = !searching && !section.folded && section.group && section.group !== previous?.group ? section.group : null
               return (
                 <Fragment key={section.id}>
                   {heading && <div className="ghost-settings__group-label" role="presentation">{heading}</div>}
@@ -152,27 +196,33 @@ export function SettingsLayout({
                     type="button"
                     role="tab"
                     aria-selected={isSelected}
-                    aria-label={statusId ? section.label : undefined}
-                    aria-describedby={statusId}
+                    aria-label={section.label}
+                    aria-describedby={[statusId, valueId].filter(Boolean).join(" ") || undefined}
                     aria-controls={panelId}
-                    tabIndex={isSelected || (!selectedSection && section === shown[0]) ? 0 : -1}
+                    tabIndex={isSelected || (!activeVisible && index === 0) ? 0 : -1}
                     onClick={() => onSectionChange(section.id)}
                     onKeyDown={(event) => onTabKeyDown(event, section.id)}
                   >
                     {section.icon && <span className="ghost-settings__section-icon" aria-hidden="true">{section.icon}</span>}
-                    <span className="ghost-settings__section-label">{section.label}</span>
+                    <span className="ghost-settings__section-copy">
+                      <span className="ghost-settings__section-label">{section.label}</span>
+                      {valueId && <span className="ghost-settings__section-value" id={valueId}>{section.value}</span>}
+                    </span>
                     {statusId && <span className="ghost-settings__section-status" id={statusId}>{section.status}</span>}
                   </button>
                 </Fragment>
               )
             })}
-            {foldedLabel && !foldedVisible && sections.some((section) => section.folded) && (
+            {!searching && foldedLabel && !foldedVisible && sections.some((section) => section.folded) && (
               <button type="button" className="ghost-settings__fold ghost-navigation-item" aria-expanded="false" onClick={() => setFoldedOpen(true)}>
                 <span className="ghost-settings__section-icon" aria-hidden="true"><Plus /></span>
                 <span>{foldedLabel}</span>
               </button>
             )}
           </div>
+          {searching && shown.length === 0 && searchEmptyLabel && (
+            <p className="ghost-settings__search-empty" role="status">{searchEmptyLabel}</p>
+          )}
         </nav>
         <section
           ref={contentRef}

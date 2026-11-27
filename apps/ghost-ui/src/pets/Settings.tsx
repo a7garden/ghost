@@ -11,7 +11,7 @@ import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import type { Preferences } from './preferences';
 import { ModelSettings } from './ModelSettings';
-import { modelDisplayName } from './ModelPicker';
+import { modelDisplayName, modelShortName } from './ModelPicker';
 import { ApprovalSettings } from './ApprovalSettings';
 import { blurTouchSearchOnEnter, useCompact } from '../ui/adaptive';
 import { uiTerms } from '../uiText';
@@ -63,7 +63,8 @@ function SettingsIndex({ items, select }: { items: SettingsItem[]; select(id: st
   const matches = items.filter(item => item.label.toLocaleLowerCase().includes(needle));
   const row = (item: SettingsItem) => {
     const id = `settings-index-${item.id}`;
-    const meta = item.status ? [item.status.label, item.value].filter(Boolean).join(' · ') : item.value;
+    const status = item.status && (item.status.count === undefined ? item.status.label : `${item.status.label} ${item.status.count}건`);
+    const meta = [status, item.value].filter(Boolean).join(' · ');
     return <button type="button" id={id} className="settings-index-row" key={item.id} aria-label={item.label}
       aria-describedby={meta ? `${id}-value` : undefined} onClick={() => {
         history.replaceState({ ...history.state, settingsIndex: { scroll: list.current?.scrollTop ?? 0, query, row: item.id, advanced } }, '');
@@ -74,11 +75,8 @@ function SettingsIndex({ items, select }: { items: SettingsItem[]; select(id: st
       </span>
       <span className="settings-index-row__copy">
         <span className="settings-index-row__title">{item.label}</span>
-        {meta && <span id={`${id}-value`} className="settings-index-row__value">
-          {meta}{item.status?.count !== undefined && <span className="sr-only"> {item.status.count}건</span>}
-        </span>}
+        {meta && <span id={`${id}-value`} className="settings-index-row__value">{meta}</span>}
       </span>
-      {item.status?.count !== undefined && <span className="settings-status__count" aria-hidden="true">{item.status.count}</span>}
       <ArrowRight className="settings-index-row__arrow" size={15} aria-hidden="true"/>
     </button>;
   };
@@ -144,7 +142,7 @@ export function Settings({ route, navigate, preferences, updatePreferences, stor
     devices: missingDevice ? { glyph: 'failed', label: '이 기기의 등록 정보 없음' } : undefined,
   };
   const values: Partial<Record<string, string>> = {
-    models: defaultModel ? modelDisplayName(settings, defaultModel) : undefined,
+    models: defaultModel ? (compact ? modelDisplayName : modelShortName)(settings, defaultModel) : undefined,
     host: statuses.host || host.quiet ? undefined : host.label,
     update: offer?.version ?? update?.status?.current.version,
     devices: missingDevice ? undefined : principal?.kind === 'device' ? principal.name : state ? `등록 ${state.devices.length}대` : undefined,
@@ -162,10 +160,11 @@ export function Settings({ route, navigate, preferences, updatePreferences, stor
   if (compact && !requested) return <SettingsIndex items={indexItems} select={changeTab}/>;
   return <SettingsLayout className="ghost-settings--frame" pageTitle={items.find(item => item.id === tab)?.label}
     compactDetail={compact} wide={tab === 'team' || shellSection?.wide} strings={{ navigationLabel: '설정 항목', contentLabel: '설정 내용' }}
+    searchLabel="설정 찾기" searchEmptyLabel="일치하는 설정이 없습니다."
     sections={indexItems.map(item => {
       const group = settingsGroups.find(entry => entry.ids.includes(item.id));
       return { id: item.id, label: item.label, icon: <item.icon aria-hidden="true"/>, group: group?.label, folded: group?.folded,
-        status: item.status && <SettingsStatusMark status={item.status}/> };
+        status: item.status && <SettingsStatusMark status={item.status}/>, value: item.value };
     })} foldedLabel={uiTerms.advanced} activeSection={tab} onSectionChange={changeTab}>
     {shellSection?.content}
     {storageError && <InlineError className="mt-4">{storageError}</InlineError>}

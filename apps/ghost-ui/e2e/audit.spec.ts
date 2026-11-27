@@ -47,9 +47,29 @@ test('Ghost chat drafts a suggested next message without sending it', async ({ p
   expect(messages).toEqual([]);
 });
 
+test('an empty conversation previews the exact draft without sending it', async ({ page }) => {
+  const sends: string[] = [];
+  await page.route('**/api/commands', async route => {
+    const command = route.request().postDataJSON()?.command;
+    if (command?.type !== 'message.send') return route.fallback();
+    sends.push(command.text);
+    await route.abort();
+  });
+  await openScreen(page, { name: 'first conversation', route: state => `/ghosts/${state.scribeGhostId}`, waits: () => ['무엇부터 이야기할까요?'] }, 'light');
+  const row = page.getByRole('group', { name: '대화 시작 제안' }).getByRole('button').first();
+  const prompt = await row.innerText();
+  await row.click();
+  const draft = page.getByRole('combobox', { name: '기록가에게 메시지', exact: true });
+  await expect(draft).toBeFocused();
+  await expect(draft).toHaveValue(prompt);
+  expect(sends).toEqual([]);
+});
+
 test('model settings expose the next-message switch and model', async ({ page }) => {
   await openScreen(page, { name: 'models', route: () => '/settings?tab=models', waits: () => [], prepare: page =>
     page.route('**/api/providers/quota*', route => route.fulfill({ json: [] })) }, 'light');
+  const models = page.getByRole('region', { name: '모델 설정', exact: true });
+  await expect(models.getByRole('heading').first()).toHaveText('모델 경로');
   const enabled = page.getByRole('switch', { name: '다음 메시지 제안', exact: true });
   const model = page.getByRole('combobox', { name: '제안 모델', exact: true });
   await expect(enabled).toBeChecked();
@@ -70,6 +90,41 @@ test('model settings expose the next-message switch and model', async ({ page })
   }
 });
 
+test('settings rail search narrows tabs without leaving the open section', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'the search field rides the wide settings rail');
+  await openScreen(page, { name: 'rail-search', route: () => '/settings?tab=team', waits: () => [] }, 'light');
+  const search = page.getByRole('searchbox', { name: '설정 찾기' });
+  await search.fill('모델');
+  await expect(page.getByRole('tab', { name: '모델', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '모델 조합', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Ghost', exact: true })).toBeHidden();
+  // Typing never moves the selection: the open Ghost page stays on screen.
+  await expect(page.getByRole('list', { name: '설정할 Ghost' })).toBeVisible();
+  await search.press('Escape');
+  await expect(page.getByRole('tab', { name: 'Ghost', exact: true })).toBeVisible();
+  await search.press('Escape');
+  await expect(page.getByRole('tab', { name: 'Ghost', exact: true })).toBeFocused();
+  // A folded advanced tab surfaces only while it matches; choosing it keeps the fold open after the query clears.
+  await search.fill('규칙');
+  await page.getByRole('tab', { name: '승인 규칙', exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\?tab=rules$/);
+  await search.fill('');
+  await expect(page.getByRole('tab', { name: '승인 규칙', exact: true })).toBeVisible();
+});
+
+test('model settings lead with provider setup when no model can be selected', async ({ page }) => {
+  await openScreen(page, { name: 'unconfigured models', route: () => '/settings?tab=models', waits: () => [], prepare: page =>
+    page.route('**/api/state', async route => {
+      const response = await route.fetch();
+      const state: State = await response.json();
+      await route.fulfill({ response, json: { ...state, settings: { ...state.settings, providers: [], defaultModel: null } } });
+    }) }, 'light');
+  const models = page.getByRole('region', { name: '모델 설정', exact: true });
+  await expect(models.getByRole('heading').first()).toHaveText('제공자');
+  await models.getByRole('button', { name: '제공자 추가', exact: true }).click();
+  await expect(models.getByRole('textbox', { name: '제공자 검색' })).toBeVisible();
+});
+
 test('the roster shows the lone main Ghost without a pool or pin actions', async ({ page }, info) => {
   await openScreen(page, { name: 'single Ghost roster', route: () => info.project.name === 'iphone' ? '/workspace' : '/', waits: () => ['비행 기록'], prepare: async page => {
     await page.route('**/api/state', async route => {
@@ -83,7 +138,7 @@ test('the roster shows the lone main Ghost without a pool or pin actions', async
     : page.getByRole('navigation', { name: '작업실', exact: true }).filter({ visible: true });
   const main = roster.locator(phone ? 'button.roster-row' : '.presence-row__main').filter({ hasText: '도우미' });
   await expect(main).toBeVisible();
-  if (!phone) await expect(main.locator('.presence-row__main-mark')).toHaveCount(0);
+  await expect(main.locator('.presence-row__main-mark')).toHaveCount(0);
   await expect(roster.locator('.sidebar-pool-toggle')).toHaveCount(0);
   await page.screenshot({ path: info.outputPath('single-main-sidebar.png'), animations: 'disabled', caret: 'hide' });
   if (info.project.name === 'desktop') {

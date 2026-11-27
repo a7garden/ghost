@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CompactTitleSlot } from '../components/AppFrame';
-import { ArrowRight, CircleAlert, GitBranch, Monitor, Phone, X } from 'lucide-react';
+import { ArrowRight, CircleAlert, GitBranch, Monitor, PencilLine, Phone, X } from 'lucide-react';
 import { Button, Conversation, Popover, PopoverContent, PopoverTrigger, Row, SkeletonChat } from '../ui'
 import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type GhostTool, type Message, type State, type Work } from '@ghost/contract';
 import { GhostProfile } from '../components/GhostProfile';
@@ -245,8 +245,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
       </>}>
       {!hasContent && !running && !loading && !error && extras.length === 0 && <div className="chat-empty">
         <h2>무엇부터 이야기할까요?</h2>
-        {ghost.persona.trim() && <div className="chat-empty__starters" role="group" aria-label="대화 시작 제안">{conversationStarters(ghost.persona).map(({ label, prompt }) =>
-          <button type="button" key={label} title={prompt} onClick={() => { setDraft(prompt); inputRef.current?.focus(); }}>{label}</button>)}</div>}
+        {ghost.persona.trim() && <div className="chat-empty__starters" role="group" aria-label="대화 시작 제안">{conversationStarters(ghost.persona).map(({ prompt }) =>
+          <button type="button" key={prompt} onClick={() => { setDraft(prompt); inputRef.current?.focus(); }}><span>{prompt}</span><PencilLine size={15} aria-hidden="true"/></button>)}</div>}
       </div>}
       {loading && <SkeletonChat label="대화 기록을 읽는 중"/>}
       {conversationId && page.before && <div className="grid justify-items-center">

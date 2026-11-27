@@ -2,7 +2,6 @@
   .model-settings { container: model-settings / inline-size; }
   .model-settings .model-row-title { color: var(--ghost-ink); font-size: 15px; font-weight: 560; line-height: 1.35; overflow-wrap: anywhere; }
   .model-settings .model-meta { display: block; margin: 0; color: var(--ghost-ink3); font-size: 12px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
-  .model-verdict__model { color: var(--ghost-ink2); font-size: var(--text-ui); }
   .model-settings :is(.model-providers, .model-route-group, .model-role-group) > .ghost-settings-group__rows {
     display: grid;
     gap: 8px;
@@ -12,11 +11,8 @@
     background: none;
     box-shadow: none;
   }
-  .model-settings :is(.provider-ledger, .model-route) { border-radius: var(--radius-control); }
-  .model-settings .provider-ledger:has(> :nth-child(2)), .model-settings .model-route, .model-settings .model-roles {
-    border: 1px solid var(--ghost-line);
-    background: var(--ghost-surface);
-  }
+  .model-settings :is(.provider-ledger, .model-route, .model-roles) { border-block-start: 1px solid var(--ghost-line-strong); }
+  .model-settings .provider-record + .provider-record { border-block-start: 1px solid var(--ghost-line); }
   .provider-ledger__row {
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr) auto;
@@ -55,7 +51,7 @@
     .provider-ledger__row:has(.provider-ledger__actions > :nth-child(2)) { grid-template-columns: 18px minmax(0, 1fr); grid-template-areas: 'mark copy' '. quota' '. actions'; }
   }
 
-  .model-settings .model-route { padding: 4px 10px 8px; }
+  .model-settings .model-route { padding: 4px 0 8px; }
   .model-settings .model-route__step[data-primary] { grid-template-columns: 24px minmax(0, 1fr) minmax(0, 56%); align-items: center; }
   .model-settings .model-route__step[data-primary] .model-route__node { margin-block-start: 0; }
   .model-settings .model-route__step[data-primary]::before { top: 50%; }
@@ -63,7 +59,7 @@
   .model-select { width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
   .model-thinking { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; min-height: 44px; padding: 4px 10px; }
   .model-suggestions { cursor: pointer; }
-  .model-settings .model-roles { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; border-radius: var(--radius-control); }
+  .model-settings .model-roles { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
   .model-roles th, .model-roles td { padding: 6px 10px; text-align: start; }
   .model-roles td { width: 56%; }
   .model-roles tr + tr > * { border-block-start: 1px solid var(--ghost-line); }
