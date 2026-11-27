@@ -82,6 +82,18 @@ function summary(message: FetchMessageObject): MailSummary {
     seen: !!message.flags?.has("\\Seen"), flagged: !!message.flags?.has("\\Flagged"), answered: !!message.flags?.has("\\Answered"), hasAttachments: hasAttachment(message.bodyStructure), size: message.size ?? 0 };
 }
 
+/** Name the failure class only; never echo server text, which can carry account details. */
+function connectFailure(error: unknown): string {
+  const e = error as { authenticationFailed?: boolean; code?: string } | null;
+  if (e?.authenticationFailed) return "메일 서버가 로그인을 거부했습니다. 앱 암호가 만료되었거나 잘못되었습니다. 계정을 다시 연결해 주세요.";
+  switch (e?.code) {
+    case "ENOTFOUND": case "EAI_AGAIN": return "메일 서버 주소를 찾지 못했습니다. 네트워크와 서버 주소를 확인해 주세요.";
+    case "ETIMEDOUT": case "ECONNRESET": case "ECONNREFUSED": case "EHOSTUNREACH": case "ENETUNREACH": return "메일 서버에 연결하지 못했습니다. 네트워크 연결을 확인해 주세요.";
+    case "CERT_HAS_EXPIRED": case "DEPTH_ZERO_SELF_SIGNED_CERT": case "UNABLE_TO_VERIFY_LEAF_SIGNATURE": case "ERR_TLS_CERT_ALTNAME_INVALID": return "메일 서버의 TLS 인증서를 확인하지 못했습니다.";
+  }
+  return "메일 서버에 연결하지 못했습니다. TLS 서버 주소, 권한과 앱 비밀번호를 확인해 주세요.";
+}
+
 /** Short-lived, serialized, TLS-only sessions. Raw provider errors never cross this boundary. */
 export class MailService {
   private readonly queues = new Map<string, Promise<unknown>>();
@@ -129,7 +141,7 @@ export class MailService {
         return await Promise.race([(async () => { authorize(); await client.connect(); authorize(); const result = await run(client, authorize, authority.credential, stop => closers.add(stop)); authorize(); return result; })(), timeout.promise]);
       } catch (error) {
         if (error instanceof CommandError || error instanceof MailTooLarge || error instanceof NoEffect) throw error;
-        throw new CommandError("unavailable", writable ? "메일 작업 결과를 확인하지 못했습니다. 자동 재시도하지 않습니다. 메일함에서 결과를 확인해 주세요." : "메일 서버에 연결하지 못했습니다. TLS 서버 주소, 권한과 앱 비밀번호를 확인해 주세요.");
+        throw new CommandError("unavailable", writable ? "메일 작업 결과를 확인하지 못했습니다. 자동 재시도하지 않습니다. 메일함에서 결과를 확인해 주세요." : connectFailure(error));
       } finally { clearTimeout(timer); close(); this.active.delete(close); }
     });
     this.queues.set(connection.id, running);
