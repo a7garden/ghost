@@ -418,12 +418,14 @@ export class SourceConnections implements ActivitySourcePort {
       const code = object(error) ? str(error.code) : "";
       if (/AUTH|EAUTH|LOGIN|Authentication/i.test(code)) {
         if (connection.config.kind === "mail" && connection.config.authType === "oauth2") {
-          fail("OAuth access token rejected by the mail server. It has most likely expired or been revoked; reconnect or refresh this account's token.");
+          fail("메일 서버가 OAuth 토큰을 거부했습니다. 만료되었거나 폐기된 것 같습니다. 계정을 다시 연결하거나 토큰을 갱신해 주세요.");
         }
-        fail("Account authentication failed. Check the username and token/app password and enable IMAP/SMTP access for this account.");
+        fail(connection.config.kind === "mail"
+          ? "메일 서버가 로그인을 거부했습니다. 사용자 이름과 앱 암호, IMAP/SMTP 사용 설정을 확인해 주세요. iCloud·Gmail·Yahoo는 계정 암호가 아니라 앱 암호가 필요합니다."
+          : "서비스가 인증을 거부했습니다. 토큰이 만료되었거나 폐기되었거나 권한이 부족한지 확인해 주세요.");
       }
-      if (/CERT|TLS|SSL|SELF_SIGNED|ALTNAME/i.test(code)) fail("TLS verification failed. Use the server's certificate hostname and a trusted, unexpired certificate; insecure authentication is not supported.");
-      fail("Source connection failed. Check the endpoint, network, account permissions and app password. No provider error body is exposed.");
+      if (/CERT|TLS|SSL|SELF_SIGNED|ALTNAME/i.test(code)) fail("TLS 인증서를 확인하지 못했습니다. 서버 주소가 인증서의 호스트 이름과 같고 만료되지 않은 신뢰할 수 있는 인증서여야 합니다. 안전하지 않은 연결은 지원하지 않습니다.");
+      fail("연결하지 못했습니다. 서버 주소, 네트워크, 계정 권한과 인증 정보를 확인해 주세요.");
     } finally {
       clearTimeout(timer);
       controller.signal.removeEventListener("abort", abort);

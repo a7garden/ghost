@@ -5,7 +5,7 @@ import { useHost } from '../host/context';
 import { Button, FormField, InlineError, Input, SegmentedControl, Switch } from '../ui';
 import { ExternalAnchor } from '../components/ExternalAnchor';
 import { buildConnectionCommand, draftFromMailDiscovery, mailAddressFromParts, mailAddressReady, sameMailAddress, type ConnectionDraft } from './connection-config';
-import { serviceById, type ConnectionService } from './connection-services';
+import { canAssist, cleanSecret, secretHint, serviceById, type ConnectionService } from './connection-services';
 // Deliberate cycle with Connections.tsx: both modules only call each other's exports at render
 // time, so the shared ServiceIcon can stay beside the catalog that owns it.
 import { ServiceIcon } from './Connections';
@@ -102,7 +102,7 @@ export function MailConnect({ seed, disabled, mainName, onAssist, onClose, onSav
   const save = async () => {
     if (saving || !draft || !resolved || pending || telling || oauthService) return;
     const full = mailAddressFromParts(address, seed);
-    const built = buildConnectionCommand({ ...draft, username: full }, null);
+    const built = buildConnectionCommand({ ...draft, username: full, credential: cleanSecret(providerService, draft.credential) }, null);
     if (!built.ok) {
       setError(built.error);
       if (!draft.host.trim()) setServerOpen(true);
@@ -151,10 +151,11 @@ export function MailConnect({ seed, disabled, mainName, onAssist, onClose, onSav
           {oauthService
             ? <ConnectionOAuthPanel key={completed} service={oauthService} ghosts={[]} defaultUsername={completed} onConnected={onConnected} onLockChange={setOAuthLocked}/>
             : <div className="setup-route__credential">
-              <FormField label={secretLabel} description={found.note ?? undefined}>
+              <FormField label={secretLabel} description={secretHint(providerService, draft?.credential ?? '') || found.note || undefined}>
                 {control => <Input {...control} ref={secretField} type="password" value={draft?.credential ?? ''} autoComplete="new-password" disabled={saving} onChange={event => set({ credential: event.target.value })}/>}
               </FormField>
               {found.setupUrl && <ExternalAnchor href={found.setupUrl} target="_blank" rel="noopener noreferrer" className="setup-route__link">{found.auth === 'password' ? '인증 설정 열기' : '앱 비밀번호 발급'}<ArrowUpRight size={12} aria-hidden="true"/></ExternalAnchor>}
+              {mainName && canAssist(providerService) && <Button variant="ghost" type="button" disabled={saving} onClick={() => setMethod('ghost')}>{mainName}에게 맡겨 발급</Button>}
             </div>}
         </>}
         {found && !oauthService && <button type="button" className="connection-advanced" aria-expanded={serverOpen} disabled={saving} onClick={() => setServerOpen(!serverOpen)}>서버 설정<span aria-hidden="true" className="fold-mark"/></button>}

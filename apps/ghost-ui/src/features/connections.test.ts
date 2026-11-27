@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, MailDiscovery } from '@ghost/contract';
 import { buildConnectionCommand, draftForService, draftFromConnection, draftFromMailDiscovery, emptyConnectionDraft, groupConnectionsByService, mailAddressFromParts, mailAddressReady, sameMailAddress, type ConnectionDraft } from './connection-config';
-import { localScopeSummary, serviceById } from './connection-services';
+import { canAssist, cleanSecret, localScopeSummary, secretHint, serviceById } from './connection-services';
 
 const connection = (patch: Partial<Connection> = {}): Connection => ({
   id: 'c1', name: '소유자 GitHub', hasCredential: true, createdAt: 1, updatedAt: 1, credentialVersion: 'v1',
@@ -213,5 +213,25 @@ describe('local account scope summary', () => {
     expect(localScopeSummary([])).toBe('기본 권한');
     expect(localScopeSummary(['repo', 'read:org'])).toBe('repo · read:org');
     expect(localScopeSummary(['repo', 'read:org', 'gist', 'workflow'])).toBe('repo · read:org 외 2개');
+  });
+});
+
+describe('pasted secrets', () => {
+  const icloud = serviceById('icloud'), gmail = serviceById('gmail');
+  it('drops the spaces and invisible characters a provider shows or a phone adds', () => {
+    expect(cleanSecret(gmail, 'abcd efgh\u00a0ijkl\u200bmnop')).toBe('abcdefghijklmnop');
+    expect(cleanSecret(serviceById('custom-mail'), 'pass word')).toBe('pass word');
+  });
+  it('hints only when a typed secret does not look like the provider\'s', () => {
+    expect(secretHint(icloud, '')).toBe('');
+    expect(secretHint(icloud, 'abcd efgh ijkl mnop')).toBe('');
+    expect(secretHint(icloud, 'abcd-efgh-ijkl-mnop')).toBe('');
+    expect(secretHint(icloud, 'my-apple-password')).toContain('abcd-efgh-ijkl-mnop');
+    expect(secretHint(serviceById('github'), 'github_pat_' + 'a'.repeat(30))).toBe('');
+    expect(secretHint(serviceById('gitea'), 'anything')).toBe('');
+  });
+  it('offers hand-off minting only where the provider has an app-password page', () => {
+    expect(canAssist(icloud)).toBe(true);
+    expect(canAssist(serviceById('outlook'))).toBe(false);
   });
 });

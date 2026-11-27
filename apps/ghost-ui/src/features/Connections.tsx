@@ -7,7 +7,7 @@ import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
 import { uiTerms } from '../uiText';
 import { buildConnectionCommand, type ConnectionDraft, connectionSummary, draftForService, draftFromConnection } from './connection-config';
-import { connectionServices, connectionSetupPrompt, localScopeSummary, serviceById, serviceForConnection, type ConnectionService } from './connection-services';
+import { cleanSecret, connectionServices, connectionSetupPrompt, localScopeSummary, secretHint, serviceById, serviceForConnection, type ConnectionService } from './connection-services';
 import { ExternalAnchor } from '../components/ExternalAnchor';
 import { ConnectionOAuthPanel, supportsConnectionOAuth } from './ConnectionOAuthPanel';
 import { ConnectionRequest } from './ConnectionRequest';
@@ -312,7 +312,7 @@ function ConnectionSetup({ existing = null, service, ghosts, mainName, onAssist,
   const name = existing ? `${existing.name} 편집` : `${service.name} 연결`;
   const save = async () => {
     if (saving) return;
-    const built = buildConnectionCommand(draft, existing);
+    const built = buildConnectionCommand({ ...draft, credential: cleanSecret(service, draft.credential) }, existing);
     if (!built.ok) { setError(built.error); return; }
     if (!existing && !draft.credential.trim()) { setError(`${service.credentialLabel}를 입력해 주세요.`); return; }
     setSaving(true); setError('');
@@ -342,7 +342,7 @@ function ConnectionSetup({ existing = null, service, ghosts, mainName, onAssist,
         </div>
         <div className="setup-route__credential">
           <FormField label={draft.mailAuthType === 'oauth2' ? 'OAuth 액세스 토큰' : service.credentialLabel}
-            description={existing?.hasCredential ? '비워 두면 기존 인증을 유지합니다.' : service.requirement}>
+            description={existing?.hasCredential ? '비워 두면 기존 인증을 유지합니다.' : secretHint(service, draft.credential) || service.requirement}>
             {control => <Input {...control} type="password" value={draft.credential} autoComplete="new-password" disabled={saving || draft.clearCredential} onChange={event => set({ credential: event.target.value })}/>}
           </FormField>
           {!existing && service.setupUrl && <ExternalAnchor href={service.setupUrl} target="_blank" rel="noopener noreferrer" className="setup-route__link">인증 설정 열기<ArrowUpRight size={12} aria-hidden="true"/></ExternalAnchor>}

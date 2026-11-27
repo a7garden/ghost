@@ -17,11 +17,43 @@ export interface ConnectionService {
   domain?: string;
 }
 
+/** What a pasted secret looks like, as Nango's per-provider `credentials.*.pattern` does: a mismatch is a hint, never a block. */
+const secretFormats: Readonly<Record<string, { pattern: RegExp; example: string }>> = {
+  icloud: { pattern: /^[a-z]{4}(-?[a-z]{4}){3}$/i, example: 'abcd-efgh-ijkl-mnop' },
+  gmail: { pattern: /^[a-z]{16}$/i, example: 'abcdefghijklmnop' },
+  yahoo: { pattern: /^[a-z]{16}$/i, example: 'abcdefghijklmnop' },
+  github: { pattern: /^(github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,})$/, example: 'github_pat_…' },
+  slack: { pattern: /^xox[bpe]-[A-Za-z0-9-]{10,}$/, example: 'xoxb-…' },
+  notion: { pattern: /^(ntn|secret)_[A-Za-z0-9]{20,}$/, example: 'ntn_…' },
+};
+
+/** Providers whose secret the Ghost can mint in a browser handoff: the owner only signs in. */
+const assistSteps: Readonly<Record<string, string>> = {
+  icloud: 'account.apple.com에서 로그인(2단계 인증은 내가 직접)한 뒤 「로그인 및 보안 → 앱 암호」에서 이름이 「Ghost」인 앱 암호를 새로 만들어 줘. Apple 계정 암호는 쓰지 마.',
+  gmail: 'myaccount.google.com/apppasswords에서 로그인(2단계 인증은 내가 직접)한 뒤 이름이 「Ghost」인 앱 비밀번호를 새로 만들어 줘.',
+  yahoo: 'login.yahoo.com/account/security에서 로그인(2단계 인증은 내가 직접)한 뒤 「다른 앱용 비밀번호」로 이름이 「Ghost」인 앱 비밀번호를 새로 만들어 줘.',
+};
+
+export const canAssist = (service?: ConnectionService): boolean => !!service && service.id in assistSteps;
+
+/** App passwords are shown in spaced groups; pasted spaces and invisible characters are never part of the secret. */
+export function cleanSecret(service: ConnectionService | undefined, value: string): string {
+  return service && service.id in secretFormats ? value.replace(/[\s\u00a0\u200b\u2060\ufeff]/g, '') : value;
+}
+
+/** One short hint when a typed secret does not look like this service's; empty when it fits or nothing is typed. */
+export function secretHint(service: ConnectionService | undefined, value: string): string {
+  const format = service && secretFormats[service.id];
+  const secret = cleanSecret(service, value);
+  if (!format || !secret || format.pattern.test(secret)) return '';
+  return service.kind === 'mail' ? `${service.name} 앱 암호는 ${format.example} 모양입니다. 일반 계정 암호가 아닌지 확인해 주세요.` : `${service.name} 토큰은 보통 ${format.example} 모양입니다.`;
+}
+
 export const connectionServices: readonly ConnectionService[] = [
   { id: 'google', name: 'Google', kind: 'api', group: '서비스', icon: 'google', baseUrl: 'https://www.googleapis.com/', testPath: 'oauth2/v3/userinfo', setupUrl: 'https://console.cloud.google.com/apis/credentials', credentialLabel: 'OAuth 액세스 토큰', requirement: 'Google API 연결에는 OAuth 앱 등록과 권한 동의가 필요합니다. Ghost가 설정을 돕고, 로그인·추가 인증은 직접 진행합니다. 액세스 토큰은 만료 후 갱신해야 합니다.' },
   { id: 'notion', name: 'Notion', kind: 'api', group: '서비스', icon: 'notion', baseUrl: 'https://api.notion.com/v1/', testPath: 'users/me', headers: { 'Notion-Version': '2026-03-11' }, setupUrl: 'https://www.notion.so/developers/tokens', credentialLabel: '개인 접근 토큰 또는 통합 토큰', requirement: '로그인으로 연결하거나 개인 접근 토큰을 등록합니다. 내부 통합 토큰을 쓴다면 사용할 페이지를 해당 통합에 공유해야 합니다.' },
   { id: 'x', name: 'X', kind: 'api', group: '서비스', icon: 'x', baseUrl: 'https://api.x.com/2/', testPath: 'users/me', setupUrl: 'https://console.x.com/', credentialLabel: '사용자 액세스 토큰', requirement: '개발자 앱과 사용자 권한이 필요합니다. 앱 전용 Bearer 토큰은 내 계정 확인에 사용할 수 없습니다. 요금·권한 변경은 직접 확인합니다.' },
-  { id: 'github', name: 'GitHub', kind: 'github', group: '서비스', icon: 'github', baseUrl: 'https://api.github.com', setupUrl: 'https://github.com/settings/personal-access-tokens/new', credentialLabel: '접근 토큰', requirement: '연결할 저장소와 필요한 권한만 허용한 토큰을 사용합니다.' },
+  { id: 'github', name: 'GitHub', kind: 'github', group: '서비스', icon: 'github', baseUrl: 'https://api.github.com', setupUrl: 'https://github.com/settings/personal-access-tokens/new?name=Ghost&description=Ghost%20agent', credentialLabel: '접근 토큰', requirement: '연결할 저장소와 필요한 권한만 허용한 토큰을 사용합니다.' },
   { id: 'gitea', name: 'Gitea', kind: 'gitea', group: '서비스', icon: 'gitea', setupUrl: undefined, credentialLabel: '접근 토큰', requirement: '서버 주소를 입력하면 API 주소를 설정합니다. 토큰은 해당 서버의 설정 → 애플리케이션에서 발급합니다.' },
   { id: 'slack', name: 'Slack', kind: 'api', group: '서비스', icon: 'slack', baseUrl: 'https://slack.com/api/', testPath: 'auth.test', setupUrl: 'https://api.slack.com/apps', credentialLabel: 'OAuth 토큰', requirement: 'Slack 앱에 필요한 권한을 설정하고 워크스페이스에 설치합니다.' },
   { id: 'icloud', name: 'iCloud', kind: 'mail', group: '메일', icon: 'icloud', domain: 'icloud.com', setupUrl: 'https://account.apple.com/', credentialLabel: '앱 암호', requirement: 'Apple 계정에서 발급한 앱 암호를 사용합니다. 일반 Apple 계정 암호는 사용하지 않습니다.', mail: { host: 'imap.mail.me.com', smtpHost: 'smtp.mail.me.com', smtpPort: 587, smtpSecure: false } },
@@ -45,6 +77,11 @@ export function serviceForConnection(connection: Connection): ConnectionService 
 }
 
 export function connectionSetupPrompt(service: ConnectionService, detail: string): string {
+  const steps = assistSteps[service.id];
+  return `${baseSetupPrompt(service, detail)}${steps ? `\n${steps}` : ''}`;
+}
+
+function baseSetupPrompt(service: ConnectionService, detail: string): string {
   return `${service.name} 연결을 도와줘.${detail.trim() ? ` 계정·서비스 정보: ${detail.trim()}` : ''}\n공식 인증 방법과 필요한 최소 권한을 조사하고, 브라우저에서 연결 설정과 키 발급을 진행해 줘. 로그인·SSO·2단계 인증은 browser_handoff로 내가 진행하게 해 줘. 비용 발생이나 권한 동의가 필요한 단계는 내 확인을 받아 줘. 비밀번호·API 키는 대화에 표시하거나 요청하지 말고, 발급된 키는 connection_register의 보안 캡처 또는 금고 참조로 등록해 줘. 연결 이름·서비스 아이콘·사용 Ghost 권한을 확인하고, 실제 인증 테스트가 통과해야 연결 완료라고 해 줘. 기존 연결이 있으면 먼저 확인해서 중복을 만들지 마.${service.setupUrl ? `\n공식 설정 진입점: ${service.setupUrl}` : ''}`;
 }
 
