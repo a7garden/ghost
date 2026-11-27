@@ -10,6 +10,7 @@ import { ComposerPlus } from './composer/ComposerPlus';
 import { AttachmentTray, useAttachments } from './composer/attachments';
 import { blurTouchSearchOnEnter } from '../ui/adaptive';
 import { useProjectMentions } from './composer/ProjectMentions';
+import { conversationStarters } from '../features/conversationSuggestions';
 import { useHostState } from '../host/store';
 import { WorkModelFields } from '../features/WorkModelFields';
 
@@ -20,7 +21,9 @@ type Mode = 'talk' | 'work';
  * Assigning unfolds the brief's completion criteria and deadline in place, so a request
  * becomes a 맡긴 일 without a separate form. Nothing is assigned unless the owner chose it.
  */
-export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigate(path: string): void }) {
+export function HandoffComposer({ ghosts, navigate, showStarters = false }: {
+  ghosts: Ghost[]; navigate(path: string): void; showStarters?: boolean;
+}) {
   const { client, store } = useHost();
   const { state } = useHostState(store);
   const roster = visibleGhosts(ghosts);
@@ -126,6 +129,10 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
       ]}/>}
       footer={hint && <span className="composer-hint" role="status">{hint}</span>}
       trailing={!assigning && <ModelPicker conversationId={target.directConversationId} disabled={sending}/>}/>
+    {showStarters && !assigning && !text && <div className="handoff__starters" role="group" aria-label="대화 시작 제안">
+      {conversationStarters(target.persona).map(({ label, prompt }) => <button type="button" key={label} className="link-quiet" disabled={sending}
+        onClick={() => { projects.onChange(prompt); inputRef.current?.focus(); }}>{label}</button>)}
+    </div>}
     {error && <InlineError className="mt-2">{error}</InlineError>}
   </div>;
 }

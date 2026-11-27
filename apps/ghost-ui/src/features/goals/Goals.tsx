@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Plus } from 'lucide-react';
 import { GOAL_TITLE_MAX, type Goal, type State } from '@ghost/contract';
 import { Button, InlineError, Page, PageHeader } from '../../ui';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { StateGlyph } from '../../components/agent';
 import { useHost } from '../../host/context';
 import { uiTerms } from '../../uiText';
 import { DecisionDeck } from '../Decision';
@@ -14,6 +15,7 @@ import { InlineEdit } from './InlineEdit';
 import { goalError } from './goalError';
 import { goalLimit, goalsAtCap, groupGoalsByScope, open, scopeName } from './goalScope';
 import './goals.css';
+import '../Goals.css';
 
 /** The project (`null` is the whole team) a goal being typed will start in; `null` when nothing is being typed. */
 type Composing = { scopeId: string | null } | null;
@@ -25,10 +27,11 @@ export function Goals({ state, navigate }: { state: State; navigate(path: string
   const target = [null, ...state.scopes.map(scope => scope.id)].find(id => !goalsAtCap(state, id));
   const full = target === undefined;
   const reason = state.scopes.length ? '모든 프로젝트의 목표가 가득 찼습니다.' : `진행 중이거나 일시정지한 목표는 ${goalLimit(state, null)}개까지 둘 수 있습니다.`;
+  const started = Boolean(state.goals?.length);
+  const add = <AddGoal disabled={full} reason={reason} onAdd={() => setComposing({ scopeId: target ?? null })}/>;
   return <Page className="goals-page">
-    <PageHeader title={uiTerms.goals} actions={!composing && <div className="goals-add"><Button disabled={full} aria-describedby={full ? 'goal-cap-reason' : undefined} onClick={() => setComposing({ scopeId: target ?? null })}><Plus/>목표 추가</Button>
-      {full && <span id="goal-cap-reason">{reason}</span>}</div>}/>
-    <GoalsBody state={state} navigate={navigate} composing={composing} setComposing={setComposing}/>
+    <PageHeader title={uiTerms.goals} actions={started && !composing ? add : undefined}/>
+    <GoalsBody state={state} navigate={navigate} composing={composing} dismissComposer={() => setComposing(null)} emptyAction={add}/>
   </Page>;
 }
 
@@ -37,15 +40,23 @@ export function ScopeGoals({ state, navigate, scopeId }: { state: State; navigat
   const [composing, setComposing] = useState<Composing>(null);
   const atCap = goalsAtCap(state, scopeId);
   const started = (state.goals ?? []).some(goal => goal.scopeId === scopeId);
+  const add = <AddGoal disabled={atCap} reason={`진행 중이거나 일시정지한 목표는 ${goalLimit(state, scopeId)}개까지 둘 수 있습니다.`} onAdd={() => setComposing({ scopeId })}/>;
   return <section className="goals-page" aria-label="프로젝트 목표">
-    {started && !composing && <div className="goals-add"><Button disabled={atCap} aria-describedby={atCap ? 'goal-cap-reason' : undefined} onClick={() => setComposing({ scopeId })}><Plus/>목표 추가</Button>
-      {atCap && <span id="goal-cap-reason">진행 중이거나 일시정지한 목표는 {goalLimit(state, scopeId)}개까지 둘 수 있습니다.</span>}</div>}
-    <GoalsBody state={state} navigate={navigate} scopeId={scopeId} composing={composing} setComposing={setComposing}/>
+    {started && !composing && add}
+    <GoalsBody state={state} navigate={navigate} scopeId={scopeId} composing={composing} dismissComposer={() => setComposing(null)} emptyAction={add}/>
   </section>;
 }
 
-function GoalsBody({ state, navigate, scopeId, composing, setComposing }: {
-  state: State; navigate(path: string): void; scopeId?: string; composing: Composing; setComposing(value: Composing): void;
+function AddGoal({ disabled, reason, onAdd }: { disabled: boolean; reason: string; onAdd(): void }) {
+  return <div className="goals-add">
+    <Button disabled={disabled} aria-describedby={disabled ? 'goal-cap-reason' : undefined} onClick={onAdd}><Plus/>목표 추가</Button>
+    {disabled && <span id="goal-cap-reason">{reason}</span>}
+  </div>;
+}
+
+function GoalsBody({ state, navigate, scopeId, composing, dismissComposer, emptyAction }: {
+  state: State; navigate(path: string): void; scopeId?: string; composing: Composing;
+  dismissComposer(): void; emptyAction: ReactNode;
 }) {
   const goals = (state.goals ?? []).filter(goal => scopeId === undefined || goal.scopeId === scopeId);
   const openGoals = goals.filter(open).sort((a, b) => Number(a.state === 'paused') - Number(b.state === 'paused') || a.createdAt - b.createdAt);
@@ -54,22 +65,30 @@ function GoalsBody({ state, navigate, scopeId, composing, setComposing }: {
     const proposal = decision.state === 'pending' ? goalProposal(decision) : null;
     return proposal !== null && (scopeId === undefined || (proposal.scopeId ?? null) === scopeId);
   }).sort((a, b) => a.createdAt - b.createdAt);
-  const groups = scopeId === undefined ? groupGoalsByScope(openGoals, state) : [{ id: scopeId, name: '', goals: openGoals }];
-  const labelled = scopeId === undefined && (groups.length > 1 || groups.some(group => group.id !== null));
+  const groups = scopeId === undefined ? groupGoalsByScope(openGoals, state) : openGoals.length ? [{ id: scopeId, name: '', goals: openGoals }] : [];
+  const labelled = scopeId === undefined && groups.some(group => group.id !== null);
   return <>
-    {composing && <GoalComposer state={state} initialScopeId={composing.scopeId} fixedScope={scopeId !== undefined} onClose={() => setComposing(null)}/>}
-    {proposals.length > 0 && <DecisionDeck state={state} navigate={navigate} decisions={proposals}/>}
+    {proposals.length > 0 && <div className="goals-decisions"><DecisionDeck state={state} navigate={navigate} decisions={proposals}/></div>}
+    {composing && <GoalComposer state={state} initialScopeId={composing.scopeId} fixedScope={scopeId !== undefined} onClose={dismissComposer}/>}
     {groups.map(group => <section key={group.id ?? 'team'} className="goal-group" aria-label={labelled ? group.name : undefined}>
-      {labelled && <h2 className="section-title goal-group__title">{group.name}</h2>}
-      {group.goals.map(goal => <GoalSection key={goal.id} goal={goal} state={state} grouped={labelled}/>)}
+      {labelled && <h2 className="section-title">{group.name}</h2>}
+      <div className="goal-group__rows">{group.goals.map(goal => <GoalSection key={goal.id} goal={goal} state={state} grouped={labelled}/>)}</div>
     </section>)}
-    {!goals.length && !composing && <div className="calm"><p>목표 없음</p><Button variant="add" size="sm" className="ml-auto" onClick={() => setComposing({ scopeId: scopeId ?? null })}>목표 추가</Button></div>}
-    {closed.length > 0 && <details className="goals-closed"><summary>종료된 목표 <span>{closed.length}</span></summary>
-      {closed.map(goal => <details className="goals-closed__goal" key={goal.id}>
-        <summary><span>{goal.title}{scopeId === undefined && goal.scopeId !== null && <span className="goal-closed__scope"> · {scopeName(state, goal.scopeId)}</span>}</span>
-          <time dateTime={new Date(goal.closedAt ?? goal.updatedAt).toISOString()}>{new Date(goal.closedAt ?? goal.updatedAt).toLocaleDateString('ko-KR')}</time></summary>
-        <GoalSection goal={goal} state={state}/>
-      </details>)}
+    {!goals.length && !composing && <div className="goals-empty"><p>목표 없음</p>{emptyAction}</div>}
+    {closed.length > 0 && <details className="goals-closed"><summary>종료된 목표</summary>
+      <div className="goal-group__rows">{closed.map(goal => {
+        const at = new Date(goal.closedAt ?? goal.updatedAt);
+        return <details className="goals-closed__goal" key={goal.id}>
+          <summary>
+            <span className="goal-row__glyph" aria-hidden="true"><StateGlyph state="cancelled"/></span>
+            <span className="goal-row__copy"><span className="goal-row__title">{goal.title}</span>
+              <span className="goal-row__meta">{scopeId === undefined && `${scopeName(state, goal.scopeId)} · `}종료</span>
+            </span>
+            <time className="goal-row__time" dateTime={at.toISOString()}>{at.toLocaleDateString('ko-KR')}</time>
+          </summary>
+          <GoalSection goal={goal} state={state}/>
+        </details>;
+      })}</div>
     </details>}
   </>;
 }
@@ -80,6 +99,8 @@ function GoalSection({ goal, state, grouped = false }: { goal: Goal; state: Stat
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const closed = goal.state === 'closed';
+  const milestones = (state.milestones ?? []).filter(item => item.goalId === goal.id);
+  const paused = goal.state === 'paused';
   const Title = grouped ? 'h3' : 'h2';
   const save = (patch: Partial<Pick<Goal, 'title' | 'why' | 'boundaries' | 'signal'>>) => client.send({ type: 'goal.update', goalId: goal.id, ...patch }).then(() => undefined);
   const changeState = async () => {
@@ -88,17 +109,23 @@ function GoalSection({ goal, state, grouped = false }: { goal: Goal; state: Stat
     catch (reason) { setError(goalError(reason)); }
     finally { setBusy(false); }
   };
-  return <section className="goal-section" aria-label={goal.title}>
-    <header className="goal-section__heading"><div><Title>{closed ? goal.title
-      : <InlineEdit value={goal.title} label="방향" maxLength={GOAL_TITLE_MAX} required onSave={title => save({ title })}>{goal.title}</InlineEdit>}</Title>
-      {goal.state === 'paused' && <span className="goal-paused"><span aria-hidden="true">Ⅱ</span> 일시정지</span>}</div>
-      {!closed && <div className="goal-actions">
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => void changeState()}>{goal.state === 'paused' ? '재개' : '일시정지'}</Button>
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => setClosing(true)}>종료</Button></div>}
-    </header>
-    <GoalClauses value={goal} onSave={closed ? undefined : (field, text) => save({ [field]: text })}/>
-    {error && <InlineError>{error}</InlineError>}
-    <GoalLine milestones={(state.milestones ?? []).filter(item => item.goalId === goal.id)} state={state} readOnly={closed}/>
+  return <section className="goal-section" aria-label={goal.title} data-closed={closed || undefined}>
+    {!closed && <header className="goal-section__heading">
+      <span className="goal-row__glyph" aria-hidden="true"><StateGlyph state={paused ? 'waiting' : 'queued'} mark="ring"/></span>
+      <div className="goal-row__copy">
+        <Title className="goal-row__title"><InlineEdit value={goal.title} label="방향" maxLength={GOAL_TITLE_MAX} required onSave={title => save({ title })}>{goal.title}</InlineEdit></Title>
+        <p className="goal-row__meta">{paused ? '일시정지' : '진행 중'}{milestones.length === 0 && <> · <span>이정표 없음</span></>}</p>
+      </div>
+      <div className="goal-actions">
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => void changeState()}>{paused ? '재개' : '일시정지'}</Button>
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => setClosing(true)}>종료</Button>
+      </div>
+    </header>}
+    <div className="goal-section__body">
+      <GoalClauses value={goal} onSave={closed ? undefined : (field, text) => save({ [field]: text })}/>
+      {error && <InlineError>{error}</InlineError>}
+      {(milestones.length > 0 || closed) && <GoalLine milestones={milestones} state={state} readOnly={closed}/>}
+    </div>
     {closing && <ConfirmDialog title="목표 종료" confirmLabel="목표 종료" onClose={() => setClosing(false)} onConfirm={async () => {
       try { await client.send({ type: 'goal.update', goalId: goal.id, state: 'closed' }); }
       catch (reason) { throw new Error(goalError(reason)); }

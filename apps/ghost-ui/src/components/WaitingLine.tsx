@@ -1,12 +1,9 @@
 import { ArrowRight } from 'lucide-react';
 import type { Decision, State } from '@ghost/contract';
-import { DotAvatar } from './DotAvatar';
-import { pendingDecisions, toneFor } from '../features/ghostState';
+import { PresenceAvatar } from './agent';
+import { pendingDecisions } from '../features/ghostState';
 import { decisionChip, decisionHeading } from '../features/decisionText';
 import { relativeTime } from '../features/time';
-
-/** Preview lines; the rest move through the heading route. One line keeps the handoff composer within a glance. */
-const SHOWN = 1;
 
 /** Pending decisions, oldest first: the one that has waited longest leads. Pure; tests pin it. */
 export function waitingDecisions(state: State): Decision[] {
@@ -14,36 +11,30 @@ export function waitingDecisions(state: State): Decision[] {
   return [...pendingDecisions(state)].sort((a, b) => a.createdAt - b.createdAt);
 }
 
-/**
- * 「기다림 줄」 — on the phone home, what waits on the owner as one line per question, above everything else.
- * Tapping a line opens that question in 확인할 일, where it is answered.
- * 2026.11.11 : 홈이 확인 카드를 통째로 다시 깔아 「확인할 일」 탭과 같은 것을 두 번 보였다.
- * 홈은 「답할 것이 있나」만 말하고, 답은 확인할 일에서 한다.
- * 2026.11.22 : 미리보기는 한 줄로 접고, 나머지는 제목 행 오른쪽의 경로로 보낸다 — 맡기기 입력이
- * 긴 줄 아래에 묻히지 않게. 기다림이 없으면 이 band 를 비우고, 총 건수는 제목에 그대로 둔다.
- */
-export function WaitingLine({ state, now, navigate, className }: { state: State; now: number; navigate(path: string): void; className?: string }) {
+/** The phone shows the longest-waiting request and takes its answer to 확인할 일. */
+export function WaitingLine({ state, now, navigate }: { state: State; now: number; navigate(path: string): void }) {
   const waiting = waitingDecisions(state);
-  if (!waiting.length) return null;
-  const names = new Map(state.ghosts.map(ghost => [ghost.id, ghost.name]));
-  const rest = waiting.length - SHOWN;
-  return <section className={['waiting-line', className].filter(Boolean).join(' ')} aria-labelledby="waiting-line-title">
+  const decision = waiting[0];
+  if (!decision) return null;
+  const more = waiting.length - 1;
+  const name = state.ghosts.find(ghost => ghost.id === decision.ghostId)?.name;
+  return <section className="waiting-line" aria-labelledby="waiting-line-title">
     <header className="home__band-head">
-      <h2 id="waiting-line-title" className="section-title">답을 기다림<span className="count">{waiting.length}</span></h2>
-      {rest > 0 && <button type="button" className="link-quiet" aria-label={`확인할 일에서 나머지 ${rest}건 보기`}
-        onClick={() => navigate('/inbox')}>나머지 {rest}건<ArrowRight size={13} aria-hidden="true"/></button>}
+      <h2 id="waiting-line-title" className="section-title">확인 필요</h2>
+      {more > 0 && <button type="button" className="link-quiet" aria-label={`확인할 일에서 나머지 ${more}건 보기`}
+        onClick={() => navigate('/inbox')}>나머지 보기<ArrowRight size={13} aria-hidden="true"/></button>}
     </header>
     <ul>
-      {waiting.slice(0, SHOWN).map(decision => <li key={decision.id}>
+      <li>
         <button type="button" onClick={() => navigate(`/inbox?decision=${encodeURIComponent(decision.id)}`)}>
-          <DotAvatar profileId={decision.ghostId} tone={toneFor(decision.ghostId)} size={28}/>
+          <span className="waiting-line__mark" aria-hidden="true"><PresenceAvatar ghostId={decision.ghostId} state="attention" size={24}/></span>
           <span className="waiting-line__copy">
             <span className="waiting-line__question">{decisionHeading(decision, state)}</span>
-            <span className="waiting-line__meta">{names.get(decision.ghostId) ?? 'Ghost'} · {decisionChip(decision)} · <time className="tabular">{relativeTime(decision.createdAt, now)}</time></span>
+            <span className="waiting-line__meta">{name ?? 'Ghost'} · {decisionChip(decision)}</span>
           </span>
-          <ArrowRight aria-hidden="true"/>
+          <time className="tabular">{relativeTime(decision.createdAt, now)}</time>
         </button>
-      </li>)}
+      </li>
     </ul>
   </section>;
 }

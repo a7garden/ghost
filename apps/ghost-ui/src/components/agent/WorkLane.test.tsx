@@ -18,6 +18,8 @@ describe('lane state reading', () => {
     const markup = render(work());
     expect(markup).toContain('<span class="lane__state" aria-hidden="true">진행 중</span>');
     expect(markup).toContain('class="sr-only">진행 중</span>');
+    expect(markup).toContain('role="img" aria-label="진행"');
+    expect(render(work({ state: 'done' }))).not.toContain('lane__track');
   });
 
   it('says 확인 필요 while the owner is the one waited on', () => {

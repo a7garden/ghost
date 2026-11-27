@@ -113,9 +113,12 @@ function Machinery({ scope, onPart }: { scope: Scope; onPart(id: string): void }
   const { state } = useHostState(store);
   return <section className="project-machinery" aria-label={uiTerms.advanced}>
     <h2 className="section-title">{uiTerms.advanced}</h2>
-    <div>{settingsParts.map(item => <button key={item.id} type="button" className="project-drill" onClick={() => onPart(item.id)}>
-      <span>{item.label}</span><span className="project-drill__summary">{summaryOf(item.id, scope, state)}</span><ChevronRight size={15} aria-hidden="true"/>
-    </button>)}</div>
+    <ul className="project-list">{settingsParts.map(item => <li key={item.id}>
+      <button type="button" className="project-item project-drill" onClick={() => onPart(item.id)}>
+        <span className="project-item__title">{item.label}</span>
+        <span className="project-item__value">{summaryOf(item.id, scope, state)}</span><ChevronRight size={15} aria-hidden="true"/>
+      </button>
+    </li>)}</ul>
   </section>;
 }
 

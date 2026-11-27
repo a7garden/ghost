@@ -12,15 +12,16 @@ const MAX_BODY_BYTES = 1_048_576;
 const EMPTY_DRAFT = { title: '', body: '', profile: 'pdc-markdown/1' as EditableProfile };
 
 /** The document itself: legacy profiles read-only, edits guarded by the content hash. */
-export default function PageEditor({ scopeId, pageId, onClose, onSaved, onDirtyChange }: {
+export default function PageEditor({ scopeId, pageId, onClose, onSaved, onDirtyChange, autoFocus = true }: {
   scopeId: string;
   /** null creates a new page. */
   pageId: string | null;
   onClose(): void;
-  /** Refreshes the document list after a save. */
-  onSaved(): void;
+  /** Refreshes the index and selects the saved document, including a newly created one. */
+  onSaved(pageId: string): void;
   /** Whether the open document holds edits that are not saved yet; a brand-new empty document holds none. */
   onDirtyChange?(dirty: boolean): void;
+  autoFocus?: boolean;
 }) {
   const { client } = useHost();
   const [view, setView] = useState<PageView | null>(null);
@@ -35,8 +36,8 @@ export default function PageEditor({ scopeId, pageId, onClose, onSaved, onDirtyC
   const pane = useRef<HTMLElement>(null);
   const titleField = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
-    (pageId === null ? titleField.current : pane.current)?.focus();
-  }, [pageId]);
+    if (autoFocus) (pageId === null ? titleField.current : pane.current)?.focus({ preventScroll: true });
+  }, [autoFocus, pageId]);
   const load = (targetId: string) => {
     setLoading(true); setLoadError('');
     client.page(scopeId, targetId).then(page => {
@@ -73,7 +74,7 @@ export default function PageEditor({ scopeId, pageId, onClose, onSaved, onDirtyC
       if (!view) { setView({ pageId: result.pageId, locator: '', title, profile: draft.profile, body: draft.body, hash: result.hash }); }
       else setView(current => current ? { ...current, title, body: draft.body, hash: result.hash } : current);
       setConflict(false);
-      onSaved();
+      onSaved(result.pageId);
     } catch (reason) {
       if (isConflict(reason)) {
         setConflict(true);
@@ -96,6 +97,7 @@ export default function PageEditor({ scopeId, pageId, onClose, onSaved, onDirtyC
         <ChevronLeft size={15} aria-hidden="true"/>{unsaved ? (view ? '수정 취소' : '취소') : '문서 목록'}
       </Button>
       <div className="doc-pane__tools">
+        {ready && view && <span className="doc-pane__profile">{view.profile}{!editable && ' · 읽기 전용'}</span>}
         {ready && !view && <select className="doc-pane__format" aria-label="형식" value={draft.profile} disabled={saving}
           onChange={event => {
             const profile = event.target.value as EditableProfile;
@@ -122,10 +124,7 @@ export default function PageEditor({ scopeId, pageId, onClose, onSaved, onDirtyC
       {editable
         ? <input ref={titleField} className="doc-page__title" aria-label="제목" placeholder="문서 제목" value={draft.title}
           required maxLength={512} readOnly={saving} onChange={event => setDraft(current => ({ ...current, title: event.target.value }))}/>
-        : <>
-          <h2 className="doc-page__title">{title}</h2>
-          <p className="doc-page__legacy">이전 형식({view?.profile}) · 읽기 전용</p>
-        </>}
+        : <h2 className="doc-page__title">{title}</h2>}
       {draft.profile === 'pdc-html/1'
         ? <>
           <div className="doc-page__mode">

@@ -181,7 +181,7 @@ for (const viewport of [
       await page.getByRole('button', { name: '수정', exact: true }).click();
       const editor = page.getByRole('form', { name: '맡긴 일 수정', exact: true });
       const title = page.locator('.work-head').getByRole('textbox', { name: '제목', exact: true });
-      const criteria = page.locator('.work-bar').getByRole('textbox', { name: '완료 기준', exact: true });
+      const criteria = editor.getByRole('textbox', { name: '완료 기준', exact: true });
       const brief = editor.getByRole('textbox', { name: '할 일', exact: true });
       await expect(page.getByRole('dialog')).toHaveCount(0);
       await expect(title).toBeFocused();

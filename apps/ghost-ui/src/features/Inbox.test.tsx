@@ -25,19 +25,20 @@ const render = (focus: string | null = null) => renderToStaticMarkup(createEleme
 
 it('lists what waits as rows with quick actions, and keeps what the main is deciding apart', () => {
   const markup = render();
-  expect(markup).toContain('추천대로 처리 1');
   expect(markup).toContain('「A」');
   expect(markup).toContain('메인에게');
   expect(markup).toContain('나중에');
-  // 두 건만 주인 차례다. 맡긴 질문은 「메인 Ghost가 판단 중」에 따로.
-  expect(markup).toMatch(/확인 필요<span class="count">2<\/span>/);
-  expect(markup).toContain('메인 Ghost가 판단 중');
-  // 접힌 줄은 근거를 펼치지 않는다.
+  expect(markup.match(/aria-controls="queue-card-/g)).toHaveLength(2);
+  expect(markup).toContain('data-inbox-kind="handed-over"');
   expect(markup).not.toContain('자세한 근거');
 });
 
-it('opens the linked decision in place', () => {
-  expect(render('quick')).toContain('자세한 근거');
+it('opens a deep link in the compact detail screen, apart from the queue', () => {
+  const markup = render('quick');
+  expect(markup).toContain('id="queue-card-quick"');
+  expect(markup).toContain('자세한 근거');
+  expect(markup).not.toContain('aria-controls="queue-card-');
+  expect(markup).not.toContain('data-inbox-kind="handed-over"');
 });
 
 it('shows the deadline on a folded row and keeps results out of the bulk recommendation', () => {
@@ -53,6 +54,5 @@ it('shows the deadline on a folded row and keeps results out of the bulk recomme
   expect(markup).toContain('마감 12분');
   expect(markup.match(/마감 \d/g)).toHaveLength(1);
   expect(markup).toContain('추천대로 처리 1');
-  // Folding is not hiding: both still count.
-  expect(markup).toMatch(/확인 필요<span class="count">2<\/span>/);
+  expect(markup.match(/aria-controls="queue-card-/g)).toHaveLength(2);
 });

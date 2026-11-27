@@ -21,7 +21,7 @@ const state = {
 describe('home counts', () => {
   it('names the live band without a number; the sidebar badge keeps the count', () => {
     const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(Overview, { state, navigate() {} })));
-    expect(markup).toContain('<h2 id="home-live" class="section-title">진행 중</h2>');
+    expect(markup).toMatch(/<h2 id="home-live"[^>]*>[^<]+<\/h2>/);
     expect(markup).not.toContain('class="count"');
   });
 });

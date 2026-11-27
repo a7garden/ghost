@@ -60,7 +60,7 @@ export async function screenshot(page: Page, name: string): Promise<void> {
     for (const row of rows) row.setAttribute('data-visual-text', row.textContent!.replace(runId, '작업 ID'));
   }, RUN_ID);
   // The work's isolated checkout has a new temporary directory on each run.
-  await page.locator('.work-criteria p').filter({ hasText: /ghost-visual-regression-[^/]+\/primary\/projects/ })
+  await page.locator('.work-aside__environment').filter({ hasText: /ghost-visual-regression-[^/]+\/primary\/projects/ })
     .evaluateAll(rows => { for (const row of rows) row.setAttribute('data-visual-text', '이 Mac · /Projects/ghost'); });
   await page.getByRole('region', { name: '모델 설정' }).getByText(/^http:\/\/127\.0\.0\.1:\d+\/v1$/, { exact: true })
     .evaluateAll(rows => { for (const row of rows) row.setAttribute('data-visual-text', 'http://127.0.0.1:8080/v1'); });

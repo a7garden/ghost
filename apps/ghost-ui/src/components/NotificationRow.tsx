@@ -10,7 +10,8 @@ export function NotificationRow({ item, ghostName, now, disabled, onOpen }: {
   item: Notification; ghostName: string; now: number; disabled?: boolean; onOpen(): void;
 }) {
   const message = item.kind === 'message';
-  return <li data-unread={!item.readAt || undefined}>
+  const unread = item.readAt === null;
+  return <li data-unread={unread || undefined}>
     <button type="button" className="feed__row" disabled={disabled} onClick={onOpen} data-inbox-kind="notification">
       <span className="feed__mark">{message && item.ghostId ? <DotAvatar profileId={item.ghostId} tone={toneFor(item.ghostId)} size={22}/>
         : item.kind === 'work_done' ? <StateGlyph state="done"/> : item.kind === 'work_failed' ? <StateGlyph state="failed"/>
@@ -18,8 +19,8 @@ export function NotificationRow({ item, ghostName, now, disabled, onOpen }: {
       <span className="feed__copy"><span className="feed__title">{message ? ghostName : item.title}</span>
         {item.body && <span className="feed__body">{item.body}</span>}
       </span>
-      <span className="feed__meta">{!message && item.ghostId && <span>{ghostName}</span>}<time className="tabular">{relativeTime(item.createdAt, now)}</time></span>
-      {!item.readAt && <span className="feed__dot"><span className="sr-only">읽지 않음</span></span>}
+      <span className="feed__meta">{!message && item.ghostId && <span>{ghostName}</span>}<time className="tabular" dateTime={new Date(item.createdAt).toISOString()}>{relativeTime(item.createdAt, now)}</time></span>
+      {unread && <span className="feed__dot"><span className="sr-only">읽지 않음</span></span>}
     </button>
   </li>;
 }

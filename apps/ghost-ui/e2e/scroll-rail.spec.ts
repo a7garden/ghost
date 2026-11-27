@@ -3,7 +3,7 @@ import { readRunState } from './run-state';
 
 test('the rail follows owner scrolling and scrubbing, not automatic movement', async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 640 });
-  await page.goto(`${readRunState().baseUrl}/#/`);
+  await page.goto(`${readRunState().baseUrl}/#/inbox`);
   const sheet = page.locator('.shell-sheet');
   await expect.poll(() => sheet.evaluate(element => element.scrollHeight - element.clientHeight)).toBeGreaterThan(100);
   await sheet.hover();

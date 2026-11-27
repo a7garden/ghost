@@ -1,0 +1,48 @@
+@layer components {
+.goals-page { display: grid; align-content: start; gap: 22px; min-width: 0; }
+.goals-page > .ghost-page-header { margin-bottom: 0; }
+.goals-page .ghost-page-header__title { font-weight: 600; }
+.goals-page > .goals-add { justify-self: end; }
+.goals-add { display: flex; flex-direction: row-reverse; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.goals-add > span { color: var(--ghost-ink3); font-size: 12px; line-height: 1.5; }
+.goals-empty { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; color: var(--ghost-ink3); font-size: var(--text-ui); }
+.goals-empty p { margin: 0; }
+.goal-group { display: grid; gap: 8px; min-width: 0; }
+.goal-group__rows { min-width: 0; }
+.goal-group__rows:has(> :nth-child(2)) { border: 1px solid var(--ghost-line); border-radius: var(--radius-control); background: var(--ghost-surface); }
+.goal-group__rows > * + * { border-top: 1px solid var(--ghost-line); }
+.goal-section { min-width: 0; padding: 12px; }
+.goal-section[data-closed] { padding: 0 12px 12px; }
+.goal-section__heading, .goals-closed__goal > summary {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 10px;
+}
+.goal-row__glyph { display: grid; width: 18px; height: 21px; place-items: center; }
+.goal-row__copy { display: grid; gap: 2px; min-width: 0; }
+.goal-row__title { margin: 0; font-size: 15px; font-weight: 560; line-height: 1.4; overflow-wrap: anywhere; }
+.goal-row__meta, .goal-row__time { margin: 0; color: var(--ghost-ink3); font-size: 12px; line-height: 1.45; }
+.goal-row__time { text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.goal-section__heading > .goal-actions { justify-content: end; }
+.goal-section__body { min-width: 0; padding-inline-start: 28px; }
+.goal-section__body > .goal-statement__clauses { margin-top: 8px; }
+.goal-section__body .goal-statement__clause, .goal-section__body .goal-statement__clause p { font-size: var(--text-ui); }
+.goal-section__body > .goal-line__empty { margin: 12px 0 0; font-size: 12px; }
+.goal-section__body .milestone-detail { border-inline-start: 2px solid var(--ghost-line-strong); border-radius: 0; background: none; box-shadow: none; }
+.goals-closed > summary { width: fit-content; min-height: 40px; padding-block: 10px; color: var(--ghost-ink3); font-size: 12px; font-weight: 600; }
+.goals-closed__goal > summary { grid-template-columns: 18px minmax(0, 1fr) auto 12px; padding: 12px; }
+.goals-closed__goal > summary::before { grid-column: 4; grid-row: 1; margin: 4px 0 0; color: var(--ghost-ink3); }
+.goals-closed__goal > summary:hover { background: var(--ghost-hover); }
+.goals-closed__goal[open] > summary { background: var(--ghost-hover2); box-shadow: inset 2px 0 var(--ghost-ink3); }
+.goals-page summary:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
+@media (min-width: 56rem) {
+  .goals-decisions .deck__body:has(.deck__index) { grid-template-columns: minmax(11rem, 30%) minmax(0, 1fr); align-items: start; }
+}
+@media (max-width: 36rem) {
+  .goal-section { padding-inline: 9px; }
+  .goal-section__heading { column-gap: 8px; }
+  .goal-section__heading > .goal-actions { gap: 0; }
+  .goal-section__body { padding-inline-start: 26px; }
+}
+}

@@ -2,14 +2,13 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type K
 import { ChevronRight, Pencil, Play, Square } from 'lucide-react';
 import { Button, Page, InlineError, SkeletonChat, SkeletonText } from '../ui';
 import type { CodingRun, Effect, Message, State, Verdict, Work, WorkDetail as WorkDetailData } from '@ghost/contract';
-import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { LifecycleTrack, StateGlyph, glyphLabel, workGlyph, type GlyphState } from '../components/agent';
 import { DotAvatar } from '../components/DotAvatar';
 import { GhostRunLabel, LiveReply, Transcript, endsInGhostRun } from '../components/TranscriptMessage';
 import { ArtifactPreview } from '../components/ArtifactPreview';
 import { InlineText, MessageBody } from '../components/MessageBody';
 import { DecisionCard } from './Decision';
-import { toneFor } from './ghostState';
+import { handedOver, liveWork, pendingDecisions, toneFor } from './ghostState';
 import { useConversationFeed } from './conversationFeed';
 import { absoluteTime, relativeTime, useNow } from './time';
 import { useHost } from '../host/context';
@@ -25,6 +24,7 @@ import { CancelWorkDialog } from './WorkViews';
 import { fromLocalInput, toLocalInput } from './Schedules';
 import { WorkCriteriaField, WorkDeadlineField, workWriteError } from './WorkBrief';
 import { embeddedSessionPath } from './CodingSessionModel';
+import './Work.css';
 
 const effectGlyph: Record<Effect['state'], GlyphState> = { pending: 'running', done: 'done', unknown: 'blocked', denied: 'cancelled' };
 const effectLabel: Record<Effect['state'], string> = { pending: '실행 중', done: '완료', unknown: '결과 미확정', denied: '거부됨' };
@@ -97,16 +97,16 @@ function WorkDetailPage({ state, workId, navigate }: WorkDetailProps) {
   const { work, children, effects, artifacts, ancestors, decisions } = detail;
   const brief = { text: work.brief, scopes: work.scopeReferences ?? [] };
   const pending = decisions.filter(decision => decision.state === 'pending');
-  const live = !TERMINAL_WORK_STATES.includes(work.state);
-  const needsOwner = pending.length > 0;
+  const live = liveWork(work);
+  const waitingOnOwner = pending.filter(decision => !handedOver(decision)).length;
+  const needsOwner = waitingOnOwner > 0;
   const glyph = workGlyph(work.state, needsOwner);
   const resumable = work.parentId === null && (work.state === 'failed' || work.state === 'blocked');
-  const pendingChildIds = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
+  const pendingChildIds = new Set(pendingDecisions(state).map(decision => decision.workId));
   // The bar's 확인 필요 points at the cards below; they keep their place at the top of the page.
   const showPending = () => {
     const section = pendingRef.current;
     if (!section) return;
-    // Scrolled on the next frame, once a panel the click folded is gone.
     requestAnimationFrame(() => {
       const warning = section.closest('.shell-sheet')?.querySelector(':scope > .connection-banner');
       section.style.scrollMarginTop = warning ? `${warning.getBoundingClientRect().height + 8}px` : '';
@@ -121,6 +121,15 @@ function WorkDetailPage({ state, workId, navigate }: WorkDetailProps) {
   // While a revision runs, the last verdict says why; the result it judged is no longer the answer.
   const revising = live && work.verdict?.outcome === 'revise';
   const verdict = work.verdict ? readVerdict(work.verdict, decisions) : null;
+  const criteria = judging ? '' : work.acceptance.criteria.trim();
+  const summary = revising ? null : work.result?.summary;
+  const hasResult = !judging && Boolean(verdict || summary || (!revising && artifacts.length));
+  const reason = workReason(work);
+  const reasonLine = reason && <p className="work-head__reason" data-state={work.state}><InlineText text={reason}/></p>;
+  const codingRuns = detail.codingRuns ?? [];
+  // Only the Mac is named; there the Ghost acts with the owner's own access.
+  const hostExecution = work.execution?.kind === 'host' ? work.execution : null;
+  const hasRail = Boolean(children.length || codingRuns.length || effects.length || hostExecution);
 
   const openEditor = () => { setSaveError(''); setDraft(work); };
   const closeEditor = () => {
@@ -172,7 +181,7 @@ function WorkDetailPage({ state, workId, navigate }: WorkDetailProps) {
   };
 
   return <Page className="work-detail" onKeyDown={editKeys}>
-    <WorkHeader work={work} ancestors={ancestors} glyph={glyph} pending={pending.length} criteria={judging ? '' : work.acceptance.criteria.trim()} ghostName={ghostName(work.ghostId)} now={now}
+    <WorkHeader work={work} ancestors={ancestors} glyph={glyph} pending={waitingOnOwner} ghostName={ghostName(work.ghostId)} now={now}
       link={live && link.state !== 'connected' && !link.quiet ? link.label : undefined} navigate={navigate} onPending={showPending}
       onEdit={live && !draft ? openEditor : undefined} editTrigger={editTrigger} onCancel={live && !draft ? () => setCancellingWorkId(work.id) : undefined}
       onResume={resumable && !draft ? () => run(() => client.send({ type: 'work.resume', workId: work.id })) : undefined}
@@ -180,33 +189,33 @@ function WorkDetailPage({ state, workId, navigate }: WorkDetailProps) {
         title: <input form={editFormId} className="work-brief-field work-brief-field--title" name="title" aria-label="제목" autoFocus
           defaultValue={draft.title} required maxLength={256} readOnly={saving} enterKeyHint="next"/>,
         deadline: <WorkDeadlineField form={editFormId} initial={initialDeadline} busy={saving}/>,
-        criteria: <WorkCriteriaField form={editFormId} initial={draft.acceptance.criteria} busy={saving}/>,
       } : undefined}/>
     {loadAlert}
     {error && <InlineError>{error}</InlineError>}
 
-    {pending.length > 0 && <section ref={pendingRef} tabIndex={-1} className="work-pending grid gap-3" aria-label="확인 필요">
-      {pending.map(decision => <DecisionCard key={decision.id} decision={decision} ghostName={ghostName(decision.ghostId)} workTitle={work.title} onResolved={() => void reload()}/>)}
-    </section>}
-
     <div className="work-body">
       <div className="work-main">
-        {(work.result || work.verdict) && !judging && <section className="work-section" aria-labelledby="work-result">
+        {live && <LifecycleTrack state={work.state} needsOwner={needsOwner} stageOnly className="work-detail__track"/>}
+        {(live || !hasResult) && reasonLine}
+        {pending.length > 0 && <section ref={pendingRef} tabIndex={-1} className="work-pending grid gap-3" aria-label="확인 필요">
+          {pending.map(decision => <DecisionCard key={decision.id} decision={decision} ghostName={ghostName(decision.ghostId)} workTitle={work.title} onResolved={() => void reload()}/>)}
+        </section>}
+        {hasResult && <section className="work-section work-result" aria-labelledby="work-result">
           <h2 id="work-result" className="section-title">{uiTerms.workResults}</h2>
-          <div className="receipt">
-            {work.verdict && verdict && <VerdictStamp verdict={work.verdict} judge={verdict.judge} note={verdict.note}/>}
-            {!revising && work.result?.summary && <div className="receipt__body"><MessageBody text={work.result.summary}/></div>}
-            {!revising && artifacts.length > 0 && <div className="receipt__files">{artifacts.map(artifact => <ArtifactPreview key={artifact.digest} artifact={artifact}/>)}</div>}
-          </div>
+          {work.verdict && verdict && <VerdictStamp verdict={work.verdict} judge={verdict.judge} note={verdict.note}/>}
+          {summary && <div className="work-result__summary"><MessageBody text={summary}/></div>}
+          {!revising && artifacts.length > 0 && <div className="receipt__files">{artifacts.map(artifact => <ArtifactPreview key={artifact.digest} artifact={artifact}/>)}</div>}
+          {!live && reasonLine}
         </section>}
 
-        <section className="work-section" aria-labelledby="work-brief">
+        <section className="work-section work-instructions" aria-labelledby="work-brief">
           <h2 id="work-brief" className="section-title">할 일</h2>
           <ProjectChips scopes={brief.scopes}/>
           {draft
             ? <form ref={editForm} id={editFormId} className="work-brief-edit" aria-label="맡긴 일 수정" aria-busy={saving || undefined} onSubmit={saveEdit}>
               <textarea className="work-brief-field work-brief-field--body" name="brief" aria-label="할 일" defaultValue={draft.brief}
                 required maxLength={32768} rows={4} readOnly={saving}/>
+              <WorkCriteriaField initial={draft.acceptance.criteria} busy={saving}/>
               {!live && <InlineError>이미 끝난 일은 수정할 수 없습니다.</InlineError>}
               {saveError && <InlineError>{saveError}</InlineError>}
               <div className="work-brief-actions">
@@ -215,30 +224,36 @@ function WorkDetailPage({ state, workId, navigate }: WorkDetailProps) {
               </div>
             </form>
             : <div className="work-brief"><MessageBody text={brief.text}/></div>}
-          {/* Only the Mac is worth naming: there the Ghost acts with the owner's own access. */}
-          {work.execution?.kind === 'host' && <div className="work-criteria"><span>실행 환경</span><p>{executionLabel.host} · {work.execution.cwd}</p></div>}
+          {!draft && criteria && <section className="work-instructions__criteria" aria-labelledby="work-criteria">
+            <h3 id="work-criteria" className="section-title">완료 기준</h3>
+            <MessageBody text={criteria}/>
+          </section>}
           {work.activityId && <Button variant="ghost" size="sm" onClick={() => navigate('/settings?tab=activities')}>자동 활동 열기</Button>}
         </section>
 
         <WorkConversation work={work} ghostName={ghostName(work.ghostId)} onEdit={live && !draft ? openEditor : undefined}/>
       </div>
 
-      <aside className="work-aside">
+      {hasRail && <aside className="work-aside">
         {/* Parents are the trail above the title; only the Work handed on from here is listed. */}
-        {children.length > 0 && <AsideSection compact={compact} title="위임" count={children.length}>
+        {children.length > 0 && <AsideSection compact={compact} title="위임">
           <ol className="branch-map">
-            {children.map(child => <BranchNode key={child.id} work={child} ghostName={ghostName(child.ghostId)} needsOwner={pendingChildIds.has(child.id)}
+            {children.map(child => <BranchNode key={child.id} work={child} ghostName={ghostName(child.ghostId)} needsOwner={pendingChildIds.has(child.id)} now={now}
               onOpen={() => navigate(`/work/${encodeURIComponent(child.id)}`)}/>)}
           </ol>
         </AsideSection>}
 
-        {(detail.codingRuns ?? []).length > 0 && <AsideSection compact={compact} title="코딩" count={detail.codingRuns!.length}>
-          <WorkCodingRuns runs={detail.codingRuns!} now={now}/>
+        {hostExecution && <AsideSection compact={compact} title="실행 환경">
+          <p className="work-aside__environment">{executionLabel.host} · {hostExecution.cwd}</p>
         </AsideSection>}
 
-        <AsideSection compact={compact} title="실행 기록" count={effects.length}>
-          {effects.length > 0 ? <ol className="timeline">{[...effects].sort((a, b) => a.createdAt - b.createdAt).map(effect => {
-            return <li key={effect.id} data-state={effect.state}>
+        {codingRuns.length > 0 && <AsideSection compact={compact} title="코딩">
+          <WorkCodingRuns runs={codingRuns} now={now}/>
+        </AsideSection>}
+
+        {effects.length > 0 && <AsideSection compact={compact} title="실행 기록">
+          <ol className="timeline">{[...effects].sort((a, b) => a.createdAt - b.createdAt).map(effect =>
+            <li key={effect.id} data-state={effect.state}>
               <StateGlyph state={effectGlyph[effect.state]} size={14}/>
               <div className="timeline__copy">
                 <span className="timeline__summary">{effect.summary}</span>
@@ -248,97 +263,68 @@ function WorkDetailPage({ state, workId, navigate }: WorkDetailProps) {
                 </span>
                 {effect.result && <details className="timeline__result"><summary>출력</summary><pre>{effect.result}</pre></details>}
               </div>
-            </li>;
-          })}</ol> : <p className="work-aside__empty">실행 기록 없음</p>}
-        </AsideSection>
-      </aside>
+            </li>
+          )}</ol>
+        </AsideSection>}
+      </aside>}
     </div>
     {cancellingWorkId === work.id && <CancelWorkDialog work={work} onCancel={async () => { await client.send({ type: 'work.cancel', workId: work.id }); void reload(); }} onClose={() => setCancellingWorkId(null)}/>}
   </Page>;
 }
 
-/**
- * The top of a 맡긴 일: where it sits (parents, title, and the lifecycle while it runs), then one bar that
- * answers 「where is it, and what is mine to do」 — state and deadline, who has it since when, why it stopped,
- * then 완료 기준 and the owner's moves. It is the parent's direct child (a sibling of the header) so the
- * reason line can hang right beneath the bar on every size.
- */
-export function WorkHeader({ work, ancestors, glyph, pending, criteria, ghostName, now, link, navigate, onPending, onEdit, editTrigger, onCancel, onResume, editor }: {
+/** Where the Work stands and what the owner can do, together above the evidence. */
+export function WorkHeader({ work, ancestors, glyph, pending, ghostName, now, link, navigate, onPending, onEdit, editTrigger, onCancel, onResume, editor }: {
   work: Work; ancestors: Work[]; glyph: GlyphState; pending: number;
-  /** 완료 기준 to unfold; empty when a result card below already shows it. */
-  criteria: string;
   ghostName: string; now: number;
   /** The host link's label (재연결 중…, 연결 끊김) while what this page shows may be behind the host. */
   link?: string;
   navigate(path: string): void; onPending(): void; onEdit?(): void; onCancel?(): void; onResume?(): void;
   editTrigger?: Ref<HTMLButtonElement>;
-  /** The author's blanks replace the title, date, and criteria in the header's own slots. */
-  editor?: { title: ReactNode; deadline: ReactNode; criteria: ReactNode };
+  editor?: { title: ReactNode; deadline: ReactNode };
 }) {
-  const [open, setOpen] = useState(false);
-  const panelId = useId();
-  const live = !TERMINAL_WORK_STATES.includes(work.state);
+  const live = liveWork(work);
   const overdue = live && work.deadlineAt !== null && work.deadlineAt < now;
   const verbs = Boolean(onEdit || onCancel || onResume);
-  const showCriteria = !editor && criteria;
-  const reason = workReason(work);
   const at = live ? work.createdAt : work.endedAt ?? work.updatedAt;
-  // Escape folds the open criteria back onto its toggle.
-  const closeOnEscape = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (editor || event.key !== 'Escape' || !open || !event.currentTarget.contains(event.target as Node)) return;
-    event.currentTarget.querySelector<HTMLButtonElement>('[aria-expanded="true"]')?.focus();
-    setOpen(false);
-  };
-  return <>
-    <header className="work-head">
-      {ancestors.length > 0 && <nav className="work-head__trail" aria-label="상위 맡긴 일">
-        {ancestors.map(ancestor => <span key={ancestor.id}>
-          <button type="button" onClick={() => navigate(`/work/${encodeURIComponent(ancestor.id)}`)}>{ancestor.title}</button>
-          <ChevronRight size={12} aria-hidden="true"/>
-        </span>)}
-      </nav>}
-      {editor
-        ? <><h1 className="sr-only">{work.title}</h1>{editor.title}</>
-        : <h1 className="work-head__title">{work.title}</h1>}
-      {/* A settled Work has no next step to point at: its state word says how it ended. */}
-      {live && <LifecycleTrack state={work.state} needsOwner={pending > 0} stageOnly className="work-head__track"/>}
-    </header>
-    <div className="work-bar" onKeyDown={closeOnEscape}>
+  return <header className="work-head">
+    {ancestors.length > 0 && <nav className="work-head__trail" aria-label="상위 맡긴 일">
+      {ancestors.map(ancestor => <span key={ancestor.id}>
+        <button type="button" onClick={() => navigate(`/work/${encodeURIComponent(ancestor.id)}`)}>{ancestor.title}</button>
+        <ChevronRight size={12} aria-hidden="true"/>
+      </span>)}
+    </nav>}
+    {editor
+      ? <><h1 className="sr-only">{work.title}</h1>{editor.title}</>
+      : <h1 className="work-detail__title">{work.title}</h1>}
+    <div className="work-bar">
       <div className="work-bar__state">
         {glyph !== 'attention' && <StateGlyph state={glyph} label/>}
-        {pending > 0 && <button type="button" className="work-bar__pending" onClick={() => { setOpen(false); onPending(); }}>
+        {pending > 0 && <button type="button" className="work-bar__pending" onClick={onPending}>
           <StateGlyph state="attention" label/><span className="tabular">{pending}</span>
         </button>}
-        {editor ? editor.deadline : live && work.deadlineAt && <span className="work-bar__due" data-overdue={overdue || undefined}>{overdue ? '기한 지남' : '기한'} {absoluteTime(work.deadlineAt)}</span>}
+        {editor ? editor.deadline : live && work.deadlineAt !== null && <span className="work-bar__due" data-overdue={overdue || undefined}>{overdue ? '기한 지남' : '기한'} {absoluteTime(work.deadlineAt)}</span>}
       </div>
-      {link && <p className="work-bar__link" role="status">{link} · 마지막 기록 {relativeTime(work.updatedAt, now)}</p>}
       <div className="work-bar__who">
         <span className="work-head__who"><DotAvatar profileId={work.ghostId} tone={toneFor(work.ghostId)} size={16}/>{ghostName}</span>
-        <span title={absoluteTime(at)}>{relativeTime(at, now)} {live ? '맡김' : '끝남'}</span>
+        <span aria-hidden="true">·</span>
+        <time dateTime={new Date(at).toISOString()} title={absoluteTime(at)}>{relativeTime(at, now)} {live ? '맡김' : '끝남'}</time>
       </div>
-      {(showCriteria || verbs) && <div className="work-bar__actions">
-        {showCriteria && <button type="button" className="work-bar__toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>
-          <span aria-hidden="true" className="fold-mark"/>완료 기준
-        </button>}
-        {verbs && <span className="work-bar__verbs">
-          {onEdit && <Button ref={editTrigger} variant="outline" onClick={onEdit}><Pencil/>수정</Button>}
-          {onCancel && <Button variant="outline" onClick={onCancel}><Square/>취소</Button>}
+      {verbs && <div className="work-bar__actions">
+        <span className="work-bar__verbs">
+          {onEdit && <Button ref={editTrigger} variant="ghost" onClick={onEdit}><Pencil/>수정</Button>}
+          {onCancel && <Button variant="ghost" onClick={onCancel}><Square/>취소</Button>}
           {onResume && <Button onClick={onResume}><Play/>재개</Button>}
-        </span>}
+        </span>
       </div>}
-      {editor ? <div className="work-bar__criteria-edit">{editor.criteria}</div>
-        : open && showCriteria && <div id={panelId} className="work-bar__panel" role="region" aria-label="완료 기준">
-          <div className="work-criteria"><MessageBody text={criteria}/></div>
-        </div>}
+      {link && <p className="work-bar__link" role="status">{link} · 마지막 기록 {relativeTime(work.updatedAt, now)}</p>}
     </div>
-    {reason && <p className="work-head__reason" data-state={work.state}><InlineText text={reason}/></p>}
-  </>;
+  </header>;
 }
 
-/** 위임 and 실행 기록 sit beside the work on a wide sheet; on a phone they follow it, folded to their title line. */
-function AsideSection({ compact, title, count, children }: { compact: boolean; title: string; count?: number; children: ReactNode }) {
+/** Sparse evidence stays beside the work on wide sheets and folds below it on phones. */
+function AsideSection({ compact, title, children }: { compact: boolean; title: string; children: ReactNode }) {
   const headingId = useId();
-  const heading = <h2 id={headingId} className="section-title">{title}{count !== undefined && <span className="count">{count || ''}</span>}</h2>;
+  const heading = <h2 id={headingId} className="section-title">{title}</h2>;
   if (compact) return <details className="work-section work-fold"><summary>{heading}</summary>{children}</details>;
   return <section className="work-section" aria-labelledby={headingId}>{heading}{children}</section>;
 }
@@ -346,7 +332,7 @@ function AsideSection({ compact, title, count, children }: { compact: boolean; t
 /** How a result was judged and by whom; what the judge said folds beneath when there is something to say. */
 export function VerdictStamp({ verdict, judge, note }: { verdict: Verdict; judge: string; note: string | null }) {
   return <div className="verdict" data-outcome={verdict.outcome}>
-    <StateGlyph state={verdict.outcome === 'pass' ? 'done' : verdict.outcome === 'fail' ? 'failed' : 'attention'} size={15}/>
+    <span aria-hidden="true"><StateGlyph state={verdict.outcome === 'pass' ? 'done' : verdict.outcome === 'fail' ? 'failed' : 'attention'} size={15}/></span>
     <strong>{verdictText[verdict.outcome]}</strong>
     <span>{judge} · {absoluteTime(verdict.at)}</span>
     {note && <details><summary>사유</summary><p>{note}</p></details>}
@@ -354,13 +340,14 @@ export function VerdictStamp({ verdict, judge, note }: { verdict: Verdict; judge
 }
 
 /** One Work handed on from this one: who carries it and where it stands. */
-function BranchNode({ work, ghostName, needsOwner, onOpen }: { work: Work; ghostName: string; needsOwner: boolean; onOpen(): void }) {
+function BranchNode({ work, ghostName, needsOwner, now, onOpen }: { work: Work; ghostName: string; needsOwner: boolean; now: number; onOpen(): void }) {
   const glyph = workGlyph(work.state, needsOwner);
+  const at = work.endedAt ?? work.updatedAt;
   return <li className="branch-map__node">
     <button type="button" onClick={onOpen}>
-      <span className="branch-map__dot"><DotAvatar profileId={work.ghostId} tone={toneFor(work.ghostId)} size={18}/></span>
+      <span className="branch-map__dot" aria-hidden="true"><StateGlyph state={glyph} size={16}/></span>
       <span className="branch-map__copy"><span>{work.title}</span><small>{ghostName} · {glyphLabel[glyph]}</small></span>
-      <StateGlyph state={glyph} size={14}/>
+      <time className="work-aside__time" dateTime={new Date(at).toISOString()} title={absoluteTime(at)}>{relativeTime(at, now)}</time>
     </button>
   </li>;
 }

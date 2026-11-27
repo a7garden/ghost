@@ -92,8 +92,13 @@ test('scope, document, slot, MCP, policy and conflict-aware history use the real
   await command(page, { type: 'document.save', scopeId: scope.id, pageId: null, expectedHash: null, title: '검증 문서', body: '# 검증\n\n소유자가 남긴 문서입니다.', profile: 'pdc-markdown/1' });
   await projectTabs.getByRole('button', { name: '문서', exact: true }).click();
   await page.reload();
-  await page.getByRole('button', { name: '검증 문서, pdc-markdown/1', exact: true }).click();
-  await expect(page.getByRole('region', { name: '검증 문서' }).getByRole('textbox', { name: '제목', exact: true })).toHaveValue('검증 문서');
+  const documentRow = page.getByRole('button', { name: '검증 문서', exact: true });
+  const split = await page.evaluate(() => matchMedia('(min-width: 56rem)').matches);
+  if (!split) await documentRow.click();
+  else await expect(documentRow).toHaveAttribute('aria-current', 'true');
+  const documentPane = page.getByRole('region', { name: '검증 문서' });
+  await expect(documentPane.getByRole('textbox', { name: '제목', exact: true })).toHaveValue('검증 문서');
+  if (!split) await documentPane.getByRole('button', { name: '문서 목록', exact: true }).click();
   await projectTabs.getByRole('button', { name: '설정', exact: true }).click();
   await page.locator('.project-bar__name').getByRole('button').click();
   await page.getByRole('textbox', { name: '프로젝트 이름', exact: true }).fill('수정한 프로젝트');
