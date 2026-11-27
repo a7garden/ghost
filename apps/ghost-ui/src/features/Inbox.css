@@ -9,12 +9,8 @@
   .inbox__group-head > .section-title { min-height: 24px; }
   .inbox__empty { margin: 0; color: var(--ghost-ink2); font-size: var(--text-ui); }
 
-  .inbox__rows { min-width: 0; margin: 0; padding: 0; list-style: none; }
-  .inbox__rows:has(> li + li) { border: 1px solid var(--ghost-line); border-radius: var(--radius-control); }
-  .inbox__rows--queue { background: var(--ghost-surface); }
-  .inbox__rows--queue > li:first-child { border-start-start-radius: inherit; border-start-end-radius: inherit; }
-  .inbox__rows--queue > li:last-child { border-end-start-radius: inherit; border-end-end-radius: inherit; }
-  .inbox__rows--queue:not(:has(> li + li)) { background: transparent; }
+  /* A ledger, not a stack of cards: one hairline under the group label, hairlines between rows. */
+  .inbox__rows { min-width: 0; margin: 0; padding: 0; list-style: none; border-block-start: 1px solid var(--ghost-line); }
   .inbox__rows > li + li { border-block-start: 1px solid var(--ghost-line); }
 
   .inbox-row {
@@ -38,13 +34,12 @@
   .inbox-row__mark { display: grid; place-items: center; min-height: 22px; color: var(--ghost-ink3); }
   .inbox-row__copy { display: grid; min-width: 0; gap: 2px; }
   .inbox-row__title { font-size: 15px; font-weight: 560; line-height: 1.4; overflow-wrap: anywhere; }
+  .inbox__rows--queue .inbox-row__title { font-size: var(--text-bodyLg); }
   .inbox-row__meta, .inbox-row__value, .inbox .inbox-row__preview { color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.5; overflow-wrap: anywhere; }
   .inbox-row__meta time, .inbox-row__value { font-variant-numeric: tabular-nums; }
   .inbox-row__value { padding-block-start: 2px; text-align: end; white-space: nowrap; }
   .inbox .inbox-row__preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .inbox-row__unread { position: absolute; inset: 10px auto auto 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--ghost-signal); }
-  .inbox__rows > li:first-child > .inbox-row { border-start-start-radius: var(--radius-control); border-start-end-radius: var(--radius-control); }
-  .inbox__rows > li:last-child > .inbox-row { border-end-start-radius: var(--radius-control); border-end-end-radius: var(--radius-control); }
 
   .inbox__item { position: relative; min-width: 0; overflow: clip; }
   .inbox__item[data-selected] { background: var(--ghost-hover2); }
@@ -85,18 +80,21 @@
     .inbox__item:hover .inbox__recommended { visibility: visible; }
     .inbox__recommended:hover { background: var(--ghost-hover2); }
   }
-  @media (pointer: coarse) { .inbox__recommended { min-height: 44px; } }
+  @media (pointer: coarse) { .inbox__recommended, .inbox__actions > button { min-height: 44px; } }
   .inbox :is(.inbox-row, .inbox__recommended, .inbox__history > summary):focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
 
   .inbox .queue-batch { box-shadow: none; border: 1px solid var(--ghost-line); border-radius: var(--radius-control); }
   .inbox__history > summary { min-height: 44px; border-block-start: 1px solid var(--ghost-line); }
+  .inbox__history .inbox__rows { border-block-start: 0; }
   .inbox__history > button { margin-block-start: var(--ghost-space-2); }
 
   .inbox__evidence { display: grid; gap: var(--ghost-space-2); min-width: 0; }
   .inbox__evidence .queue__card { padding: 0; }
-  .inbox__evidence .decision { border-color: var(--ghost-line); border-radius: var(--radius-card); }
+  /* The pane is the card: the question stands on the sheet in page scale, not inside another frame. */
+  .inbox__evidence .decision { padding: 0; border: 0; background: none; }
+  .inbox__evidence .decision__title { font-size: var(--text-headingLg); line-height: 1.28; letter-spacing: -.022em; }
   .inbox__evidence .decision__body { max-block-size: min(45dvh, 28rem); overflow: auto; overscroll-behavior: contain; }
-  .inbox__evidence .decision__secure > .decision__actions { position: sticky; bottom: 0; padding-block-start: var(--ghost-space-2); background: var(--ghost-surface); }
+  .inbox__evidence .decision__secure > .decision__actions { position: sticky; bottom: 0; padding-block-start: var(--ghost-space-2); background: var(--ghost-canvas); }
   .inbox__ack { min-width: 0; margin: 0; overflow: hidden; color: var(--ghost-ink2); font-size: var(--text-caption); line-height: 1.5; white-space: nowrap; text-overflow: ellipsis; }
   .inbox__ack:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .inbox--detail { gap: var(--ghost-space-3); }
@@ -105,6 +103,7 @@
   @media (min-width: 56rem) {
     .inbox__triage[data-split] { grid-template-columns: minmax(0, min(24rem, 42%)) minmax(0, 1fr); }
     .inbox__triage > .inbox__evidence { position: sticky; top: 0; }
+    .inbox__triage[data-split] > .inbox__evidence { padding-inline-start: var(--ghost-space-5); border-inline-start: 1px solid var(--ghost-line); }
   }
   @media (max-width: 55.999rem) {
     .inbox > .ghost-page-header { display: none; }

@@ -128,15 +128,6 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, p
           <LayoutList/><span className="flex-1">{uiTerms.work}</span>
           {live > 0 && <span className="sidebar-count"><span className="sr-only">진행 중 </span>{live}</span>}
         </NavigationItem>
-        <NavigationItem current={section === 'coding'} onClick={() => navigate('/coding')}>
-          <Bot/><span className="flex-1">{routeLabels.coding}</span>
-        </NavigationItem>
-        <NavigationItem current={section === 'mail'} onClick={() => navigate('/mail')}>
-          <Mail/><span className="flex-1">{routeLabels.mail}</span>
-        </NavigationItem>
-        <NavigationItem current={section === 'goals'} onClick={() => navigate('/goals')}>
-          <Compass/><span className="flex-1">{uiTerms.goals}</span>
-        </NavigationItem>
       </div>
       <div className="sidebar-scroll-frame">
         <div ref={scrollRef} className="sidebar-scroll">
@@ -160,6 +151,17 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, p
           </div>
         </div>
         <ScrollRail viewportRef={scrollRef} contentRef={contentRef}/>
+      </div>
+      <div className="sidebar-tools">
+        <NavigationItem current={section === 'coding'} onClick={() => navigate('/coding')}>
+          <Bot/><span>{routeLabels.coding}</span>
+        </NavigationItem>
+        <NavigationItem current={section === 'mail'} onClick={() => navigate('/mail')}>
+          <Mail/><span>{routeLabels.mail}</span>
+        </NavigationItem>
+        <NavigationItem current={section === 'goals'} onClick={() => navigate('/goals')}>
+          <Compass/><span>{uiTerms.goals}</span>
+        </NavigationItem>
       </div>
     </Navigation>
     <div className="sidebar-foot">

@@ -14,8 +14,8 @@ Accessible primitives use Radix directly. Tailwind utilities consume the app's
 own light/dark theme; source Markdown editing lives in `src/editor`.
 The desktop shell and process supervision belong to `apps/ghost-desktop`.
 
-`src/components/AppFrame.tsx` draws the window: a quiet sidebar on the page tone and the
-destination on an inset sheet (rounded, card shadow) beside it.
+`src/components/AppFrame.tsx` draws one reading surface beside the Ghost roster.
+Hairlines, rather than an outer rounded card, separate navigation from the destination.
 
 - Sidebar: 홈 · 확인할 일 (pending decisions, amber count) · 맡긴 일 (live count), then
   Ghosts as presence rows — portrait in its state ring, name, and a one-line "now" (the
@@ -25,9 +25,9 @@ destination on an inset sheet (rounded, card shadow) beside it.
   pins, set from a row's context menu) and the **Ghost pool**, folded from its own header,
   which sticks while scrolling; a folded pool still admits the Ghosts that need the owner or
   hold the conversation on screen, and an expanded pool past eight rows grows a filter.
-  프로젝트 with 새 프로젝트. 설정 at the bottom; host trouble shows
-  there only when the host is not connected. The three destinations and 설정 stay put; only
-  the roster and projects scroll, under sticky group labels, fading out while more follows, with
+  프로젝트 with 새 프로젝트. 코딩 · 메일 · 목표 share a fixed tool row below the roster;
+  설정 remains below it and reports host trouble only when disconnected. The primary
+  destinations stay put. Only the roster and projects scroll under sticky group labels, with
   a ScrollRail marking Ghosts that are working or need the owner. Opening a Ghost from
   elsewhere brings its row into view.
 - Title bar: back/forward (`⌘[` `⌘]`, positions kept in history state) and the page's trail on

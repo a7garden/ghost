@@ -54,8 +54,7 @@
   .ghost-sidebar .ghost-navigation-group__label { padding-block: 8px 4px; font-size: var(--text-caption); }
   .ghost-sidebar :is(.sidebar-pool-toggle, .sidebar-group-action) { margin-block-start: 4px; }
   .ghost-sidebar .sidebar-ghosts > .ghost-navigation-group__items:not(:empty) { gap: 0; }
-  .sidebar-ghosts .sidebar-entry + .sidebar-entry,
-  .sidebar-ghosts .sidebar-entry + .sidebar-pool:has(> *) { border-block-start: 1px solid var(--ghost-line); }
+  .sidebar-entry { padding-block: 2px; }
   .sidebar-pool { display: grid; }
   .sidebar-pool .sidebar-search { margin-block: 4px; }
   .ghost-sidebar .presence-row__main { width: 100%; }
@@ -65,8 +64,10 @@
   .sidebar-projects { display: flex; flex-direction: column; }
   .ghost-sidebar .sidebar-project { min-height: 28px; align-items: baseline; padding-block: 5px; }
   .sidebar-project > svg { align-self: center; }
-  /* Projects under a Ghost share the name's start: row inset + portrait + gap. */
-  .ghost-sidebar .sidebar-project--nested { padding-inline-start: 44px; font-size: var(--text-caption); font-weight: 500; }
+  /* Keep project names under the Ghost's name and join the rows beneath its portrait. */
+  .ghost-sidebar .sidebar-project--nested { position: relative; padding-inline-start: 44px; font-size: var(--text-caption); font-weight: 500; }
+  .ghost-sidebar .sidebar-project--nested::before { content: ''; position: absolute; inset: 0 auto 0 21px; width: 11px; border-inline-start: 1px solid var(--ghost-line-strong); background: linear-gradient(var(--ghost-line-strong), var(--ghost-line-strong)) left center / 100% 1px no-repeat; pointer-events: none; }
+  .ghost-sidebar .sidebar-project--nested:last-child::before { bottom: 50%; background-position: left bottom; }
   .sidebar-project__paused { flex: none; margin-inline-start: auto; color: var(--ghost-ink3); font-size: var(--text-caption); }
   .sidebar-project__signal { flex: none; margin-inline-start: auto; }
   .sidebar-project__signal[data-tone='amber'] { color: var(--ghost-amber-ink); }
@@ -79,6 +80,6 @@
   .ghost-sidebar .presence-row__main[data-tone='working'] { --roster-state: var(--ghost-signal); }
   .ghost-sidebar :is(.presence-row__main, .sidebar-project):focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
   @media (pointer: coarse) {
-    .sidebar-project { min-height: 44px; align-items: center; }
+    .sidebar-project, .ghost-sidebar .sidebar-project { min-height: 44px; align-items: center; }
   }
 }

@@ -80,13 +80,14 @@
   .shell-sidebar { display: none; }
   .compact-dock { display: grid; flex: none; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 7px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--ghost-canvas); border-top: 1px solid var(--ghost-line); }
   .compact-dock[data-hidden], &[data-keyboard="open"] .compact-dock, .shell:has(.cm-editor) .compact-dock { display: none; }
-  .compact-dock button { display: flex; min-height: 49px; align-items: center; justify-content: center; flex-direction: column; gap: 5px; border: 0; border-radius: 13px; background: none; color: var(--ghost-ink3); font-size: 11px; font-weight: 500; cursor: pointer; }
-  .compact-dock button[aria-current] { color: var(--ghost-ink); background: var(--ghost-hover); }
+  .compact-dock button { position: relative; display: flex; min-height: 49px; align-items: center; justify-content: center; flex-direction: column; gap: 4px; border: 0; border-radius: var(--radius-chip); background: none; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 500; cursor: pointer; }
+  .compact-dock button[aria-current] { color: var(--ghost-ink); font-weight: 650; }
+  .compact-dock button[aria-current]::before { content: ''; position: absolute; top: -8px; width: 28px; height: 2px; background: currentColor; }
   .ghost-titlebar .shell-icon-button[aria-current] { color: var(--ghost-ink); background: var(--ghost-hover); }
   /* 위쪽 바의 버튼은 채움 없이 둔다 — 색은 「근무 중」 하나만 말한다 (강조는 하나). */
   .ghost-titlebar .shell-search:not([data-duty="on"]) { background: none; color: var(--ghost-ink2); }
   .compact-dock__icon { position: relative; }
-  .compact-dock__badge { position: absolute; left: 15px; top: -5px; min-width: 15px; padding: 2px 4px; border-radius: 10px; background: var(--ghost-amber); color: var(--ghost-canvas); font-size: 9px; line-height: 1.1; }
+  .compact-dock__badge { position: absolute; left: 15px; top: -5px; min-width: 16px; padding: 2px 4px; border-radius: 10px; background: var(--ghost-amber-tint); color: var(--ghost-amber-ink); font-size: var(--text-micro); font-weight: 650; line-height: 1.1; }
   .ghost-conversation__dock {
     --composer-glow-blur: 5px;
     padding: 6px max(var(--ghost-space-3), env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(var(--ghost-space-3), env(safe-area-inset-left));

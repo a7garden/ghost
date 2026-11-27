@@ -41,18 +41,9 @@
     .home__desk[data-awaiting] > .home__dispatch[data-short] { position: sticky; top: 12px; }
   }
 
-  /* A single row stands on its own; multiple rows share one frame, not one per item. */
-  .home :is(.feed, .lanes) {
-    gap: 0;
-    padding: 0;
-    border: 1px solid var(--ghost-line);
-    border-radius: var(--radius-control);
-    box-shadow: none;
-  }
-  .home :is(.feed, .lanes):not(:has(> :nth-child(2), .lane__branch)) {
-    border-color: transparent;
-    background: none;
-  }
+  /* Records are one ledger, not a rack of cards: no frame per section, a hairline between rows,
+     every row starting at the sheet edge the band headers and the composer also start at. */
+  .home :is(.feed, .lanes) { gap: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
   .home .feed > li + li, .home .lanes > .lane + .lane, .home .lane__branch > .lane + .lane {
     border-block-start: 1px solid var(--ghost-line);
   }
@@ -62,7 +53,7 @@
     align-items: center;
     min-height: 54px;
     gap: 10px;
-    padding: 8px 12px;
+    padding: 8px 10px 8px 8px;
     border-radius: var(--radius-chip);
   }
   .home :is(.feed__row, .lane__main, .waiting-line li > button):focus-visible {
@@ -85,6 +76,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* The phone leads with the question itself, so it reads larger than the records below it. */
+  .home .waiting-line__question { font-size: var(--text-bodyLg); font-weight: 600; }
   .home :is(.feed__body, .waiting-line__meta) {
     display: block;
     overflow: hidden;
@@ -102,7 +95,7 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
-  .home .feed__dot { top: 15px; left: 8px; }
+  .home .feed__dot { top: 15px; left: 1px; }
   .home .lane .lane__title { color: var(--ghost-ink); }
   .home .lane__meta { flex-wrap: wrap; gap: 2px 0; line-height: 1.35; }
   .home .lane__meta > span { color: var(--ghost-ink3); }
@@ -115,34 +108,43 @@
   .home .lane__branch { margin-left: 25px; }
   .home .waiting-line { gap: var(--ghost-space-1); }
 
-  /* The deck keeps its own actions and keyboard model. Only the home placement changes. */
-  .home__judgment .deck__head { flex-wrap: wrap; }
+  /* The reading side is an editing surface, not a peer of the composer's card: the deck head rules the
+     column, the index is a plain list whose choice shows as a tone rule and weight, and the question
+     itself stands on the sheet in large type. Only the outgoing composer keeps a box. */
+  .home__judgment .deck__head { flex-wrap: wrap; padding-block-end: 8px; border-block-end: 1px solid var(--ghost-line); }
   .home__judgment .deck__index { --home-decision-rule: var(--ghost-ink3); }
   .home__judgment .deck:has(.decision__kind[data-tone="urgent"]) .deck__index { --home-decision-rule: var(--ghost-amber); }
   .home__judgment .deck:has(.decision__kind[data-tone="authority"]) .deck__index { --home-decision-rule: var(--ghost-danger); }
   .home__judgment .deck__index button {
     min-height: 52px;
+    padding-inline: 8px 10px;
     border-bottom: 0;
     border-inline-start: 2px solid transparent;
-    border-radius: 0 var(--radius-chip) var(--radius-chip) 0;
+    border-radius: 0;
   }
   .home__judgment .deck__index button[aria-current="true"] {
-    background: var(--ghost-hover2);
+    background: none;
     border-inline-start-color: var(--home-decision-rule);
   }
-  .home__judgment .deck__index-copy > span { font-size: 15px; font-weight: 560; }
+  .home__judgment .deck__index-copy > span { font-size: var(--text-ui); font-weight: 500; }
+  .home__judgment .deck__index button[aria-current="true"] .deck__index-copy > span { font-size: 15px; font-weight: 560; }
   .home__judgment .deck__index-copy > small { color: var(--ghost-ink3); font-size: var(--text-caption); }
-  .home__judgment .decision { gap: 12px; border-color: var(--ghost-line); }
-  .home__judgment .decision__title { font-size: var(--text-heading); font-weight: 600; }
+  .home__judgment .decision { gap: 14px; padding: 0; border: 0; background: none; }
+  .home__judgment .decision:focus-visible { outline-offset: 6px; }
+  .home__judgment .decision__title { font-size: var(--text-heading); font-weight: 650; }
+  .home__judgment .decision__detail { font-size: var(--text-body); }
   .home__judgment .decision__body { max-block-size: min(38dvh, 22rem); overflow: auto; overscroll-behavior: contain; }
-  .home__judgment .decision__secure > .decision__actions { position: sticky; bottom: 0; padding-block-start: 8px; background: var(--ghost-surface); }
+  .home__judgment .decision__secure > .decision__actions { position: sticky; bottom: 0; padding-block-start: 8px; background: var(--ghost-canvas); }
   @container home-judgment (min-width: 36rem) {
-    .home__judgment .deck__body:has(.deck__index) { grid-template-columns: minmax(0, 29%) minmax(0, 1fr); align-items: start; }
-    .home__judgment .deck__index { display: grid; gap: 0; padding: 0; max-height: min(56dvh, 30rem); overflow-y: auto; }
+    .home__judgment .deck__body:has(.deck__index) { grid-template-columns: minmax(0, 29%) minmax(0, 1fr); align-items: start; column-gap: 0; }
+    .home__judgment .deck__index { display: grid; gap: 0; padding: 0; padding-inline-end: 12px; border-inline-end: 1px solid var(--ghost-line); max-height: min(56dvh, 30rem); overflow-y: auto; }
     .home__judgment .deck__index li { min-width: 0; max-width: none; }
     .home__judgment .deck__index li + li { border-block-start: 1px solid var(--ghost-line); }
+    /* A lone question stays flush with the head rule; only the list|reading split indents the pane. */
+    .home__judgment .deck__body:has(.deck__index) > .deck__top { padding-inline-start: 16px; }
   }
 
+  /* The outgoing surface stays the one boxed control on the sheet; the owner reads first, writes second. */
   .home .handoff { container: home-compose / inline-size; }
   .home .handoff .ghost-composer {
     --composer-surface-padding: 10px 12px;
@@ -161,6 +163,8 @@
   .home .handoff__mode button { white-space: nowrap; }
   .home .recipient > .dot-avatar { flex: none; }
   .home .handoff .ghost-composer__textarea { min-height: calc(2lh + 8px); font-size: var(--text-bodyLg); line-height: 1.35; }
+  /* Quiet home is a writing desk: give the empty sheet a taller first breath. */
+  .home__desk[data-quiet] .handoff .ghost-composer__textarea { min-height: calc(3lh + 8px); }
   .home .handoff .ghost-composer__footer { gap: 6px; }
   .home .handoff .ghost-composer__footer-slot:empty { display: none; }
   .home .handoff .ghost-composer__footer-actions { min-width: 0; max-width: calc(100% - 50px); margin-inline-start: auto; }
