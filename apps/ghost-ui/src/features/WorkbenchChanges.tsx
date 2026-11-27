@@ -46,7 +46,7 @@ export function WorkbenchChanges({ root, onClose }: { root: string; onClose(): v
     {changes && <>
       <div className="embedded-changes__bar">
         <span>{changes.branch && <><code>{changes.branch}</code> · </>}{changes.files.length ? `${changes.files.length}개 파일` : '변경된 파일 없음'}</span>
-        <Button type="button" size="icon" variant="ghost" aria-label="변경 새로고침" onClick={refresh}><RefreshCw aria-hidden="true"/></Button>
+        <Button type="button" size="icon" variant="ghost" aria-label="변경 새로고침" title="변경 새로고침" onClick={refresh}><RefreshCw aria-hidden="true"/></Button>
       </div>
       {changes.files.length > 0 && <ul className="coding-changed-files max-h-[30dvh] overflow-y-auto" aria-label="변경된 파일">
         {changes.files.map(entry => {

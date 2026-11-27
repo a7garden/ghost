@@ -25,11 +25,6 @@ export function orderMailboxes(mailboxes: readonly MailboxInfo[]): MailboxInfo[]
   });
 }
 
-/** The mailbox a fresh view opens: the first after ordering (받은편지함 when the server has one). */
-export function defaultMailbox(mailboxes: readonly MailboxInfo[]): MailboxInfo | null {
-  return orderMailboxes(mailboxes)[0] ?? null;
-}
-
 /** One mailbox's unseen marker after the owner read mail in it; unknown counts stay unknown. */
 export function shiftMailboxUnseen(mailboxes: readonly MailboxInfo[], path: string, delta: number): MailboxInfo[] {
   return mailboxes.map(mailbox => mailbox.path !== path || mailbox.unseen === null ? mailbox
@@ -85,6 +80,20 @@ export function removeMailMessage(state: MailListState, uid: number, accountId?:
 /** One account's 받은편지함 for the merged view: the server's inbox, else a mailbox literally named INBOX. */
 export function inboxMailbox(mailboxes: readonly MailboxInfo[]): MailboxInfo | null {
   return mailboxes.find(mailbox => mailbox.specialUse === 'inbox') ?? mailboxes.find(mailbox => mailbox.path.toUpperCase() === 'INBOX') ?? null;
+}
+
+/** A merged count is known only when every account reports its inbox's unseen count. */
+export function mergedInboxUnseen(
+  accounts: readonly { connectionId: string }[], mailboxes: ReadonlyMap<string, readonly MailboxInfo[]>,
+): number | null {
+  let total = 0;
+  for (const { connectionId } of accounts) {
+    const boxes = mailboxes.get(connectionId);
+    const count = boxes && inboxMailbox(boxes)?.unseen;
+    if (count == null) return null;
+    total += count;
+  }
+  return total;
 }
 
 /** One account's page of its inbox, tagged for the merged list. */

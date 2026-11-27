@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import type { CodingDialog, CodingItem } from '@ghost/contract';
-import { codingDialogAnswer, mergeCodingItems, upsertCodingItem } from './CodingSessionModel';
+import { codingApprovalToolId, codingDialogAnswer, groupCodingItems, mergeCodingItems, upsertCodingItem, type CodingToolItem } from './CodingSessionModel';
 
 const reply: Extract<CodingItem, { kind: 'assistant' }> = { id: 'reply', at: 10, kind: 'assistant', text: '검', streaming: true };
 const notice: CodingItem = { id: 'notice', at: 11, kind: 'notice', text: '안내', level: 'info' };
 const base = { id: 'dialog', title: '골라 주세요', createdAt: 10, options: [{ id: 'front', label: '앞면' }] };
+const tool: CodingToolItem = { kind: 'tool', id: 'tool', at: 10, tool: 'bash', summary: 'bash bun test', status: 'running', output: '', images: [] };
 
 describe('coding transcript updates', () => {
   test('replaces a streaming item in its original position, without mutating the previous render', () => {
@@ -23,6 +24,31 @@ describe('coding transcript updates', () => {
     expect(upsertCodingItem([reply], notice)).toEqual([reply, notice]);
     expect(mergeCodingItems([reply], [delta, notice])).toEqual([delta, notice]);
     expect(mergeCodingItems([reply, notice], [delta])).toEqual([delta, notice]);
+  });
+
+  test('reads replies and their reasoning before one trail, retaining call runs and child branches', () => {
+    const user: CodingItem = { id: 'user', kind: 'user', at: 10, text: '검토해 주세요.', images: [] };
+    const thinking: CodingItem = { id: 'thought', kind: 'thinking', at: 10, text: '범위를 살핀다.', streaming: false };
+    const toolThinking = { ...thinking, id: 'tool-thought' };
+    const second = { ...tool, id: 'second' };
+    const third = { ...tool, id: 'third' };
+    const agent: CodingItem = { id: 'agent', kind: 'subagent', at: 10, role: 'scout', task: '검토', status: 'done', summary: '' };
+    const child = { ...tool, id: 'child', subagent: agent.id };
+    const { rows, subagentTools } = groupCodingItems([user, toolThinking, tool, second, thinking, reply, third, child, agent, notice]);
+    expect(rows).toEqual([user, reply, thinking, {
+      kind: 'activity', id: toolThinking.id, entries: [
+        toolThinking, { kind: 'tools', id: tool.id, tools: [tool, second] },
+        { kind: 'tools', id: third.id, tools: [third] }, agent,
+      ],
+    }, notice]);
+    expect(subagentTools.get(agent.id)).toEqual([child]);
+  });
+
+  test('marks an approval only when its command identifies one running call', () => {
+    const evidence = { name: 'bash', summary: 'bun   test' };
+    expect(codingApprovalToolId([tool, { ...tool, id: 'old', status: 'done' }], evidence)).toBe(tool.id);
+    expect(codingApprovalToolId([tool, { ...tool, id: 'other' }], evidence)).toBeUndefined();
+    expect(codingApprovalToolId([tool], { ...evidence, summary: 'bun run another-task' })).toBeUndefined();
   });
 });
 

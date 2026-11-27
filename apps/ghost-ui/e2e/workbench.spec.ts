@@ -60,16 +60,23 @@ for (const width of [1440, 390]) {
       await coding.showApproval();
       const rows = await list();
       const row = rows.getByRole('listitem').filter({ hasText: sampleSession.title });
-      await expect(row.locator('.workbench-attention')).toHaveAttribute('data-signal', 'waiting');
-      await expect(row.locator('.workbench-agent-question')).toHaveText('도구 실행 확인');
-      await expect(rows.locator('.workbench-space-row .workbench-attention')).toHaveAttribute('data-signal', 'waiting');
+      const pending = page.getByRole('complementary', { name: '작업대 탐색' }).getByRole('button', { name: /^확인 필요 1$/ });
+      await expect(row.locator('.workbench-state')).toHaveAttribute('data-state', 'attention');
+      await expect(row.locator('.workbench-agent-question')).toBeVisible();
+      await pending.click();
+      await expect(existing).toBeVisible();
+      await expect(page.locator('.workbench-pane__head[data-waiting]').filter({ visible: true })).toBeVisible();
+      await (await list()).getByTitle('새 작업 트리', { exact: true }).click();
+      await expect(created).toBeVisible();
+      await list();
       await coding.patch({ state: 'idle', pendingDialog: null, updatedAt: sampleSession.updatedAt + 1 });
-      await expect(row.locator('.workbench-attention')).toHaveAttribute('data-signal', 'done');
+      await expect(row.locator('.workbench-state')).toHaveAttribute('data-state', 'done');
+      await expect(pending).toHaveCount(0);
 
       await row.getByTitle(sampleSession.title, { exact: true }).click();
       await expect(existing).toBeVisible();
       await expect(created).toBeHidden();
-      await expect(row.locator('.workbench-attention')).toHaveCount(0);
+      await expect(page.locator('.workbench-pane__head .workbench-state').filter({ visible: true })).toHaveAttribute('data-state', 'queued');
       await expect.poll(() => service.read().focus).toEqual({ scopeId, sessionId: sampleSession.id });
 
       if (!phone) {
@@ -99,6 +106,20 @@ for (const width of [1440, 390]) {
     });
   });
 }
+
+test('opens an agent that needs attention even from another project', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { scopeId } = readRunState();
+  const coding = await mockCodingSessions(page);
+  const { service } = await mockWorkbench(page);
+  service.addAgent({ version: 0, sessionId: sampleSession.id, scopeId });
+  service.focus({ version: 1, scopeId: null });
+  await coding.patch({ state: 'failed' });
+  await openScreen(page, { name: 'workbench attention', route: () => '/coding', waits: () => ['새 에이전트'] }, 'light');
+  await page.getByRole('complementary', { name: '작업대 탐색' }).getByRole('button', { name: /^확인 필요 1$/ }).click();
+  await expect(agentPane(page, sampleSession.title)).toBeVisible();
+  await expect.poll(() => service.read().focus).toEqual({ scopeId, sessionId: sampleSession.id });
+});
 
 test('a new project starts from one line and a chosen folder names it', async ({ page }) => {
   await mockWorkbench(page);

@@ -10,6 +10,7 @@ import { useCodingSessionLive } from './CodingSessionLive';
 import { codingError } from './CodingSessionModel';
 import { CodingSessionTranscript } from './CodingSessionTranscript';
 import { PiSessionSettings } from './PiConfig';
+import './CodingSession2.css';
 
 /** One agent's transcript and composer. The workbench pane around it carries the name, changes and session actions. */
 export function CodingSession({ id, onUpdate, changesRevision: onChangesRevision }: {
@@ -51,24 +52,28 @@ export function CodingSession({ id, onUpdate, changesRevision: onChangesRevision
     {actionError && <InlineError>{actionError}</InlineError>}
   </div> : undefined;
   const dialog = session?.pendingDialog;
+  const empty = ready && !items.length && !dialog;
 
   return <Conversation className="embedded-workspace" label="내장 코딩 세션" transcriptLabel="코딩 기록" jumpToLatestLabel="최신 기록"
     header={session ? notices : undefined} followKey={follow}
-    composer={session && !closed && <CodingSessionComposer state={session.state} disabled={!ready || !connected} stopping={pending}
-      model={<CodingModelChip allowDefault={false} value={{ model: session.model, thinking: session.thinking }} disabled={!connected || pending}
-        onChange={next => void patch({ ...(next.model && { model: next.model }), ...(next.thinking && { thinking: next.thinking }) })}
-        extra={<PiSessionSettings key={`${session.id}:${session.model.provider}:${session.model.model}:${session.thinking}`} session={session} disabled={!connected || pending}/>}/>}
-      onAbort={() => void command(session, () => client.abortCodingSession(id), '작업을 중단하지 못했습니다.')}
-      onPrompt={async prompt => {
-        followLatest();
-        return client.promptCodingSession(id, prompt);
-      }}/>}
+    composer={session && !closed && <>
+      {dialog && <CodingSessionDialog key={dialog.id} sessionId={id} dialog={dialog} disabled={!connected}
+        onAnswer={answer => client.answerCodingSession(id, dialog.id, answer)}/>}
+      {empty && <p className="embedded-muted embedded-start">아직 지시가 없습니다.</p>}
+      <CodingSessionComposer state={session.state} disabled={!ready || !connected} stopping={pending}
+        model={<CodingModelChip allowDefault={false} value={{ model: session.model, thinking: session.thinking }} disabled={!connected || pending}
+          onChange={next => void patch({ ...(next.model && { model: next.model }), ...(next.thinking && { thinking: next.thinking }) })}
+          extra={<PiSessionSettings key={`${session.id}:${session.model.provider}:${session.model.model}:${session.thinking}`} session={session} disabled={!connected || pending}/>}/>}
+        onAbort={() => void command(session, () => client.abortCodingSession(id), '작업을 중단하지 못했습니다.')}
+        onPrompt={async prompt => {
+          followLatest();
+          return client.promptCodingSession(id, prompt);
+        }}/>
+    </>}
   >
     {!session && error && <InlineError onRetry={reconnect} retryLabel="다시 연결">{error}</InlineError>}
     {!ready && !error && <SkeletonText label="코딩 기록을 불러오는 중…" lines={4} className="py-2"/>}
-    {ready && !items.length && !dialog && <p className="embedded-muted">{closed ? '기록 없음' : '아직 지시가 없습니다.'}</p>}
-    <CodingSessionTranscript id={id} items={items}/>
-    {dialog && !closed && <CodingSessionDialog key={dialog.id} sessionId={id} dialog={dialog} disabled={!connected}
-      onAnswer={answer => client.answerCodingSession(id, dialog.id, answer)}/>}
+    {empty && closed && <p className="embedded-muted">기록 없음</p>}
+    <CodingSessionTranscript id={id} items={items} approval={dialog?.kind === 'approval' ? dialog.tool : undefined}/>
   </Conversation>;
 }

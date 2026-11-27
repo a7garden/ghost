@@ -66,6 +66,7 @@ async function release(page: Page, route: Route, body: unknown, status = 200) {
 }
 
 test('HTML mail stays readable without automatic remote requests or navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 900 });
   const remote = 'https://mail-navigation.invalid';
   const remoteRequests: string[] = [];
   const remoteNavigations: string[] = [];
@@ -84,6 +85,7 @@ test('HTML mail stays readable without automatic remote requests or navigation',
   await row(page, 'A INBOX #1').click();
   await release(page, await pending, {
     ...message('Hostile HTML'),
+    cc: [{ name: 'Copied recipient', address: 'copy@example.com' }],
     text: 'Safe plain text',
     html: `<!doctype html><html><head>
       <mEtA HTTP-EQUIV="rEfReSh" content="0; URL=${remote}/refresh">
@@ -102,6 +104,10 @@ test('HTML mail stays readable without automatic remote requests or navigation',
   });
   await expect(page.locator('.mail-reader__text')).toHaveText('Safe plain text');
   await expect(page.locator('.mail-reader__frame')).toHaveCount(0);
+  const copyRecipient = page.getByText('Copied recipient <copy@example.com>', { exact: true });
+  await expect(copyRecipient).not.toBeVisible();
+  await page.getByRole('button', { name: '주소 보기', exact: true }).click();
+  await expect(copyRecipient).toBeVisible();
   await page.getByRole('button', { name: 'HTML 보기', exact: true }).click();
   const frame = page.locator('.mail-reader__frame');
   const body = frame.contentFrame();
@@ -118,20 +124,24 @@ test('HTML mail stays readable without automatic remote requests or navigation',
   await expect(body.getByText('Safe HTML text', { exact: true })).toBeVisible();
 });
 const row = (page: Page, subject: string) => page.locator('.mail-row').filter({ hasText: subject });
+const accountTab = (page: Page, id: string) => page.getByRole('navigation', { name: '메일 계정', exact: true })
+  .getByRole('button', { name: `Account ${id}`, exact: true });
+const folders = (page: Page) => page.getByRole('navigation', { name: '메일함', exact: true });
+const unseen = (page: Page) => folders(page).locator('[aria-current="true"] .mail-tab__count');
 
 test('late A list cannot replace B, or a newer A after A → B → A', async ({ page }) => {
   const api = await mailApi(page);
   const pending = api.holdNext(url => url.pathname.endsWith('/A/messages'));
   await openMail(page); const oldA = await pending;
-  await page.getByRole('combobox', { name: '메일 계정' }).selectOption('B');
+  await accountTab(page, 'B').click();
   await expect(row(page, 'B INBOX #1')).toBeVisible();
   await release(page, oldA, { messages: [summary('obsolete A')], nextBefore: null });
   await expect(row(page, 'B INBOX #1')).toBeVisible(); await expect(row(page, 'obsolete A')).toHaveCount(0);
   const next = api.holdNext(url => url.pathname.endsWith('/A/messages'));
-  await page.getByRole('combobox', { name: '메일 계정' }).selectOption('A'); const firstA = await next;
-  await page.getByRole('combobox', { name: '메일 계정' }).selectOption('B');
+  await accountTab(page, 'A').click(); const firstA = await next;
+  await accountTab(page, 'B').click();
   await expect(row(page, 'B INBOX #2')).toBeVisible();
-  await page.getByRole('combobox', { name: '메일 계정' }).selectOption('A');
+  await accountTab(page, 'A').click();
   await expect(row(page, 'A INBOX #1')).toBeVisible();
   await release(page, firstA, { messages: [summary('obsolete returned A')], nextBefore: null });
   await expect(row(page, 'A INBOX #1')).toBeVisible(); await expect(row(page, 'obsolete returned A')).toHaveCount(0);
@@ -157,7 +167,7 @@ for (const failure of [false, true]) test(`late pagination ${failure ? 'failure'
   const api = await mailApi(page); await openMail(page); await expect(row(page, 'A INBOX #1')).toBeVisible();
   const pending = api.holdNext(url => url.pathname.endsWith('/A/messages') && url.searchParams.has('before'));
   await page.getByRole('button', { name: '이전 메일 더 보기' }).click(); const old = await pending;
-  await page.getByRole('combobox', { name: '메일 계정' }).selectOption('B'); await expect(row(page, 'B INBOX #1')).toBeVisible();
+  await accountTab(page, 'B').click(); await expect(row(page, 'B INBOX #1')).toBeVisible();
   const currentPending = api.holdNext(url => url.pathname.endsWith('/B/messages') && url.searchParams.has('before'));
   await page.getByRole('button', { name: '이전 메일 더 보기' }).click(); const current = await currentPending;
   await release(page, old, failure ? { error: { code: 'unavailable', message: 'obsolete page error' } } : { messages: [summary('obsolete page', 9)], nextBefore: null }, failure ? 503 : 200);
@@ -167,10 +177,12 @@ for (const failure of [false, true]) test(`late pagination ${failure ? 'failure'
 });
 
 test('late read cannot expose A or issue seen/reply/archive commands under B', async ({ page }) => {
-  const api = await mailApi(page); await openMail(page); await expect(row(page, 'A INBOX #1')).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const api = await mailApi(page);
   const pending = api.holdNext(url => url.pathname.endsWith('/A/message'));
-  await row(page, 'A INBOX #1').click(); const old = await pending;
-  await page.getByRole('combobox', { name: '메일 계정' }).selectOption('B'); await row(page, 'B INBOX #1').click();
+  await openMail(page); const old = await pending;
+  await row(page, 'A INBOX #1').click();
+  await accountTab(page, 'B').click(); await row(page, 'B INBOX #1').click();
   await expect(page.getByRole('article', { name: '메일 읽기: B read' })).toBeVisible();
   await expect(page.getByRole('button', { name: '안읽음으로 표시', exact: true })).toBeEnabled();
   await release(page, old, message('A obsolete read'));
@@ -183,15 +195,29 @@ test('late read cannot expose A or issue seen/reply/archive commands under B', a
   await expect(row(page, 'B INBOX #1')).toHaveCount(0); expect(api.updates[1]).toMatchObject({ connectionId: 'B', action: 'archive' });
 });
 
-test('auto seen updates the reader once; unread restores the row and count once', async ({ page }) => {
-  const api = await mailApi(page); await openMail(page); await row(page, 'A INBOX #1').click();
+test('the wide preview stays unread; opening it marks seen once and unread restores the row and count', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const api = await mailApi(page);
+  await page.route('**/api/mail/A/messages?*', route => json(route, {
+    mailbox: 'INBOX', uidValidity: 1, nextBefore: null,
+    messages: [{ ...summary('Already seen', 11), seen: true }, summary('A INBOX #1')],
+  }));
+  await openMail(page);
+  const mail = row(page, 'A INBOX #1');
+  await expect(page.locator('.mail-row').first()).toContainText('Already seen');
+  await expect(page.getByRole('article', { name: '메일 읽기: A read' })).toBeVisible();
+  await expect(mail).toHaveAttribute('aria-current', 'true');
+  await expect(mail).toHaveAttribute('data-unread');
+  await expect(unseen(page)).toHaveText('1');
+  expect(api.updates).toHaveLength(0);
+  await mail.click();
   await expect(page.getByRole('button', { name: '안읽음으로 표시', exact: true })).toBeEnabled();
   await expect(row(page, 'A INBOX #1')).not.toHaveAttribute('data-unread');
-  await expect(page.locator('.mail-folder[aria-current] .mail-folder__count')).toHaveCount(0);
+  await expect(unseen(page)).toHaveCount(0);
   await page.getByRole('button', { name: '안읽음으로 표시', exact: true }).click();
   await expect(page.getByRole('button', { name: '읽음으로 표시', exact: true })).toBeEnabled();
   await expect(row(page, 'A INBOX #1')).toHaveAttribute('data-unread');
-  await expect(page.locator('.mail-folder[aria-current] .mail-folder__count')).toHaveText('1');
+  await expect(unseen(page)).toHaveText('1');
   expect(api.updates.map(command => command.action)).toEqual(['seen', 'unseen']);
 });
 
@@ -204,18 +230,18 @@ test('late seen and manual mutation completions cannot modify the next selection
     return route.fallback();
   });
   await openMail(page); await row(page, 'A INBOX #1').click(); const oldSeen = await pending.promise;
-  await page.getByRole('combobox', { name: '메일 계정' }).selectOption('B'); await row(page, 'B INBOX #1').click();
+  await accountTab(page, 'B').click(); await row(page, 'B INBOX #1').click();
   await expect(page.getByRole('button', { name: '안읽음으로 표시', exact: true })).toBeEnabled();
   await release(page, oldSeen, { ok: true, result: { updated: 1 } });
   await expect(page.getByRole('article', { name: '메일 읽기: B read' })).toBeVisible();
-  await expect(page.locator('.mail-folder[aria-current] .mail-folder__count')).toHaveCount(0);
-  await page.getByRole('combobox', { name: '메일 계정' }).selectOption('A');
+  await expect(unseen(page)).toHaveCount(0);
   // Serve the next A read as already seen, so the delayed operation is the owner's flag action.
   await page.route('**/api/mail/A/message?*', route => json(route, { ...message('A read'), seen: true }));
+  await accountTab(page, 'A').click();
   await row(page, 'A INBOX #2').click(); await expect(page.getByRole('button', { name: '별표', exact: true })).toBeEnabled();
   pending = Promise.withResolvers<Route>();
   await page.getByRole('button', { name: '별표', exact: true }).click(); const oldFlag = await pending.promise;
-  await page.getByRole('combobox', { name: '메일 계정' }).selectOption('B'); await row(page, 'B INBOX #2').click();
+  await accountTab(page, 'B').click(); await row(page, 'B INBOX #2').click();
   await expect(page.getByRole('button', { name: '안읽음으로 표시', exact: true })).toBeEnabled();
   await release(page, oldFlag, { ok: true, result: { updated: 1 } });
   await expect(page.getByRole('button', { name: '별표', exact: true })).toHaveAttribute('aria-pressed', 'false');
@@ -268,22 +294,34 @@ test('known validation refusal preserves an editable draft', async ({ page }) =>
   await expect(page.getByRole('button', { name: '전송 상태 확인', exact: true })).toHaveCount(0);
 });
 
-test('phone can change account and mailbox without pushing the message list down another row', async ({ page }) => {
+test('phone keeps account and mailbox tabs on one line and restores the scrolled list on Back', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
-  await mailApi(page); await openMail(page);
-  const account = page.getByRole('combobox', { name: '메일 계정' });
-  const folder = page.getByRole('combobox', { name: '메일함', exact: true });
-  await account.selectOption('B');
-  await folder.selectOption('Archive');
+  await mailApi(page);
+  await page.route('**/api/mail/B/messages?mailbox=Archive**', route => json(route, {
+    mailbox: 'Archive', uidValidity: 1, nextBefore: null,
+    messages: [...Array.from({ length: 12 }, (_, index) => summary(`Earlier mail ${index}`, 30 - index)), summary('B Archive #1')],
+  }));
+  await openMail(page);
+  const account = page.getByRole('navigation', { name: '메일 계정', exact: true });
+  const folder = folders(page);
+  const archive = folder.getByRole('button', { name: '보관함', exact: true });
+  await accountTab(page, 'B').click();
+  await archive.click();
   const mail = row(page, 'B Archive #1');
-  await expect(mail).toBeInViewport();
   const a = (await account.boundingBox())!, b = (await folder.boundingBox())!;
   expect(b.y).toBe(a.y);
   expect(b.x).toBeGreaterThanOrEqual(a.x + a.width);
+  await expect(page.getByRole('article', { name: /메일 읽기/ })).toHaveCount(0);
+  const scroll = page.locator('.mail-list__scroll');
+  await mail.scrollIntoViewIfNeeded();
+  const top = await scroll.evaluate(element => element.scrollTop);
+  expect(top).toBeGreaterThan(0);
   await mail.click();
   await expect(page.getByRole('article', { name: '메일 읽기: B read' })).toBeVisible();
   await page.getByRole('button', { name: '목록', exact: true }).click();
-  await expect(folder).toHaveValue('Archive');
+  await expect(scroll).toHaveJSProperty('scrollTop', top);
+  await expect(mail).toBeFocused();
+  await expect(archive).toHaveAttribute('aria-current', 'true');
 });
 
 test('메일함 이동 opens under the message actions and can be dismissed or chosen by keyboard', async ({ page }) => {
@@ -329,10 +367,30 @@ test('a narrow native Mac window retains mailbox selection, compose, and reader 
     Object.defineProperty(navigator, 'platform', { value: 'MacIntel' });
     Object.defineProperty(window, '__TAURI_INTERNALS__', { value: { invoke: async (command: string) => command === 'companion_enabled' ? false : undefined } });
   });
-  await mailApi(page); await openMail(page); await expect(row(page, 'A INBOX #1')).toBeVisible();
+  await mailApi(page);
+  await page.route('**/api/mail/accounts', route => json(route, { accounts: ['A', 'B', 'C', 'D', 'E'].map(id => ({
+    connectionId: id, name: `Account ${id}`, address: `${id}@example.com`, canSend: true,
+  })) }));
+  await page.route('**/api/mail/A/mailboxes', route => json(route, { mailboxes: [
+    { path: 'INBOX', name: 'INBOX', delimiter: '/', specialUse: 'inbox', total: 2, unseen: 1 },
+    { path: 'Archive', name: 'Archive', delimiter: '/', specialUse: 'archive', total: 0, unseen: 0 },
+    { path: 'Drafts', name: 'Drafts', delimiter: '/', specialUse: 'drafts', total: null, unseen: null },
+  ] }));
+  await openMail(page); await expect(row(page, 'A INBOX #1')).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-desktop-shell', '');
-  await expect(page.getByRole('combobox', { name: '메일함', exact: true })).toBeVisible();
-  await page.getByRole('combobox', { name: '메일함', exact: true }).selectOption('Archive'); await expect(row(page, 'A Archive #1')).toBeVisible();
+  await accountTab(page, 'A').click();
+  const picker = page.getByRole('dialog', { name: '메일 계정 선택' });
+  const search = picker.getByRole('searchbox');
+  await expect(search).toBeFocused();
+  await search.fill('E@example.com');
+  await expect(picker.getByRole('button', { name: /^Account/ })).toHaveCount(1);
+  await search.press('Escape');
+  await expect(accountTab(page, 'A')).toBeFocused();
+  await folders(page).getByRole('button', { name: '더보기', exact: true }).click();
+  await page.getByRole('dialog', { name: '다른 메일함' }).getByRole('button', { name: '임시보관함', exact: true }).click();
+  await expect(row(page, 'A Drafts #1')).toBeVisible();
+  await expect(folders(page).getByRole('button', { name: '임시보관함', exact: true })).toHaveAttribute('aria-current', 'true');
+  await folders(page).getByRole('button', { name: '보관함', exact: true }).click(); await expect(row(page, 'A Archive #1')).toBeVisible();
   const write = page.getByRole('button', { name: '메일 쓰기', exact: true });
   await write.click();
   const letter = page.getByRole('form', { name: '메일 쓰기', exact: true });
@@ -347,7 +405,7 @@ test('a narrow native Mac window retains mailbox selection, compose, and reader 
   await expect(write).toBeFocused();
   await row(page, 'A Archive #1').click();
   await expect(page.getByRole('article', { name: '메일 읽기: A read' })).toBeVisible(); await page.getByRole('button', { name: '목록', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: '메일함', exact: true })).toBeVisible();
+  await expect(folders(page).getByRole('button', { name: '보관함', exact: true })).toHaveAttribute('aria-current', 'true');
 });
 
 test('closing a pending read invalidates it before the same UID is opened again', async ({ page }) => {
@@ -388,7 +446,7 @@ test('first visit with two accounts opens the merged inbox; reading one account\
   await expect(row(page, 'A INBOX #1')).toBeVisible(); await expect(row(page, 'B INBOX #1')).toBeVisible();
   await expect(row(page, 'A INBOX #1').locator('.mail-row__account')).toHaveText('Account A');
   await expect(row(page, 'B INBOX #1').locator('.mail-row__account')).toHaveText('Account B');
-  await row(page, 'B INBOX #1').click();
+  await row(page, 'A INBOX #1').press('j');
   await expect(page.getByRole('article', { name: '메일 읽기: B read' })).toBeVisible();
   await expect(page.getByRole('button', { name: '안읽음으로 표시', exact: true })).toBeEnabled();
   expect(api.updates).toHaveLength(1); expect(api.updates[0]).toMatchObject({ connectionId: 'B', mailbox: 'INBOX', action: 'seen', uids: [10] });
@@ -432,8 +490,8 @@ test('a merged-view reply stays on the receiving account, a new mail can pick th
   await letter.getByRole('button', { name: '보내기', exact: true }).click();
   await expect(letter).toHaveCount(0);
   expect(sent).toHaveLength(2); expect(sent[1]).toMatchObject({ connectionId: 'B' }); expect(sent[1]!.replyTo).toBeUndefined();
-  await page.getByRole('combobox', { name: '메일 계정' }).selectOption('B');
-  await page.reload(); await expect(page.getByRole('combobox', { name: '메일 계정' })).toHaveValue('B');
+  await accountTab(page, 'B').click();
+  await page.reload(); await expect(accountTab(page, 'B')).toHaveAttribute('aria-current', 'true');
 });
 
 test('on a 390px screen forwarding continues the message, with copy recipients folded into its letterhead', async ({ page }) => {

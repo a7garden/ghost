@@ -1,6 +1,6 @@
 {
   "name": "@ghost/host",
-  "version": "2.46.6",
+  "version": "2.46.7",
   "private": true,
   "type": "module",
   "bin": {

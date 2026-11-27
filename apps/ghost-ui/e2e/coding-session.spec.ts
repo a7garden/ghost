@@ -47,6 +47,8 @@ for (const width of [1440, 390]) {
       await api.item({ ...editTool, status: 'done', diff: loginDiff });
       await expect(transcript.getByRole('article', { name: '에이전트 응답' })).toHaveCount(1);
       await expect(transcript.getByText('로그인 화면의 제목과 입력 순서를 정리했습니다.')).toBeVisible();
+      await expect(transcript.getByText('edit src/login.ts')).toBeHidden();
+      await transcript.locator('.embedded-tool-run > summary').click();
       await transcript.getByText('edit src/login.ts').click();
       await expect(transcript.getByLabel('파일 차이').getByText('+const mode = "focused";')).toBeVisible();
       await capture(page, `${width}-transcript`);
@@ -64,6 +66,7 @@ for (const width of [1440, 390]) {
       await changes.getByRole('button', { name: '닫기' }).click();
 
       await api.patch({ state: 'idle' });
+      await expect(workspace.getByRole('button', { name: '작업 중단' })).toHaveCount(0);
       const [fileChooser] = await Promise.all([
         page.waitForEvent('filechooser'),
         workspace.getByRole('button', { name: '이미지 첨부' }).click(),
@@ -75,7 +78,7 @@ for (const width of [1440, 390]) {
       await expect.poll(() => api.prompts.at(-1)).toEqual({ text: '이 이미지를 바탕으로 시안을 보여 주세요.', mode: 'prompt', images: [
         { name: 'owner.png', mimeType: 'image/png', data: attachmentB64 },
       ] });
-      const choices = transcript.getByRole('region', { name: '로그인 목업 고르기' });
+      const choices = workspace.getByRole('region', { name: '로그인 목업 고르기' });
       await expect(choices.getByRole('img', { name: '집중형 이미지' })).toBeVisible();
       await expect(choices.getByRole('img', { name: '여백형 이미지' })).toBeVisible();
       const previewFrame = choices.locator('iframe');
@@ -96,7 +99,7 @@ for (const width of [1440, 390]) {
       expect(api.answers[0]).toEqual({ id: 'mockups', input: { optionId: 'compact' } });
 
       await api.showApproval();
-      const approval = transcript.getByRole('region', { name: '도구 실행 확인' });
+      const approval = workspace.getByRole('region', { name: '도구 실행 확인' });
       await expect(approval.getByText('bun run screenshot --output /tmp/login.png')).toBeVisible();
       await approval.getByRole('button', { name: '한 번 허용' }).click();
       await expect(approval).toHaveCount(0);

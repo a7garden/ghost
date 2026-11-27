@@ -1,4 +1,4 @@
-import { createContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Ellipsis, Home, Inbox, Menu, MessageCircle, PanelLeft, PanelsTopLeft, Search, Settings, Bot } from 'lucide-react';
 import { CommandPalette, Dialog, DialogContent, DialogTitle, Popover, PopoverContent, PopoverTrigger, TitleBar, type CommandItem } from '../ui';
 import { useCompact } from '../ui/adaptive';
@@ -7,6 +7,12 @@ import { shortcut } from '../ui/keys';
 
 export const CompactTitleSlot = createContext<HTMLDivElement | null>(null);
 const SIDEBAR_KEY = 'ghost.sidebar';
+const NARROW_QUERY = '(max-width: 1099.98px)';
+function subscribeNarrow(listener: () => void) {
+  const media = matchMedia(NARROW_QUERY);
+  media.addEventListener('change', listener);
+  return () => media.removeEventListener('change', listener);
+}
 
 /**
  * The window: a quiet sidebar on the page tone, the destination on an inset sheet,
@@ -41,11 +47,19 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, callTray
   const focusedChat = compact && section === 'ghosts';
   const [titleSlot, setTitleSlot] = useState<HTMLDivElement | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
-  const [sidebarHidden, setSidebarHidden] = useState(() => { try { return localStorage.getItem(SIDEBAR_KEY) === 'hidden'; } catch { return false; } });
-  const toggleSidebar = () => setSidebarHidden(hidden => {
-    try { localStorage.setItem(SIDEBAR_KEY, hidden ? 'shown' : 'hidden'); } catch { /* The choice still holds for this visit. */ }
-    return !hidden;
+  const narrow = useSyncExternalStore(subscribeNarrow, () => matchMedia(NARROW_QUERY).matches, () => false);
+  const [preference, setPreference] = useState<'shown' | 'hidden' | null>(() => {
+    try { const stored = localStorage.getItem(SIDEBAR_KEY); return stored === 'hidden' || stored === 'shown' ? stored : null; } catch { return null; }
   });
+  // Without an explicit choice the coding workbench, which brings its own rail, folds the app sidebar on narrow windows.
+  const sidebarHidden = preference ? preference === 'hidden' : section === 'coding' && !compact && narrow;
+  const hiddenNow = useRef(sidebarHidden);
+  hiddenNow.current = sidebarHidden;
+  const toggleSidebar = () => {
+    const next = hiddenNow.current ? 'shown' : 'hidden';
+    try { localStorage.setItem(SIDEBAR_KEY, next); } catch { /* The choice still holds for this visit. */ }
+    setPreference(next);
+  };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key !== '\\') return;

@@ -18,6 +18,7 @@ export function CodingSessionDialog({ sessionId, dialog, disabled, onAnswer }: {
   const choices = dialog.kind === 'choices' || dialog.kind === 'select';
   const allowText = dialog.kind === 'input' || (dialog.kind === 'choices' && dialog.allowText);
   const gallery = dialog.kind === 'choices' && dialog.options?.some(option => option.image || option.html);
+  const tool = dialog.kind === 'approval' ? dialog.tool : undefined;
   const answer = choices && selected ? codingDialogAnswer(dialog, { type: 'option', id: selected })
     : allowText ? codingDialogAnswer(dialog, { type: 'text', value: text }) : null;
 
@@ -36,31 +37,38 @@ export function CodingSessionDialog({ sessionId, dialog, disabled, onAnswer }: {
     }
   }
 
-  return <section className="embedded-dialog" aria-labelledby={label} aria-busy={pending || undefined}
-    data-rail="amber" data-rail-label={dialog.title}>
-    <h3 id={label}><CircleAlert size={17} aria-hidden="true"/>{dialog.title}</h3>
-    {dialog.message && <p>{dialog.message}</p>}
-    {dialog.kind === 'approval' && dialog.tool && <div className="embedded-dialog__command">
-      <strong>{dialog.tool.name}</strong><pre><code>{dialog.tool.summary}</code></pre>
-    </div>}
+  return <section className="embedded-dialog" aria-labelledby={label} aria-busy={pending || undefined}>
     <form onSubmit={event => { event.preventDefault(); void send(answer); }}>
-      {choices && <fieldset className="embedded-choices" data-gallery={gallery || undefined}>
-        <legend className="sr-only">선택지</legend>
-        {dialog.options?.map(option => <div className="embedded-choice" key={option.id} data-selected={selected === option.id || undefined}>
-          {option.image && <CodingSessionPreview id={sessionId} kind="image" path={option.image.path} label={option.image.label ?? `${option.label} 이미지`} thumbnail/>}
-          {option.html && <CodingSessionPreview id={sessionId} kind="html" path={option.html} label={option.label} thumbnail/>}
-          <label>
-            <input type="radio" name={name} checked={selected === option.id} disabled={pending || disabled} onChange={() => { setSelected(option.id); setText(''); }}/>
-            <span><strong>{option.label}</strong>{option.description && <small>{option.description}</small>}</span>
-          </label>
-        </div>)}
-      </fieldset>}
-      {allowText && <div className="embedded-dialog__text">
-        <label htmlFor={`${name}-answer`}>{dialog.kind === 'input' ? '응답' : '직접 답하기'}</label>
-        <Input id={`${name}-answer`} value={text} placeholder={dialog.placeholder} maxLength={8000} disabled={pending || disabled}
-          onChange={event => { setText(event.target.value); setSelected(''); }}/>
-      </div>}
-      {error && <InlineError>{error}</InlineError>}
+      <div className="embedded-dialog__body" tabIndex={0}>
+        <header className="embedded-dialog__head">
+          <p><CircleAlert size={15} aria-hidden="true"/>{dialog.kind === 'approval' ? '승인 대기' : '응답 필요'}</p>
+          <h3 id={label}>{dialog.title}</h3>
+        </header>
+        {dialog.message && <p className="embedded-dialog__evidence">{dialog.message}</p>}
+        {tool && <div className="embedded-dialog__command">
+          <strong>{tool.name}</strong>
+          {!dialog.message?.includes(tool.summary) && <pre><code>{tool.summary}</code></pre>}
+        </div>}
+        {choices && <fieldset className="embedded-choices" data-gallery={gallery || undefined}>
+          <legend className="sr-only">선택지</legend>
+          {dialog.options?.map(option => <div className="embedded-choice" key={option.id} data-selected={selected === option.id || undefined}>
+            <label>
+              <input type="radio" name={name} checked={selected === option.id} disabled={pending || disabled} onChange={() => { setSelected(option.id); setText(''); }}/>
+              <span><strong>{option.label}</strong>{option.description && <small>{option.description}</small>}</span>
+            </label>
+            {(option.image || option.html) && <div className="embedded-choice__evidence">
+              {option.image && <CodingSessionPreview id={sessionId} kind="image" path={option.image.path} label={option.image.label ?? `${option.label} 이미지`} thumbnail/>}
+              {option.html && <CodingSessionPreview id={sessionId} kind="html" path={option.html} label={option.label} thumbnail/>}
+            </div>}
+          </div>)}
+        </fieldset>}
+        {allowText && <div className="embedded-dialog__text">
+          <label htmlFor={`${name}-answer`}>{dialog.kind === 'input' ? '응답' : '직접 답하기'}</label>
+          <Input id={`${name}-answer`} value={text} placeholder={dialog.placeholder} maxLength={8000} disabled={pending || disabled}
+            onChange={event => { setText(event.target.value); setSelected(''); }}/>
+        </div>}
+        {error && <InlineError>{error}</InlineError>}
+      </div>
       <div className="embedded-dialog__actions">
         {dialog.kind === 'confirm' || dialog.kind === 'approval' ? <>
           <Button type="button" variant="outline" disabled={pending || disabled} onClick={() => void send(codingDialogAnswer(dialog, { type: 'confirm', yes: false }))}>{dialog.kind === 'approval' ? '거부' : '아니요'}</Button>

@@ -28,7 +28,7 @@
   --ghost-signal-ink: #2c47d1;
   --ghost-signal-tint: color-mix(in srgb, #3d5cf5 9%, transparent);
   --ghost-amber: #f0a020;
-  --ghost-amber-ink: #a35a00;
+  --ghost-amber-ink: #995400;
   --ghost-amber-tint: color-mix(in srgb, #f0a020 14%, transparent);
   --ghost-success: #1f9d55;
   --ghost-success-ink: #157a41;

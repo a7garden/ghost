@@ -31,7 +31,7 @@ export function CodingSessionChanges({ id, revision, onClose }: { id: string; re
     {result && <>
       <div className="embedded-changes__bar">
         <span>{result.files.length ? `${result.files.length}개 파일` : '변경된 파일 없음'}</span>
-        <Button type="button" size="icon" variant="ghost" aria-label="변경 새로고침" onClick={refresh}><RefreshCw aria-hidden="true"/></Button>
+        <Button type="button" size="icon" variant="ghost" aria-label="변경 새로고침" title="변경 새로고침" onClick={refresh}><RefreshCw aria-hidden="true"/></Button>
       </div>
       {result.files.length > 0 && <ul className="embedded-changes__files" aria-label="변경된 파일" tabIndex={0}>
         {result.files.map(file => <li key={file.path}>

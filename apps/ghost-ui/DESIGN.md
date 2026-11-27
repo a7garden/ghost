@@ -103,6 +103,13 @@ Bespoke redraw of the landing screens around what the owner does: settle what wa
 - **모델** leads with one verdict (Ghost can run / why not); providers are rows with their quota inline and their editor as a branch of the row; the role models are one table whose cells are the selects. **연결 상태** and **업데이트** lead with their state and one action.
 - **List pages** (연결 계정, 금고, 기기, 반복 작업, 자동 활동) are ledgers: identity | one state line | action, failures first, no card per row. Connection add is a searchable catalog under 서비스 추가; per-record data-entry shapes are unchanged.
 
+## Screen structure, round 3 — 2026-11-27
+
+- **메일**: the folder column is gone. A head over the list holds the accounts and mailboxes as inline text tabs with unread counts, search, refresh and 메일 쓰기; list and reader fill the rest. Rows follow the row grammar (unread: ink name, 650 weight and a signal dot; read: quiet), the reader's header is subject, sender → recipients · date on one line, with reply and forward as words and the other actions as a labelled icon group. Wide screens preview the first unread message without marking it read. Phones keep tabs on one scrolling line and restore the list on Back.
+- **코딩 작업대**: the rail leads with 확인 필요 N (an agent waiting or failed anywhere, one press opens the first); agent rows carry the shared state glyph and a state word only when not calm; the footer is one labelled 도구 group. A pane head is state, name edited in place, branch, then 터미널 · 변경 · ⋯ · 닫기 with names; a waiting pane is marked amber in its head while the active pane keeps its ink line. A launch pane shows earlier sessions under the composer. On windows under 1100px wide the app sidebar defaults to folded on this screen unless the owner chose otherwise (`ghost.sidebar`). A terminal belongs to the pane that asked for it and opens in that session's folder.
+- **코딩 대화**: one text column; a turn's tool calls are one group on a left rule that folds to a sentence (파일 수정 1 · 명령 실행 1) and opens to rows that name a state only when not done; diffs open inline; sub-agent tools nest. Questions from the agent sit above the composer like a 확인할 일 card with an amber mark. 중단 is a labelled button only while running.
+- `--ghost-amber-ink` is `#995400` in light so amber text keeps AA on selected rows.
+
 ## Agent components
 
 Built for supervising agents instead of reusing generic cards and badges

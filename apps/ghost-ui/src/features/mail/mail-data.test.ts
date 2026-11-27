@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { MailboxInfo, MailMessage, MailSummary } from '../../host/client';
 import {
-  appendMailPage, buildMailSend, defaultMailbox, emptyMailList, forwardQuote,
+  appendMailPage, buildMailSend, emptyMailList, forwardQuote,
   forwardSubject, inboxMailbox, mailboxLabel, mailSizeLabel, mailAddressName, mailAddressList,
-  mergeUnifiedPages, orderMailboxes, patchMailMessage, parseMailAddresses, refreshMailPage,
+  mergeUnifiedPages, mergedInboxUnseen, orderMailboxes, patchMailMessage, parseMailAddresses, refreshMailPage,
   removeMailMessage, replyQuote, replySubject, shiftMailboxUnseen, unifiedHasMore,
 } from './mail-data';
 
@@ -45,12 +45,6 @@ describe('mailbox ordering and labels', () => {
     expect(mailboxLabel(mailbox('[Gmail]/All Mail', 'all'))).toBe('모든 메일');
     expect(mailboxLabel(mailbox('[Gmail]/Starred', 'flagged'))).toBe('별표편지함');
     expect(mailboxLabel(mailbox('Work', null, '업무'))).toBe('업무');
-  });
-
-  it('opens on 받은편지함 when present, else the first mailbox after ordering', () => {
-    expect(defaultMailbox([mailbox('Trash', 'trash'), mailbox('INBOX', 'inbox')])?.path).toBe('INBOX');
-    expect(defaultMailbox([mailbox('Archive', 'archive'), mailbox('Sent', 'sent')])?.path).toBe('Sent');
-    expect(defaultMailbox([])).toBeNull();
   });
 
   it('shifts a known unseen count and leaves unknown counts and other mailboxes alone', () => {
@@ -121,6 +115,16 @@ describe('merged inbox across accounts', () => {
     expect(inboxMailbox([mailbox('Sent', 'sent'), mailbox('Posteingang', 'inbox')])?.path).toBe('Posteingang');
     expect(inboxMailbox([mailbox('Sent', 'sent'), mailbox('inbox')])?.path).toBe('inbox');
     expect(inboxMailbox([mailbox('Sent', 'sent')])).toBeNull();
+  });
+
+  it('adds only known inbox counts and never presents a partial total', () => {
+    const accounts = [{ connectionId: 'A' }, { connectionId: 'B' }];
+    const boxes = new Map<string, MailboxInfo[]>([['A', [mailbox('INBOX', 'inbox', 'INBOX', 0), mailbox('Archive', 'archive')]]]);
+    expect(mergedInboxUnseen(accounts, boxes)).toBeNull();
+    boxes.set('B', [mailbox('INBOX', 'inbox', 'INBOX', null)]);
+    expect(mergedInboxUnseen(accounts, boxes)).toBeNull();
+    boxes.set('B', [mailbox('inbox', null, 'Inbox', 2)]);
+    expect(mergedInboxUnseen(accounts, boxes)).toBe(2);
   });
 });
 

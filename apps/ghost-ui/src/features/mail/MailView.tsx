@@ -1,20 +1,32 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { MailPlus, MailX, Paperclip, RotateCw, Search, Star } from 'lucide-react';
-import { Button, EmptyState, InlineError, Skeleton } from '../../ui';
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { ChevronDown, ChevronLeft, MailPlus, MailX, Paperclip, Reply, RotateCw, Search, Star } from 'lucide-react';
+import { Button, EmptyState, InlineError, Popover, PopoverContent, PopoverTrigger, Skeleton } from '../../ui';
 import type { MailAccounts, MailboxInfo, MailMessage } from '../../host/client';
 import { useHost } from '../../host/context';
 import { relativeTime, useNow } from '../time';
+import { blurTouchSearchOnEnter, useCompact } from '../../ui/adaptive';
+import { isDesktopShell } from '../../host/desktop';
 import { MailCompose, type ComposeSeed } from './MailCompose';
 import { MailReader, type MailReaderAction } from './MailReader';
 import {
-  ALL_ACCOUNTS, ALL_INBOX, appendMailPage, defaultMailbox, emptyMailList, inboxMailbox, mailboxLabel, mailAddressName,
-  mergeUnifiedPages, orderMailboxes, patchMailMessage, refreshMailPage, removeMailMessage, shiftMailboxUnseen,
+  ALL_ACCOUNTS, ALL_INBOX, appendMailPage, emptyMailList, inboxMailbox, mailboxLabel, mailAddressName,
+  mergeUnifiedPages, mergedInboxUnseen, orderMailboxes, patchMailMessage, refreshMailPage, removeMailMessage, shiftMailboxUnseen,
   unifiedHasMore, type ListedMail, type MailListState, type UnifiedPage,
 } from './mail-data';
+import './MailDesk.css';
 
 type Account = MailAccounts['accounts'][number];
 /** Where one message lives. Uids repeat across accounts, so every action names its own account. */
 interface Target { accountId: string; mailboxPath: string }
+interface Scope extends Target { query: string }
+interface OpenSelection {
+  scope: Scope;
+  target: Target;
+  uid: number;
+  generation: number;
+  markSeen: boolean;
+  message: MailMessage | null;
+}
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE = 400;
@@ -26,7 +38,7 @@ const savedView = () => { try { return localStorage.getItem(VIEW_KEY); } catch {
 const rememberView = (id: string) => { try { localStorage.setItem(VIEW_KEY, id); } catch { /* a private window cannot save; the choice holds for this screen only. */ } };
 const rowKey = (message: ListedMail) => `${message.accountId ?? ''}:${message.uid}`;
 
-// Match mail.css even in a narrow native Mac window; shell chrome is a separate concern.
+// The web uses the shell's compact mode. A narrow native window needs the same mail layout.
 const compactQuery = '(max-width: 55.999rem)';
 function subscribeMailWidth(listener: () => void) {
   const media = matchMedia(compactQuery);
@@ -34,20 +46,104 @@ function subscribeMailWidth(listener: () => void) {
   return () => media.removeEventListener('change', listener);
 }
 
-/**
- * 메일: the owner's mail accounts as a familiar three-pane client — mailboxes, list, reader.
- * With two or more accounts the view opens on 전체 계정, every 받은편지함 merged newest first.
- * Below 56rem the panes stack: account and mailbox become selects above the list, and an open
- * message takes the whole sheet with a back button (iPhone).
- */
+const accountLabel = (account: Account) => account.name || account.address;
+
+/** Keep the current text tab in view without scrolling the list or the shell with it. */
+function revealMailTab(tab: HTMLButtonElement | null) {
+  const rail = tab?.parentElement;
+  if (!rail || !tab) return;
+  const inner = tab.getBoundingClientRect(), outer = rail.getBoundingClientRect();
+  if (inner.left < outer.left) rail.scrollLeft += inner.left - outer.left;
+  else if (inner.right > outer.right) rail.scrollLeft += inner.right - outer.right;
+}
+
+function UnseenCount({ count }: { count: number | null }) {
+  return count !== null && count > 0 ? <span className="mail-tab__count">{count}</span> : null;
+}
+
+function AccountScope({ accounts, current, onSelect }: { accounts: Account[]; current: string; onSelect(id: string): void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const search = useRef<HTMLInputElement>(null);
+  const selected = accounts.find(account => account.connectionId === current);
+  const currentName = current === ALL_ACCOUNTS ? '전체 계정' : selected ? accountLabel(selected) : '메일 계정';
+  const tab = (id: string, label: string, inline = false) => <button key={id} type="button" className="mail-tab" title={label}
+    aria-current={id === current || undefined} ref={inline && id === current ? revealMailTab : undefined}
+    onClick={() => { onSelect(id); setOpen(false); setQuery(''); }}><span className="mail-tab__label">{label}</span></button>;
+  const term = query.trim().toLowerCase();
+  const matches = accounts.length > 4
+    ? accounts.filter(account => `${account.name} ${account.address}`.toLowerCase().includes(term))
+    : accounts;
+  const showAll = !term || '전체 계정'.includes(term);
+  return <nav className="mail-scope mail-scope--accounts" aria-label="메일 계정">
+    {accounts.length === 1 ? <div className="mail-scope__tabs">
+      <span className="mail-tab mail-tab__label mail-scope__name" title={accountLabel(accounts[0]!)}>{accountLabel(accounts[0]!)}</span>
+    </div> : accounts.length <= 4 ? <div className="mail-scope__tabs">
+      {tab(ALL_ACCOUNTS, '전체 계정', true)}
+      {accounts.map(account => tab(account.connectionId, accountLabel(account), true))}
+    </div> : <Popover open={open} onOpenChange={value => { setOpen(value); if (!value) setQuery(''); }}>
+      <PopoverTrigger className="mail-tab" title={currentName}>
+        <span className="mail-tab__label">{currentName}</span><ChevronDown size={13} aria-hidden="true"/>
+      </PopoverTrigger>
+      <PopoverContent align="start" aria-label="메일 계정 선택" onOpenAutoFocus={event => { event.preventDefault(); search.current?.focus(); }}>
+        <div className="mail-picker">
+          <label className="mail-search">
+            <Search size={14} aria-hidden="true"/>
+            <input ref={search} type="search" aria-label="계정 검색" placeholder="계정 검색" value={query} onChange={event => setQuery(event.target.value)}/>
+          </label>
+          {showAll && tab(ALL_ACCOUNTS, '전체 계정')}
+          {matches.map(account => tab(account.connectionId, accountLabel(account)))}
+          {!showAll && !matches.length && <p className="mail-picker__empty" role="status">일치하는 계정 없음</p>}
+        </div>
+      </PopoverContent>
+    </Popover>}
+  </nav>;
+}
+
+function MailboxScope({ mailboxes, current, unified, unseen, onSelect }: {
+  mailboxes: MailboxInfo[]; current: string; unified: boolean; unseen: number | null; onSelect(path: string): void;
+}) {
+  const [open, setOpen] = useState(false);
+  // Inbox and Archive stay at hand. An open overflow mailbox stays visible beside them.
+  const first = mailboxes[0];
+  const second = mailboxes.find(mailbox => mailbox !== first && mailbox.specialUse === 'archive') ?? mailboxes[1];
+  const selected = mailboxes.find(mailbox => mailbox.path === current);
+  const extra = mailboxes.filter(mailbox => mailbox !== first && mailbox !== second);
+  const tab = (mailbox: MailboxInfo, inline = false) => <button type="button" className="mail-tab" key={mailbox.path} title={mailboxLabel(mailbox)}
+    aria-current={mailbox.path === current || undefined} ref={inline && mailbox.path === current ? revealMailTab : undefined}
+    onClick={() => { onSelect(mailbox.path); setOpen(false); }}>
+    <span className="mail-tab__label">{mailboxLabel(mailbox)}</span><UnseenCount count={mailbox.unseen}/>
+  </button>;
+  return <nav className="mail-scope mail-scope--mailboxes" aria-label="메일함">
+    <div className="mail-scope__tabs">
+      {unified ? <span className="mail-tab mail-scope__name"><span className="mail-tab__label">받은편지함</span><UnseenCount count={unseen}/></span> : <>
+        {first && tab(first, true)}
+        {second && tab(second, true)}
+        {selected && extra.includes(selected) && tab(selected, true)}
+      </>}
+    </div>
+    {extra.length > 0 && <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger className="mail-tab">더보기</PopoverTrigger>
+      <PopoverContent align="end" aria-label="다른 메일함">
+        <div className="mail-picker">{extra.map(mailbox => tab(mailbox))}</div>
+      </PopoverContent>
+    </Popover>}
+  </nav>;
+}
+
+/** One list and its reading pane, with a read-only first preview on wide screens. */
 export function MailView({ navigate }: { navigate(path: string): void }) {
   const { client } = useHost();
-  const compact = useSyncExternalStore(subscribeMailWidth, () => matchMedia(compactQuery).matches, () => false);
+  const phone = useCompact();
+  const narrow = useSyncExternalStore(subscribeMailWidth, () => matchMedia(compactQuery).matches, () => false);
+  const compact = phone || (isDesktopShell() && narrow);
   const now = useNow();
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [accountsError, setAccountsError] = useState('');
   const [accountId, setAccountId] = useState('');
   const [mailboxes, setMailboxes] = useState<MailboxInfo[]>([]);
+  const [mailboxReload, setMailboxReload] = useState(0);
+  const [unifiedUnseen, setUnifiedUnseen] = useState<number | null>(null);
   const [mailboxPath, setMailboxPath] = useState('');
   const [list, setList] = useState<MailListState>(emptyMailList);
   const [query, setQuery] = useState('');
@@ -67,6 +163,17 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
   const [compose, setCompose] = useState<{ seed: ComposeSeed; accountId: string } | null>(null);
   const composeTrigger = useRef<HTMLButtonElement | null>(null);
   const writeButton = useRef<HTMLButtonElement>(null);
+  const backButton = useRef<HTMLButtonElement>(null);
+  const lastRow = useRef<HTMLButtonElement | null>(null);
+  const freshLetter = compose?.seed.mode === 'new';
+  const stacked = compact && (freshLetter || openKey !== null);
+  useLayoutEffect(() => {
+    if (stacked && !freshLetter) backButton.current?.focus({ preventScroll: true });
+    if (!stacked && lastRow.current) {
+      (lastRow.current.isConnected ? lastRow.current : writeButton.current)?.focus({ preventScroll: true });
+      lastRow.current = null;
+    }
+  }, [stacked, freshLetter]);
   useLayoutEffect(() => {
     if (compose || !composeTrigger.current) return;
     const trigger = composeTrigger.current;
@@ -77,14 +184,16 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
   /** Mailboxes of each account the merged view has read, for its inbox path and the reader's 이동 list. */
   const accountMailboxes = useRef(new Map<string, MailboxInfo[]>());
   const unified = accountId === ALL_ACCOUNTS;
-  const scope = useMemo(() => ({ accountId, mailboxPath, query }), [accountId, mailboxPath, query]);
+  const scope = useMemo<Scope>(() => ({ accountId, mailboxPath, query }), [accountId, mailboxPath, query]);
   const currentScope = useRef(scope);
   currentScope.current = scope;
   const listGeneration = useRef(0);
+  const loadedScope = useRef<Scope | null>(null);
+  const previewedScope = useRef<Scope | null>(null);
   const moreGeneration = useRef(0);
   const openGeneration = useRef(0);
   const refreshing = useRef(false);
-  const activeOpen = useRef<{ scope: typeof scope; target: Target; uid: number; generation: number } | null>(null);
+  const activeOpen = useRef<OpenSelection | null>(null);
   useEffect(() => () => clearTimeout(searchTimer.current), []);
 
   const reloadAccounts = useCallback(async (pickFirst = false) => {
@@ -137,6 +246,7 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
 
   const loadList = useCallback(async () => {
     const generation = ++listGeneration.current;
+    loadedScope.current = null;
     ++moreGeneration.current;
     setLoadingMore(false);
     setList(emptyMailList);
@@ -145,18 +255,20 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
       if (scope.accountId === ALL_ACCOUNTS) {
         const { pages, failed } = await fetchUnified(scope.query, null);
         if (currentScope.current !== scope || listGeneration.current !== generation) return;
+        setUnifiedUnseen(mergedInboxUnseen(accounts ?? [], accountMailboxes.current));
         setFailures(failed);
         if (!pages.length && Object.keys(failed).length) {
-          setListError(Object.values(failed)[0]!);
           setPhase('error');
           return;
         }
+        loadedScope.current = scope;
         setList(mergeUnifiedPages({ ...emptyMailList, query: scope.query }, pages));
         setPhase('ready');
         return;
       }
       const page = await client.mailMessages(scope.accountId, { mailbox: scope.mailboxPath, q: scope.query || undefined, limit: PAGE_SIZE });
       if (currentScope.current !== scope || listGeneration.current !== generation) return;
+      loadedScope.current = scope;
       setList({ ...emptyMailList, messages: page.messages, nextBefore: page.nextBefore, query: scope.query });
       setPhase('ready');
     } catch (reason) {
@@ -164,7 +276,7 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
       setListError(reason instanceof Error ? reason.message : '메일을 읽지 못했습니다.');
       setPhase('error');
     }
-  }, [client, scope, fetchUnified]);
+  }, [accounts, client, scope, fetchUnified]);
 
   // A new account brings its mailboxes; the view opens on its first (받은편지함 when present).
   // The old account's mailbox drops at once so no load runs against the wrong account.
@@ -174,6 +286,7 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
     setMailboxes([]);
     setList(emptyMailList);
     setPhase('loading');
+    setListError(''); setMoreError(''); setFailures({});
     if (accountId === ALL_ACCOUNTS) { setMailboxPath(ALL_INBOX); return; }
     let alive = true;
     setMailboxPath('');
@@ -181,8 +294,10 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
       try {
         const result = await client.mailMailboxes(accountId);
         if (!alive) return;
-        setMailboxes(orderMailboxes(result.mailboxes));
-        setMailboxPath(defaultMailbox(result.mailboxes)?.path ?? '');
+        const ordered = orderMailboxes(result.mailboxes);
+        setMailboxes(ordered);
+        setMailboxPath(ordered[0]?.path ?? '');
+        if (!ordered.length) setPhase('ready');
       } catch (reason) {
         if (!alive) return;
         setListError(reason instanceof Error ? reason.message : '메일함을 읽지 못했습니다.');
@@ -190,7 +305,7 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
       }
     })();
     return () => { alive = false; };
-  }, [accountId, client]);
+  }, [accountId, client, mailboxReload]);
 
   useEffect(() => {
     if (accountId && mailboxPath) void loadList();
@@ -214,21 +329,30 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
     searchTimer.current = setTimeout(() => setQuery(value.trim()), SEARCH_DEBOUNCE);
   };
   const onSearchKey = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') { event.preventDefault(); commitSearch(search.trim()); }
+    if (event.key === 'Enter') { event.preventDefault(); commitSearch(search.trim()); blurTouchSearchOnEnter(event); }
     if (event.key === 'Escape') { event.preventDefault(); setSearch(''); commitSearch(''); }
   };
 
   const reloadMailboxes = async () => {
-    if (!scope.accountId || scope.accountId === ALL_ACCOUNTS) return;
-    try {
-      const result = await client.mailMailboxes(scope.accountId);
+    if (scope.accountId === ALL_ACCOUNTS && accounts) {
+      const results = await Promise.allSettled(accounts.map(async account =>
+        [account.connectionId, orderMailboxes((await client.mailMailboxes(account.connectionId)).mailboxes)] as const));
       if (currentScope.current !== scope) return;
-      setMailboxes(orderMailboxes(result.mailboxes));
-    } catch { /* counts are cosmetic; the stored list stays. */ }
+      for (const result of results) {
+        if (result.status === 'fulfilled') accountMailboxes.current.set(...result.value);
+      }
+      setUnifiedUnseen(results.every(result => result.status === 'fulfilled') ? mergedInboxUnseen(accounts, accountMailboxes.current) : null);
+    } else if (scope.accountId) {
+      try {
+        const result = await client.mailMailboxes(scope.accountId);
+        if (currentScope.current !== scope) return;
+        setMailboxes(orderMailboxes(result.mailboxes));
+      } catch { /* counts are cosmetic; the stored list stays. */ }
+    }
   };
 
   /**
-   * New mail without a click: ask for the first page again and fold it in. Skipped while a search
+   * New mail without a click: fold in the first page. Skipped while a search
    * is committed, a load or another refresh is running, or the tab is hidden; failures stay silent.
    */
   const refreshQuietly = async () => {
@@ -244,8 +368,8 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
         const page = await client.mailMessages(scope.accountId, { mailbox: scope.mailboxPath, limit: PAGE_SIZE });
         if (currentScope.current !== scope || listGeneration.current !== generation) return;
         setList(current => refreshMailPage(current, page));
-        void reloadMailboxes();
       }
+      void reloadMailboxes();
     } catch { /* the next tick tries again; the list on screen stays valid. */ } finally {
       refreshing.current = false;
     }
@@ -270,37 +394,74 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
   const removeRow = (target: Target, uid: number) =>
     setList(current => removeMailMessage(current, uid, unified ? target.accountId : undefined));
 
-  /** Opening a message reads it, then marks it seen and drops the mailbox's unseen count. */
-  const open = async (summary: ListedMail) => {
-    if (!accountId || !mailboxPath) return;
-    const target = targetOf(summary);
-    const key = rowKey(summary);
-    if (activeOpen.current?.scope === scope && activeOpen.current.uid === summary.uid && activeOpen.current.target.accountId === target.accountId) return;
-    const selection = { scope, target, uid: summary.uid, generation: ++openGeneration.current };
-    activeOpen.current = selection;
-    let loaded = false;
-    setOpenKey(key); setOpenTarget(target); setOpenMessage(null); setMessageError(''); setActionError(''); setBusy('');
+  const shiftUnseen = (target: Target, delta: number) => {
+    if (!unified) {
+      setMailboxes(current => shiftMailboxUnseen(current, target.mailboxPath, delta));
+      return;
+    }
+    const boxes = accountMailboxes.current.get(target.accountId);
+    if (!boxes) return;
+    accountMailboxes.current.set(target.accountId, shiftMailboxUnseen(boxes, target.mailboxPath, delta));
+    const total = mergedInboxUnseen(accounts ?? [], accountMailboxes.current);
+    setUnifiedUnseen(current => current === null ? null : total);
+  };
+
+  const markOpenSeen = async (selection: OpenSelection, message: MailMessage) => {
+    if (message.seen) return;
+    const { target, uid } = selection;
+    setBusy('seen'); setActionError('');
     try {
-      const message = await client.mailMessage(target.accountId, target.mailboxPath, summary.uid);
+      await client.mailUpdate({ type: 'mail.update', connectionId: target.accountId, mailbox: target.mailboxPath, uids: [uid], action: 'seen' });
       if (currentScope.current !== scope || activeOpen.current !== selection) return;
-      setOpenMessage(message);
-      loaded = true;
-      if (!message.seen) {
-        setBusy('seen');
-        await client.mailUpdate({ type: 'mail.update', connectionId: target.accountId, mailbox: target.mailboxPath, uids: [summary.uid], action: 'seen' });
-        if (currentScope.current !== scope || activeOpen.current !== selection) return;
-        patchRow(target, summary.uid, { seen: true });
-        setOpenMessage(current => current ? { ...current, seen: true } : current);
-        if (!unified) setMailboxes(current => shiftMailboxUnseen(current, target.mailboxPath, -1));
-      }
+      patchRow(target, uid, { seen: true });
+      setOpenMessage(current => current ? { ...current, seen: true } : current);
+      shiftUnseen(target, -1);
     } catch (reason) {
-      if (currentScope.current !== scope || activeOpen.current !== selection) return;
-      if (loaded) setActionError(reason instanceof Error ? reason.message : '읽음으로 표시하지 못했습니다.');
-      else setMessageError(reason instanceof Error ? reason.message : '메일을 읽지 못했습니다.');
+      if (currentScope.current === scope && activeOpen.current === selection) {
+        setActionError(reason instanceof Error ? reason.message : '읽음으로 표시하지 못했습니다.');
+      }
     } finally {
       if (currentScope.current === scope && activeOpen.current === selection) setBusy('');
     }
   };
+
+  /** Only an explicit open marks seen. A preview uses the same BODY.PEEK request without the update. */
+  const open = async (summary: ListedMail, markSeen = true) => {
+    if (!accountId || !mailboxPath) return;
+    const target = targetOf(summary);
+    const active = activeOpen.current;
+    if (!messageError && active?.scope === scope && active.uid === summary.uid && active.target.accountId === target.accountId) {
+      if (markSeen && !active.markSeen && !busy) {
+        active.markSeen = true;
+        const message = openMessage ?? active.message;
+        if (message) await markOpenSeen(active, message);
+      }
+      return;
+    }
+    const selection: OpenSelection = { scope, target, uid: summary.uid, generation: ++openGeneration.current, markSeen, message: null };
+    activeOpen.current = selection;
+    previewedScope.current = scope;
+    setOpenKey(rowKey(summary)); setOpenTarget(target); setOpenMessage(null); setMessageError(''); setActionError(''); setBusy('');
+    try {
+      const message = await client.mailMessage(target.accountId, target.mailboxPath, summary.uid);
+      if (currentScope.current !== scope || activeOpen.current !== selection) return;
+      selection.message = message;
+      setOpenMessage(message);
+      if (selection.markSeen) await markOpenSeen(selection, message);
+    } catch (reason) {
+      if (currentScope.current !== scope || activeOpen.current !== selection) return;
+      setMessageError(reason instanceof Error ? reason.message : '메일을 읽지 못했습니다.');
+    }
+  };
+
+  const previewUnread = useEffectEvent(() => {
+    if (loadedScope.current !== scope || previewedScope.current === scope || activeOpen.current) return;
+    const unread = list.messages.find(message => !message.seen);
+    if (unread) void open(unread, false);
+  });
+  useEffect(() => {
+    if (!compact && !compose && phase === 'ready') previewUnread();
+  }, [compact, compose, phase, scope, list.messages]);
 
   const closeOpen = () => {
     activeOpen.current = null;
@@ -333,7 +494,7 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
         if (currentScope.current !== scope || activeOpen.current !== selection) return;
         patchRow(target, message.uid, { seen });
         setOpenMessage(current => current?.uid === message.uid ? { ...current, seen } : current);
-        if (!unified) setMailboxes(current => shiftMailboxUnseen(current, target.mailboxPath, seen ? -1 : 1));
+        shiftUnseen(target, seen ? -1 : 1);
       } else if (action.type === 'toggleFlag') {
         const flagged = !message.flagged;
         await update({ action: flagged ? 'flag' : 'unflag' });
@@ -389,6 +550,20 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
 
   const mailbox = mailboxes.find(item => item.path === mailboxPath) ?? null;
   const resetScope = () => { setSearch(''); commitSearch(''); };
+  const refresh = () => {
+    if (!mailboxPath) { setMailboxReload(value => value + 1); return; }
+    void loadList(); void reloadMailboxes();
+  };
+
+  const onRowKey = (event: KeyboardEvent<HTMLUListElement>) => {
+    if (compact || event.defaultPrevented || event.altKey || event.metaKey || event.ctrlKey || event.shiftKey || event.nativeEvent.isComposing
+      || !(event.target instanceof HTMLButtonElement)) return;
+    const row = event.target.parentElement;
+    const sibling = event.key === 'j' || event.key === 'ArrowDown' ? row?.nextElementSibling
+      : event.key === 'k' || event.key === 'ArrowUp' ? row?.previousElementSibling : null;
+    const next = sibling?.querySelector('button');
+    if (next) { event.preventDefault(); next.focus(); next.click(); }
+  };
 
   if (accountsError && !accounts) {
     return <div className="mail mail--single">
@@ -397,8 +572,9 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
     </div>;
   }
   if (!accounts) {
-    return <div className="mail mail--single grid content-start gap-2 p-1" aria-busy="true">
-      <Skeleton className="h-6 w-40"/><Skeleton className="h-16 w-full"/><Skeleton className="h-16 w-full"/><Skeleton className="h-16 w-full"/>
+    return <div className="mail mail--single" role="status" aria-busy="true">
+      <span className="sr-only">메일 계정 불러오는 중</span>
+      <div className="mail-skeleton" aria-hidden="true"><Skeleton className="h-6 w-40"/><Skeleton className="h-14 w-full"/><Skeleton className="h-14 w-full"/></div>
     </div>;
   }
   if (!accounts.length) {
@@ -406,109 +582,108 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
       action={<Button type="button" onClick={() => navigate('/settings?tab=connections')}>메일 계정 연결</Button>}/>;
   }
 
-  const switchAccount = (id: string) => { resetScope(); rememberView(id); setMailboxPath(''); setAccountId(id); };
-  const switchMailbox = (path: string) => { resetScope(); setMailboxPath(path); };
-  const compactBack = compact
-    ? <Button variant="ghost" size="sm" onClick={closeOpen}>목록으로</Button>
-    : null;
+  const switchAccount = (id: string) => {
+    if (id === accountId) return;
+    resetScope(); rememberView(id);
+    setMailboxes([]); setUnifiedUnseen(null); setMailboxPath(''); setAccountId(id);
+  };
+  const switchMailbox = (path: string) => { if (path !== mailboxPath) { resetScope(); setMailboxPath(path); } };
   const newMail = (event: MouseEvent<HTMLButtonElement>) =>
     startCompose({ mode: 'new' }, unified ? (accounts.find(item => item.canSend) ?? accounts[0]!).connectionId : accountId, event.currentTarget);
   const listLabel = unified ? '전체 받은편지함' : mailbox ? mailboxLabel(mailbox) : '메일';
-  const accountNames = new Map(accounts.map(item => [item.connectionId, item.name || item.address] as const));
+  const accountNames = new Map(accounts.map(item => [item.connectionId, accountLabel(item)] as const));
   const readerMailboxes = unified && openTarget ? accountMailboxes.current.get(openTarget.accountId) ?? [] : mailboxes;
-
+  const ownerAddress = openTarget && accounts.find(account => account.connectionId === openTarget.accountId)?.address;
   const letter = compose && <MailCompose connectionId={compose.accountId} accounts={accounts} seed={compose.seed}
-    onSent={() => { void loadList(); void reloadMailboxes(); }} onClose={() => setCompose(null)}/>;
-  const freshLetter = compose?.seed.mode === 'new';
+    onSent={() => { if (mailboxPath) void loadList(); void reloadMailboxes(); }} onClose={() => setCompose(null)}/>;
 
-  // A new letter takes the reader's place; a reply or forward continues the message in that pane.
+  // A new letter takes the reader's place; a reply or forward continues under the original.
   let reader: ReactNode;
   if (freshLetter) {
-    reader = <div className="mail-reader mail-reader--writing"><div className="mail-reader__scroll">{letter}</div></div>;
+    reader = <div className="mail-reader"><div className="mail-reader__scroll"><div className="mail-reader__measure">{letter}</div></div></div>;
   } else if (openMessage && openTarget) {
-    reader = <MailReader key={`${accountId}:${mailboxPath}:${openKey}:${activeOpen.current?.generation}`} connectionId={openTarget.accountId} mailboxPath={openTarget.mailboxPath} mailboxes={readerMailboxes}
-      message={openMessage} busy={busy} actionError={actionError} onAction={action => void runAction(openMessage, action)}
-      draft={letter} onBack={compact ? closeOpen : undefined}/>;
+    reader = <MailReader key={activeOpen.current?.generation} connectionId={openTarget.accountId} mailboxPath={openTarget.mailboxPath}
+      ownerAddress={ownerAddress || undefined} mailboxes={readerMailboxes} message={openMessage} busy={busy} actionError={actionError}
+      onAction={action => void runAction(openMessage, action)} draft={letter}/>;
   } else if (openKey !== null && messageError) {
-    reader = <div className="mail-reader mail-reader--empty">{compactBack}<InlineError>{messageError}</InlineError></div>;
+    const summary = list.messages.find(message => rowKey(message) === openKey);
+    reader = <div className="mail-reader mail-reader--empty">
+      <InlineError>{messageError}</InlineError>
+      {summary && <Button type="button" variant="outline" size="sm" onClick={() => void open(summary, activeOpen.current?.markSeen)}>다시 시도</Button>}
+    </div>;
   } else if (openKey !== null) {
-    reader = <div className="mail-reader mail-reader--empty">{compactBack}
-      <div className="grid w-full max-w-md gap-2 px-6" aria-busy="true">
-        <Skeleton className="h-6 w-2/3"/><Skeleton className="h-4 w-1/3"/><Skeleton className="h-48 w-full"/>
+    reader = <div className="mail-reader mail-reader--empty">
+      <div className="mail-skeleton" role="status" aria-busy="true">
+        <span className="sr-only">메일 불러오는 중</span>
+        <Skeleton className="h-7 w-2/3"/><Skeleton className="h-4 w-1/2"/><Skeleton className="h-32 w-full"/>
       </div>
     </div>;
   } else {
-    reader = compact ? null
-      : <div className="mail-reader mail-reader--empty"><p className="m-0 text-ui text-ink-3">메일을 선택해 주세요</p></div>;
+    reader = compact ? null : <div className="mail-reader mail-reader--empty">
+      {phase === 'ready' && list.messages.length > 0 && <p>읽을 메일을 선택하세요.</p>}
+    </div>;
   }
 
-  const stacked = compact && (freshLetter || openKey !== null);
-  return <div className="mail" data-writing={compose ? true : undefined}>
-    <nav className="mail-nav" aria-label="메일함" hidden={stacked} inert={Boolean(compose)}>
-      {accounts.length > 1 && <select className="mail-switch" value={accountId} aria-label="메일 계정"
-        onChange={event => switchAccount(event.target.value)}>
-        <option value={ALL_ACCOUNTS}>전체 계정</option>
-        {accounts.map(item => <option key={item.connectionId} value={item.connectionId}>{item.name || item.address}</option>)}
-      </select>}
-      {unified
-        ? compact ? null : <ul className="mail-folders"><li>
-          <button type="button" className="mail-folder" aria-current="true"><span className="mail-folder__name">받은편지함</span></button>
-        </li></ul>
-        : compact
-          ? <select className="mail-switch" value={mailboxPath} aria-label="메일함"
-            onChange={event => switchMailbox(event.target.value)}>
-            {mailboxes.map(item => <option key={item.path} value={item.path}>
-              {mailboxLabel(item)}{(item.unseen ?? 0) > 0 ? ` (${item.unseen})` : ''}</option>)}
-          </select>
-          : <ul className="mail-folders">
-            {mailboxes.map(item => <li key={item.path}>
-              <button type="button" className="mail-folder" aria-current={item.path === mailboxPath || undefined}
-                onClick={() => switchMailbox(item.path)}>
-                <span className="mail-folder__name">{mailboxLabel(item)}</span>
-                {(item.unseen ?? 0) > 0 && <span className="mail-folder__count tabular">{item.unseen}</span>}
-              </button>
-            </li>)}
-          </ul>}
-      {!compact && <Button ref={writeButton} variant="ghost" size="sm" className="mail-nav__write" disabled={!accountId} onClick={newMail}>
-        <MailPlus size={15}/>메일 쓰기</Button>}
-    </nav>
-    <section className="mail-list" aria-label={`${listLabel} 목록`} hidden={stacked} inert={Boolean(compose)}>
-      <div className="mail-list__bar">
-        {compact && <Button ref={writeButton} variant="ghost" size="icon" aria-label="메일 쓰기" disabled={!accountId} onClick={newMail}>
-          <MailPlus size={16}/></Button>}
-        <label className="mail-search">
-          <Search size={14} aria-hidden="true"/>
-          <input type="search" placeholder="메일 검색" aria-label="메일 검색" value={search}
-            onChange={event => onSearchInput(event.target.value)} onKeyDown={onSearchKey}/>
-        </label>
-        <Button variant="ghost" size="icon" aria-label="메일 새로고침" disabled={!accountId || !mailboxPath || phase === 'loading'}
-          onClick={() => { void loadList(); void reloadMailboxes(); }}><RotateCw size={15}/></Button>
-      </div>
+  const failedAccounts = Object.entries(failures);
+  return <div className="mail">
+    <section className="mail-list" aria-label={`${listLabel} 목록`} aria-hidden={stacked || undefined} inert={stacked || Boolean(compose)}>
+      <header className="mail-list__head">
+        <div className="mail-list__navigation">
+          <AccountScope accounts={accounts} current={accountId} onSelect={switchAccount}/>
+          <MailboxScope key={accountId} mailboxes={mailboxes} current={mailboxPath} unified={unified} unseen={unifiedUnseen} onSelect={switchMailbox}/>
+        </div>
+        <div className="mail-list__bar">
+          <label className="mail-search">
+            <Search size={14} aria-hidden="true"/>
+            <input type="search" placeholder="메일 검색" aria-label="메일 검색" value={search} disabled={!mailboxPath}
+              onChange={event => onSearchInput(event.target.value)} onKeyDown={onSearchKey}/>
+          </label>
+          <Button type="button" variant="ghost" size="icon" aria-label="메일 새로고침" title="메일 새로고침" disabled={!accountId || phase === 'loading'}
+            onClick={refresh}><RotateCw size={15} aria-hidden="true"/></Button>
+          <Button type="button" ref={writeButton} disabled={!accountId} onClick={newMail}><MailPlus size={15} aria-hidden="true"/>메일 쓰기</Button>
+        </div>
+      </header>
       <div className="mail-list__scroll">
-        {Object.entries(failures).map(([id, message]) => <div key={id} className="mail-list__error">
+        {failedAccounts.map(([id, message]) => <div key={id} className="mail-list__error">
           <InlineError>{accountNames.get(id) ?? '계정'}: {message}</InlineError></div>)}
-        {phase === 'loading' && <ul className="mail-rows" aria-busy="true">
-          {[0, 1, 2, 3, 4].map(row => <li key={row} className="mail-row mail-row--loading">
-            <Skeleton className="h-4 w-1/2"/><Skeleton className="h-3 w-3/4"/>
+        {phase === 'loading' && <ul className="mail-rows" aria-busy="true" aria-label={mailboxPath ? '메일 불러오는 중' : '메일함 불러오는 중'}>
+          {[0, 1, 2, 3, 4].map(row => <li key={row} className="mail-row mail-row--loading" aria-hidden="true">
+            <div className="mail-row__copy"><Skeleton className="h-4 w-1/2"/><Skeleton className="h-3 w-3/4"/></div>
           </li>)}
         </ul>}
-        {phase === 'error' && <div className="mail-list__error"><InlineError>{listError}</InlineError></div>}
-        {phase === 'ready' && !list.messages.length
-          && <div className="calm mail-list__empty"><MailX size={16} aria-hidden="true"/><p>{list.query ? '일치하는 메일 없음' : '메일 없음'}</p></div>}
-        {phase === 'ready' && list.messages.length > 0 && <ul className="mail-rows">
+        {phase === 'error' && <div className="mail-list__status">
+          {!failedAccounts.length && <InlineError>{listError}</InlineError>}
+          <Button type="button" variant="outline" size="sm" className="justify-self-start" onClick={refresh}>다시 시도</Button>
+        </div>}
+        {phase === 'ready' && !list.messages.length && <div className="mail-list__empty">
+          <MailX size={16} aria-hidden="true"/>
+          <p>{!mailboxPath ? '메일함 없음'
+            : failedAccounts.length ? (list.query ? '불러온 계정에 일치하는 메일 없음' : '불러온 계정에 메일 없음')
+            : list.query ? '일치하는 메일 없음' : '메일 없음'}</p>
+        </div>}
+        {phase === 'ready' && list.messages.length > 0 && <ul className="mail-rows" onKeyDown={onRowKey}>
           {list.messages.map(message => <li key={rowKey(message)}>
-            <button type="button" className="mail-row" data-unread={!message.seen || undefined}
-              aria-current={rowKey(message) === openKey || undefined} onClick={() => void open(message)}>
-              <span className="mail-row__line">
-                <span className="mail-row__from">{mailAddressName(message.from)}</span>
-                {unified && message.accountName && <span className="mail-row__account">{message.accountName}</span>}
-                <span className="mail-row__flags">
-                  {message.flagged && <Star size={12} fill="currentColor" aria-label="별표 메일"/>}
-                  {message.hasAttachments && <Paperclip size={12} aria-label="첨부 파일 있음"/>}
+            <button type="button" className="mail-row" data-unread={!message.seen || undefined} data-flagged={message.flagged || undefined}
+              aria-current={rowKey(message) === openKey || undefined} onClick={event => {
+                if (compact) lastRow.current = event.currentTarget;
+                void open(message);
+              }}>
+              <span className="mail-row__mark">{!message.seen && <span className="mail-row__dot" role="img" aria-label="읽지 않음" title="읽지 않음"/>}</span>
+              <span className="mail-row__copy">
+                <span className="mail-row__line">
+                  <span className="mail-row__from">{mailAddressName(message.from)}</span>
+                  {unified && message.accountName && <span className="mail-row__account" title={message.accountName}>{message.accountName}</span>}
                 </span>
-                <time className="mail-row__date tabular">{relativeTime(message.date, now)}</time>
+                <span className="mail-row__subject">{message.subject || '(제목 없음)'}</span>
               </span>
-              <span className="mail-row__subject">{message.subject || '(제목 없음)'}</span>
+              <span className="mail-row__value">
+                <time className="mail-row__date" dateTime={new Date(message.date).toISOString()}>{relativeTime(message.date, now)}</time>
+                {(message.flagged || message.hasAttachments || message.answered) && <span className="mail-row__flags">
+                  {message.flagged && <Star className="mail-row__flag" size={12} fill="currentColor" role="img" aria-label="별표 메일"><title>별표 메일</title></Star>}
+                  {message.hasAttachments && <Paperclip size={12} role="img" aria-label="첨부 파일 있음"><title>첨부 파일 있음</title></Paperclip>}
+                  {message.answered && <Reply size={12} role="img" aria-label="답장함"><title>답장함</title></Reply>}
+                </span>}
+              </span>
             </button>
           </li>)}
         </ul>}
@@ -519,6 +694,12 @@ export function MailView({ navigate }: { navigate(path: string): void }) {
         </div>}
       </div>
     </section>
-    {reader}
+    {reader && <div className="mail-pane">
+      {stacked && !freshLetter && <Button ref={backButton} type="button" className="mail-pane__back" variant="ghost" size="sm"
+        aria-label={openMessage ? undefined : '목록으로'} disabled={Boolean(compose)} onClick={closeOpen}>
+        <ChevronLeft size={15} aria-hidden="true"/>목록
+      </Button>}
+      {reader}
+    </div>}
   </div>;
 }

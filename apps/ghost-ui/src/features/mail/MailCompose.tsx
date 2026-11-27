@@ -102,6 +102,7 @@ export function MailCompose({ connectionId, accounts, seed, onSent, onClose }: {
       if (event.key === 'Escape' && !sending) { event.preventDefault(); onClose(); }
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send(); }
     }}>
+    {seed.mode === 'new' && <h2 className="mail-letter__title">{title}</h2>}
     <header className="mail-letter__head">
       <div className="mail-letter__envelope">
         <div className="mail-letter__sender">

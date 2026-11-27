@@ -78,7 +78,7 @@ export function CodingSessionPreview({ id, path, label, kind, thumbnail = false 
           {compact && <SheetHandle/>}
           <header className="file-sheet__bar">
             <div className="file-sheet__identity"><Icon size={18} aria-hidden="true"/><DialogTitle className="file-sheet__title">{label}</DialogTitle></div>
-            <DialogPrimitive.Close className="file-sheet__close" aria-label="미리보기 닫기"><X size={18} aria-hidden="true"/></DialogPrimitive.Close>
+            <DialogPrimitive.Close className="file-sheet__close" aria-label="미리보기 닫기" title="미리보기 닫기"><X size={18} aria-hidden="true"/></DialogPrimitive.Close>
           </header>
           <div className="file-sheet__viewport" data-file-scroll>
             {kind === 'html' ? <iframe className="file-sheet__pdf" src={url} sandbox="" referrerPolicy="no-referrer" title={`${label} · HTML 미리보기`}/>

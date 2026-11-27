@@ -114,12 +114,12 @@ export function CodingSessionComposer({ state, disabled, stopping, onPrompt, onA
           add(Array.from(event.currentTarget.files ?? []));
           event.currentTarget.value = '';
         }}/>
-        <Button type="button" variant="ghost" size="icon" disabled={disabled || pending} aria-label="이미지 첨부" onClick={() => attaching.current?.click()}><Paperclip aria-hidden="true"/></Button>
+        <Button type="button" variant="ghost" size="icon" disabled={disabled || pending} aria-label="이미지 첨부" title="이미지 첨부" onClick={() => attaching.current?.click()}><Paperclip aria-hidden="true"/></Button>
       </>}
       trailing={<>
         {model}
-        {state === 'working' && <Button type="button" className="embedded-queue" variant="ghost" size="sm" disabled={!readyToSend || tooLong || disabled || pending} onClick={() => void send(draft.trim(), 'follow_up')}>후속 지시 예약</Button>}
-        {busy && <Button type="button" variant="ghost" size="icon" aria-label="작업 중단" title="작업 중단" disabled={disabled || stopping} onClick={onAbort}><Square aria-hidden="true"/></Button>}
+        {state === 'working' && readyToSend && <Button type="button" className="embedded-queue" variant="ghost" size="sm" disabled={tooLong || disabled || pending} onClick={() => void send(draft.trim(), 'follow_up')}>후속 지시 예약</Button>}
+        {state === 'working' && <Button type="button" className="embedded-stop" variant="ghost" size="sm" aria-label="작업 중단" disabled={disabled || stopping} onClick={onAbort}><Square aria-hidden="true"/>중단</Button>}
       </>}/>
   </>;
 }

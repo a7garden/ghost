@@ -6,7 +6,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui';
 import { directoryName } from './CodingModel';
 import { CodingModelChip, type ModelChoice } from './CodingModelChip';
 import { CodingSessionComposer } from './CodingSessionComposer';
-import { relativeTime, useNow } from './time';
+import { useNow } from './time';
+import { AgentRowBody } from './WorkbenchPane';
 
 /** Where a new agent works: a folder (directly or in its own worktree), or an empty sandbox. */
 export type LaunchPlace = { folder: string | null; worktree: boolean };
@@ -51,10 +52,8 @@ export function AgentLaunch({ folders, busyFolders, earlier, onLaunch, onResume,
     {earlier.length > 0 && <section className="agent-launch__earlier" aria-label="이전 세션">
       <h3>이어서 하기</h3>
       <ul>
-        {shown.map(session => <li key={session.id}><button type="button" title={session.repo ?? session.cwd} onClick={() => onResume(session)}>
-          <span className="agent-launch__title">{session.title}</span>
-          <span className="agent-launch__meta">{directoryName(session.repo ?? session.cwd)}</span>
-          <time className="tabular" dateTime={new Date(session.updatedAt).toISOString()}>{relativeTime(session.updatedAt, now)}</time>
+        {shown.map(session => <li key={session.id}><button type="button" className="workbench-agent-open" title={session.repo ?? session.cwd} onClick={() => onResume(session)}>
+          <AgentRowBody session={session} detail={directoryName(session.repo ?? session.cwd)} now={now}/>
         </button></li>)}
       </ul>
       {earlier.length > EARLIER_SHOWN && <button type="button" className="agent-launch__more" aria-expanded={allEarlier} onClick={() => setAllEarlier(value => !value)}>

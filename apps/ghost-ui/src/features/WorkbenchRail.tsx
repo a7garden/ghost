@@ -1,14 +1,12 @@
 import { useState, type MouseEvent } from 'react';
-import { Box, ChevronDown, ChevronUp, Columns2, Folder, FolderOpen, PanelLeftClose, Pencil, Pin, Plus, Settings2, Trash2 } from 'lucide-react';
+import { Box, Columns2, Folder, FolderOpen, Minus, PanelLeftClose, Pencil, Pin, Plus, Settings2, Trash2 } from 'lucide-react';
 import type { CodingSession as Session, Scope } from '@ghost/contract';
-import { DotAvatar } from '../components/DotAvatar';
 import { FolderPicker } from '../components/FolderPicker';
 import { Button, ContextMenu, ContextMenuAction, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Input } from '../ui';
 import { shortcut } from '../ui/keys';
 import { directoryName } from './CodingModel';
-import { absoluteTime, relativeTime } from './time';
 import type { Attention } from './WorkbenchAttention';
-import { AgentState, AttentionMark, InlineName } from './WorkbenchPane';
+import { AgentRowBody, AgentState, AttentionMark, InlineName } from './WorkbenchPane';
 import type { ProjectAgent } from './workbenchProjects';
 
 export const AGENT_DRAG = 'application/x-ghost-agent';
@@ -20,7 +18,6 @@ export type RailProps = {
   selected: string | null;
   rows: readonly ProjectAgent[];
   folded: ReadonlySet<string>;
-  shownIds: ReadonlySet<string>;
   activeId: string | null;
   launching: boolean;
   sessions: ReadonlyMap<string, Session>;
@@ -39,6 +36,7 @@ export type RailProps = {
   createProject(name: string, folder: string | null): Promise<unknown>;
   openProjectSettings(id: string): void;
   onCollapse?(): void;
+  attentionAction?: React.ReactNode;
   footer?: React.ReactNode;
 };
 
@@ -48,7 +46,10 @@ const wantsSplit = (event: MouseEvent) => event.metaKey || event.ctrlKey;
 export function WorkbenchRail(props: RailProps) {
   const { projects, selected, busy, onCollapse } = props;
   const [drafting, setDrafting] = useState(false);
+  const addAgent = <button type="button" className="workbench-agent-add" data-selected={props.launching || undefined} disabled={busy}
+    onClick={event => props.newAgent(props.canSplit && wantsSplit(event))}><Plus size={16} aria-hidden="true"/>새 에이전트</button>;
   return <>
+    {props.attentionAction}
     <div className="workbench-rail-head">
       <h2>프로젝트</h2>
       <Button variant="ghost" size="icon" type="button" disabled={busy} aria-label="새 프로젝트" title="새 프로젝트" onClick={() => setDrafting(true)}><Plus aria-hidden="true"/></Button>
@@ -56,17 +57,19 @@ export function WorkbenchRail(props: RailProps) {
     </div>
     <nav className="workbench-spaces" aria-label="프로젝트">
       {drafting && <ProjectDraft onCancel={() => setDrafting(false)} onCreate={(name, folder) => props.createProject(name, folder).then(() => setDrafting(false))}/>}
+      {!props.canSplit && addAgent}
       {projects.map(project => {
         const current = project.id === selected;
         const name = project.scope?.name ?? '프로젝트 없음';
         return <div key={project.id ?? 'none'} className="workbench-project" data-selected={current || undefined}>
           <div className="workbench-space-row" data-selected={current || undefined}>
             <button type="button" aria-current={current ? 'true' : undefined} aria-expanded={current} title={project.scope?.paths[0] ?? name} onClick={() => props.selectProject(project.id)}>
-              {project.scope ? <Folder size={15} aria-hidden="true"/> : <Box size={15} aria-hidden="true"/>}<span>{name}</span><AttentionMark signal={project.signal}/>
+              {project.scope ? <Folder size={16} aria-hidden="true"/> : <Box size={16} aria-hidden="true"/>}<span>{name}</span>
+              {!current && <AttentionMark signal={project.signal}/>}
             </button>
             {project.scope && <Button variant="ghost" size="icon" type="button" aria-label={`${name} 프로젝트 설정`} title="프로젝트 설정" onClick={() => props.openProjectSettings(project.id!)}><Settings2 aria-hidden="true"/></Button>}
           </div>
-          {current && <AgentList {...props}/>}
+          {current && <><AgentList {...props}/>{props.canSplit && addAgent}</>}
         </div>;
       })}
     </nav>
@@ -75,7 +78,7 @@ export function WorkbenchRail(props: RailProps) {
 }
 
 function AgentList(props: RailProps) {
-  const { rows, folded, sessions, attention, ghosts, now, busy, canSplit, activeId, shownIds } = props;
+  const { rows, folded, sessions, attention, ghosts, now, busy, canSplit, activeId } = props;
   const [showOlder, setShowOlder] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const visible = showOlder ? rows : rows.filter(row => !folded.has(row.sessionId));
@@ -85,23 +88,14 @@ function AgentList(props: RailProps) {
       const title = session?.title || '에이전트';
       const ghost = row.ghostId ? ghosts.get(row.ghostId) : undefined;
       const active = row.sessionId === activeId;
-      const shown = shownIds.has(row.sessionId);
-      const question = session?.state === 'waiting' ? session.pendingDialog?.title : undefined;
       return <li key={row.sessionId}><ContextMenu>
-        <ContextMenuTrigger asChild touchAction="inline"><div className="workbench-agent-row" data-selected={active || undefined} data-shown={shown || undefined}
+        <ContextMenuTrigger asChild touchAction="inline"><div className="workbench-agent-row" data-selected={active || undefined}
           draggable={canSplit && renaming !== row.sessionId} onDragStart={event => { event.dataTransfer.setData(AGENT_DRAG, row.sessionId); event.dataTransfer.effectAllowed = 'move'; }}>
           {renaming === row.sessionId
             ? <span className="workbench-agent-rename"><AgentState state={session?.state}/><InlineName value={title} label="에이전트 이름" editing onEditing={value => { if (!value) setRenaming(null); }} onSave={next => props.renameAgent(row.sessionId, next)}/></span>
-            : <button type="button" aria-current={active ? 'true' : undefined} title={title}
+            : <button type="button" className="workbench-agent-open" aria-current={active ? 'true' : undefined} title={title}
               onClick={event => props.openAgent(row.sessionId, canSplit && wantsSplit(event))}>
-              <AgentState state={session?.state}/>
-              <span className="workbench-agent-text">
-                <span className="workbench-agent-title">{title}</span>
-                {question && <span className="workbench-agent-question">{question}</span>}
-              </span>
-              {ghost && <span className="workbench-ghost" title={`${ghost.name}이(가) 시작`}><DotAvatar profileId={ghost.id} size={16}/><span className="sr-only">{ghost.name}</span></span>}
-              {session && <time className="workbench-agent-time tabular" dateTime={new Date(session.updatedAt).toISOString()} title={absoluteTime(session.updatedAt)}>{relativeTime(session.updatedAt, now)}</time>}
-              <AttentionMark signal={attention.get(row.sessionId)}/>
+              <AgentRowBody session={session} attention={attention.get(row.sessionId)} ghost={ghost} now={now}/>
             </button>}
           <ContextMenuAction/>
         </div></ContextMenuTrigger>
@@ -114,9 +108,7 @@ function AgentList(props: RailProps) {
       </ContextMenu></li>;
     })}
     {folded.size > 0 && <li><button type="button" className="workbench-agent-add" aria-expanded={showOlder} onClick={() => setShowOlder(value => !value)}>
-      {showOlder ? <ChevronUp size={15} aria-hidden="true"/> : <ChevronDown size={15} aria-hidden="true"/>}{showOlder ? '이전 에이전트 접기' : `이전 에이전트 ${folded.size}개`}</button></li>}
-    <li><button type="button" className="workbench-agent-add" data-selected={props.launching || undefined} disabled={busy}
-      onClick={event => props.newAgent(canSplit && wantsSplit(event))}><Plus size={15} aria-hidden="true"/>새 에이전트</button></li>
+      {showOlder ? <Minus size={15} aria-hidden="true"/> : <Plus size={15} aria-hidden="true"/>}{showOlder ? '이전 에이전트 접기' : `이전 에이전트 ${folded.size}개`}</button></li>}
   </ul>;
 }
 

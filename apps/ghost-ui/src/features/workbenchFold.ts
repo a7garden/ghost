@@ -3,7 +3,7 @@ import type { Attention } from './WorkbenchAttention';
 
 export const STALE_MS = 3 * 24 * 60 * 60 * 1000;
 
-/** Agents the list folds away: idle for days and not asking for the owner. The agent on screen is never folded. */
+/** Fold quiet, idle or closed agents that have nothing new for the owner. The focused agent always stays visible. */
 export function foldedAgents(
   agents: readonly Agent[], sessions: ReadonlyMap<string, CodingSession>, attention: ReadonlyMap<string, Attention>,
   focusedId: string | null, now: number,
@@ -12,8 +12,7 @@ export function foldedAgents(
   for (const { sessionId } of agents) {
     const session = sessions.get(sessionId);
     if (!session || sessionId === focusedId || attention.has(sessionId)) continue;
-    if (session.state === 'working' || session.state === 'waiting') continue;
-    if (session.state === 'closed' || now - session.updatedAt > STALE_MS) folded.add(sessionId);
+    if (session.state === 'closed' || (session.state === 'idle' && now - session.updatedAt > STALE_MS)) folded.add(sessionId);
   }
   return folded;
 }
