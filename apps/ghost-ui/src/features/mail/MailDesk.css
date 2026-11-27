@@ -167,8 +167,9 @@
     .mail-list, .mail-pane { grid-area: 1 / 1; }
     .mail-list { border-inline-end: 0; }
     .mail-list[aria-hidden='true'] { visibility: hidden; }
-    .mail-list__navigation { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 6px; }
-    .mail-scope--mailboxes { border-inline-start: 1px solid var(--ghost-line); padding-inline-start: 6px; }
+    /* Side by side the accounts clipped at 390px and hid the mailbox tabs behind a scroll; two rows read at once. */
+    .mail-list__navigation { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .mail-list__navigation .mail-tab { min-height: 40px; }
     .mail-reader__scroll { padding-block: 12px 28px; }
   }
   @media (pointer: coarse) {

@@ -294,7 +294,7 @@ test('known validation refusal preserves an editable draft', async ({ page }) =>
   await expect(page.getByRole('button', { name: '전송 상태 확인', exact: true })).toHaveCount(0);
 });
 
-test('phone keeps account and mailbox tabs on one line and restores the scrolled list on Back', async ({ page }) => {
+test('phone stacks account and mailbox tabs in two rows and restores the scrolled list on Back', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await mailApi(page);
   await page.route('**/api/mail/B/messages?mailbox=Archive**', route => json(route, {
@@ -309,8 +309,8 @@ test('phone keeps account and mailbox tabs on one line and restores the scrolled
   await archive.click();
   const mail = row(page, 'B Archive #1');
   const a = (await account.boundingBox())!, b = (await folder.boundingBox())!;
-  expect(b.y).toBe(a.y);
-  expect(b.x).toBeGreaterThanOrEqual(a.x + a.width);
+  expect(b.y).toBeGreaterThanOrEqual(a.y + a.height - 1);
+  expect(Math.abs(b.x - a.x)).toBeLessThan(2);
   await expect(page.getByRole('article', { name: /메일 읽기/ })).toHaveCount(0);
   const scroll = page.locator('.mail-list__scroll');
   await mail.scrollIntoViewIfNeeded();
