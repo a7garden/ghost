@@ -75,7 +75,7 @@ CI는 로컬과 같은 `scripts/release.ts --publish`를 쓴다. CI에서는 배
 
 1. [Ghost Actions 시크릿](https://github.com/a7garden/ghost/settings/secrets/actions)에 Apple 배포·공증 자격을 등록한다. `project-oxi` 조직의 값은 개인 저장소 `a7garden/ghost`에 상속되지 않는다.
 2. 업데이터 키는 설치본의 공개 키와 일치하는 기존 `GHOST_UPDATER_KEY`를 쓴다. 바꾸면 기존 앱이 업데이트를 거부한다.
-3. `v<Host 버전>` 태그를 push한다. Actions 완료 후 공개 산출물의 서명·해시·공증을 독립 검증하고 운영 Host의 `lastResult`를 확인한다.
+3. `v<Host 버전>` 태그를 push한다. 태그는 가벼운 태그(`git tag v<버전>`)로 만든다. 주석 태그(`git tag -a`)는 checkout이 만든 로컬 태그와 달라 release.ts의 `git fetch --tags origin`이 거부한다(2026-11-28 v3.0.0 첫 실행이 이렇게 실패했다). Actions 완료 후 공개 산출물의 서명·해시·공증을 독립 검증하고 운영 Host의 `lastResult`를 확인한다.
 4. [Ghost TestFlight](https://appstoreconnect.apple.com/apps/6840207174/testflight)의 `Ghost Internal` 그룹은 자동 배포로 설정했다. iPhone에서는 TestFlight로 처음 설치한 뒤 자동 업데이트를 켠다.
 
 2026-11-28: [iPhone 0.1.0 빌드 20](https://github.com/a7garden/ghost/actions/runs/46089015375)이 서명·검증을 통과했고 Apple이 업로드를 수락했다.
