@@ -306,6 +306,15 @@ export const CODE_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => too
 /** The allow-list a new Ghost gets when none is given: every selectable tool except host, coding agent, PC control, mail and finance tools. */
 export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !CODE_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool) && !MAIL_TOOLS.includes(tool) && !FINANCE_TOOLS.includes(tool));
 
+/** System configuration: projects, approval rules, model slots, limits, tool servers and rollbacks. The main Ghost manages these; installed Ghosts work inside them. */
+export const MANAGEMENT_TOOLS: readonly GhostTool[] = [
+  "scope_create", "scope_update", "scope_attach", "scope_delete", "slot_set", "slot_delete", "limits_set",
+  "rule_create", "rule_update", "rule_delete", "mcp_create", "mcp_update", "mcp_delete", "config_revert",
+];
+
+/** The allow-list an installed or custom Ghost starts from: the default set without system configuration. */
+export const APP_GHOST_TOOLS: readonly GhostTool[] = DEFAULT_GHOST_TOOLS.filter((tool) => !MANAGEMENT_TOOLS.includes(tool));
+
 /** A skill directory name under the configured skills root. */
 export const SkillName = Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" });
 export const SkillList = Type.Array(SkillName, { uniqueItems: true, maxItems: 16 });
@@ -350,6 +359,13 @@ export const SlotName = Type.String({ pattern: "^[a-z][a-z0-9-]{0,31}$" });
 export const ModelSlot = Type.Object({ model: ModelRef, fallbacks: FallbackList });
 export type ModelSlot = Static<typeof ModelSlot>;
 
+/** The package an installed Ghost came from, and the package version last applied to it. */
+export const GhostSource = Type.Object({
+  package: SkillName,
+  version: Type.Integer({ minimum: 1 }),
+});
+export type GhostSource = Static<typeof GhostSource>;
+
 export const Ghost = Type.Object({
   attachments: DocRefs,
   id: Id,
@@ -372,8 +388,36 @@ export const Ghost = Type.Object({
   directConversationId: Id,
   createdAt: Timestamp,
   updatedAt: Timestamp,
+  /** The package it was installed from; null for the main Ghost and for Ghosts made by hand. */
+  source: Type.Optional(nullable(GhostSource)),
 });
 export type Ghost = Static<typeof Ghost>;
+
+/** Which of the main Ghost's projects a package offers to take at install. */
+export const GhostPackageProjects = Type.Union([Type.Literal("code"), Type.Literal("documents")]);
+export type GhostPackageProjects = Static<typeof GhostPackageProjects>;
+
+/**
+ * One installable way of working: a Ghost's persona, look, tools and skills as one unit, the way a skill bundles a
+ * procedure. Built-in packages ship with the Host; owner packages are `GHOST.md` files under `<root>/ghost-packages/`.
+ */
+export const GhostPackage = Type.Object({
+  name: SkillName,
+  title: Type.String({ minLength: 1, maxLength: 128 }),
+  version: Type.Integer({ minimum: 1 }),
+  origin: Type.Union([Type.Literal("builtin"), Type.Literal("owner")]),
+  /** Line one is the introduction lists and the catalog show. */
+  persona: Type.String({ minLength: 1, maxLength: 8192 }),
+  look: Look,
+  tools: GhostToolList,
+  skills: SkillList,
+  /** Asks for direct PC execution; the owner grants or withholds it at install. */
+  hostExecution: Type.Boolean(),
+  /** The kind of model that suits it, in the owner's words; the owner picks the model. */
+  modelHint: Type.String({ maxLength: 256 }),
+  projects: nullable(GhostPackageProjects),
+});
+export type GhostPackage = Static<typeof GhostPackage>;
 
 export const ConversationKind = Type.Union([Type.Literal("direct"), Type.Literal("work"), Type.Literal("review"), Type.Literal("wake"), Type.Literal("subagent")]);
 export type ConversationKind = Static<typeof ConversationKind>;

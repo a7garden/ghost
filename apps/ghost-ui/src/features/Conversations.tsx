@@ -7,20 +7,17 @@ import { blurTouchSearchOnEnter } from '../ui/adaptive';
 import { routeLabels, uiTerms } from '../uiText';
 import { ghostPresence, liveWork, pendingDecisions, visibleGhosts } from './ghostState';
 import { absoluteTime, relativeTime, useNow } from './time';
-import { useSidebarPreferences } from './sidebarPreferences';
+import { ghostAddPath } from './ghostRoutes';
 import './Roster.css';
 
 const destinations = [['/work', uiTerms.work], ['/goals', uiTerms.goals], ['/mail', routeLabels.mail]] as const;
 type RosterVisit = { top: number; query: string; row: string };
-const newGhostPath = '/settings?tab=team&new=1';
 
 export function Conversations({ state, navigate, openGhost }: { state: State; navigate(path: string): void; openGhost(id: string): void }) {
   const [visit] = useState<RosterVisit | undefined>(() => typeof history === 'undefined' ? undefined : history.state?.ghostRoster);
   const [query, setQuery] = useState(visit?.query ?? '');
   const now = useNow();
   const roster = visibleGhosts(state.ghosts);
-  const { pinned, togglePinned } = useSidebarPreferences(roster.map(ghost => ghost.id));
-  const pinOrder = new Map(pinned.map((id, index) => [id, index]));
   const searchable = roster.length > 8;
   const needle = searchable ? query.trim().toLocaleLowerCase() : '';
 
@@ -79,9 +76,8 @@ export function Conversations({ state, navigate, openGhost }: { state: State; na
       : preview?.createdAt ?? activityAt;
     const line = (presence.state === 'working' ? runningByGhost.get(ghost.id)?.title : undefined)
       ?? presence.line ?? preview?.body ?? (ghost.state === 'paused' ? '일시 중지' : null);
-    const pin = ghost.isDefault ? -1 : pinOrder.get(ghost.id) ?? pinned.length;
-    return { ghost, presence, at, line, pin };
-  }).sort((a, b) => a.presence.rank - b.presence.rank || a.pin - b.pin);
+    return { ghost, presence, at, line };
+  }).sort((a, b) => a.presence.rank - b.presence.rank || Number(b.ghost.isDefault) - Number(a.ghost.isDefault));
 
   const main = roster.find(ghost => ghost.isDefault);
   const names = new Map(roster.map(ghost => [ghost.id, ghost.name]));
@@ -99,8 +95,7 @@ export function Conversations({ state, navigate, openGhost }: { state: State; na
           {ghost.isDefault && roster.length > 1 && <span className="presence-row__main-mark">메인</span>}
         </span>;
         return <li key={ghost.id}>
-          <RosterGhostMenu ghost={ghost} pinned={pinOrder.has(ghost.id)} togglePinned={togglePinned} onOpen={open}
-            navigate={path => { remember(row); navigate(path); }}>
+          <RosterGhostMenu ghost={ghost} onOpen={open} navigate={path => { remember(row); navigate(path); }}>
             <button id={row} type="button" className="roster-row" data-tone={presence.state} onClick={open}>
               <PresenceAvatar ghostId={ghost.id} state={presence.state} size={32}/>
               <span className="roster-row__copy">
@@ -115,9 +110,11 @@ export function Conversations({ state, navigate, openGhost }: { state: State; na
       })}
     </ul> : <div className="roster-empty">
       <p role="status">{needle ? '일치하는 Ghost가 없습니다.' : '대화할 Ghost가 없습니다.'}</p>
-      {!needle && <a id="roster-new-ghost" className="roster-link" href={`#${newGhostPath}`}
-        onClick={event => follow(event, newGhostPath)}>새 Ghost</a>}
     </div>}
+    {!needle && <a id="roster-add-ghost" className="roster-row roster-row--add" href={`#${ghostAddPath}`} onClick={event => follow(event, ghostAddPath)}>
+      <span className="roster-row__glyph"><Plus size={18} aria-hidden="true"/></span>
+      <span className="roster-row__copy"><span className="roster-row__name">Ghost 추가</span></span>
+    </a>}
 
     <section className="roster-projects" aria-labelledby="roster-projects-heading">
       <header className="roster-projects__head">

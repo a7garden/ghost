@@ -8,6 +8,7 @@ import { digestOf, newId } from "./ids.ts";
 import { verifyChecks } from "./verify.ts";
 import { policyTaint } from "./policy-context.ts";
 import { validateExecutionTarget } from "../sandbox/index.ts";
+import { INSTALLED_DELEGATION_RULE } from "../packages/index.ts";
 import { classifyEffect, evaluateStoredPolicy, workEpochKey, workExecutionIdentity, type PolicyReceipt } from "./policy-context.ts";
 
 /** Reminders sent when a work conversation stops without completing; a quota-ended turn never counts. */
@@ -111,6 +112,9 @@ export class Works {
     const target = this.ledger.ghost(input.ghostId);
     if (target.deletedAt !== null) throw conflict(`${target.name} was deleted`);
     if (target.state !== "active") throw conflict(`${target.name} is ${target.state}`);
+    // Hierarchy: a non-main Ghost delegates only to itself or the main Ghost.
+    const parentGhost = this.ledger.ghost(parent.ghostId);
+    if (!parentGhost.isDefault && target.id !== parentGhost.id && !target.isDefault) throw conflict(INSTALLED_DELEGATION_RULE);
     checkAttachments(this.core, input.attachments ?? []);
     const slots = this.ledger.settings().slots ?? {};
     if ((input.slot && !slots[input.slot]) || (input.retry && !slots[input.retry.slot])) throw invalid("Work refers to a missing slot");

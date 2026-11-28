@@ -17,6 +17,7 @@ import {
   FallbackList,
   GhostToolList,
   SkillList,
+  SkillName,
   Id,
   Look,
   ModelInfo,
@@ -96,12 +97,17 @@ export const Command = Type.Union([
   command("decision.delegate", { decisionId: Id }),
 
   // Ghosts
+  /**
+   * Install a package (`package`), or make a Ghost by hand (`name` and `persona`). With a package, every omitted
+   * field comes from it and the Ghost records it as its source.
+   */
   command("ghost.create", {
-    name: Text(128),
-    persona: Type.String({ maxLength: 8192 }),
+    package: Type.Optional(SkillName),
+    name: Type.Optional(Text(128)),
+    persona: Type.Optional(Type.String({ maxLength: 8192 })),
     model: Type.Optional(nullable(ModelRef)),
     look: Type.Optional(Look),
-    /** Omit for the default set (every selectable tool except host, desktop and finance tools); [] disables every optional tool. */
+    /** Omit for the package's tools, or for a hand-made Ghost the installed-Ghost default; [] disables every optional tool. */
     tools: Type.Optional(GhostToolList),
     fallbacks: Type.Optional(FallbackList),
     skills: Type.Optional(SkillList),
@@ -121,9 +127,10 @@ export const Command = Type.Union([
     hostExecution: Type.Optional(Type.Boolean()),
     attachments: Type.Optional(DocRefs),
   }),
-  /** Remove a retired Ghost from every list. Past Works keep it as their assignee. */
+  /** Re-apply the Ghost's package as it is now: persona, look, tools and skills. Model, PC execution, notes and memory stay. */
+  command("ghost.apply_package", { ghostId: Id }),
+  /** Remove a Ghost other than the main one. Its projects must have moved; past Works keep it as their assignee. */
   command("ghost.delete", { ghostId: Id }),
-  command("ghost.set_default", { ghostId: Id }),
   /** Edit or clear (empty notes) what a Ghost learned about this environment. */
   command("ghost.adapt", { ghostId: Id, notes: Type.String({ maxLength: ADAPTATION_MAX_CHARS }) }),
   command("sandbox.control", { ghostId: Id, action: Type.Union([Type.Literal("stop"), Type.Literal("reset")]) }),

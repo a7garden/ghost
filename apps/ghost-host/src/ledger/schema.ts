@@ -372,4 +372,7 @@ export const MIGRATIONS: readonly string[] = [
     data TEXT NOT NULL
   );
   `,
+  /* 14: the package an installed Ghost came from; hand-made and main Ghosts stay NULL */ `
+  ALTER TABLE ghosts ADD COLUMN source TEXT;
+  `,
 ];

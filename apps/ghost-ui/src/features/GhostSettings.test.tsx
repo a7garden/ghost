@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GHOST_TOOLS, type Adaptation, type Ghost } from '@ghost/contract';
-import { adaptationLine, canDeleteGhost, editFallbacks, settingsRoster, toggleSkill, toolGroups } from './GhostSettings';
+import { adaptationLine, canRemoveGhost, editFallbacks, packageDrift, removalCommands, settingsRoster, toggleSkill, toolGroups } from './GhostSettings';
 import { toolLabels } from './toolLabels';
 
 const ghost = (patch: Partial<Ghost> = {}): Ghost => ({
@@ -62,14 +62,43 @@ describe('환경 적응 meta line', () => {
 });
 
 describe('Ghost lifecycle', () => {
-  it('allows deletion only after retirement and never for the main or an already deleted Ghost', () => {
-    expect(canDeleteGhost(ghost())).toBe(true);
-    expect(canDeleteGhost(ghost({ state: 'active' }))).toBe(false);
-    expect(canDeleteGhost(ghost({ state: 'paused' }))).toBe(false);
-    expect(canDeleteGhost(ghost({ isDefault: true }))).toBe(false);
-    expect(canDeleteGhost(ghost({ deletedAt: 9 }))).toBe(false);
+  it('removes any Ghost but the main one, once', () => {
+    expect(canRemoveGhost(ghost({ state: 'active' }))).toBe(true);
+    expect(canRemoveGhost(ghost({ state: 'paused' }))).toBe(true);
+    expect(canRemoveGhost(ghost({ isDefault: true, state: 'active' }))).toBe(false);
+    expect(canRemoveGhost(ghost({ deletedAt: 9 }))).toBe(false);
   });
 
+  it('hands the removed Ghost\'s projects back to the main Ghost before removing it', () => {
+    const scopes = [{ id: 's1', ghostId: 'g1' }, { id: 's2', ghostId: null }, { id: 's3', ghostId: 'other' }, { id: 's4', ghostId: 'g1' }];
+    expect(removalCommands('g1', scopes)).toEqual([
+      { type: 'scope.update', scopeId: 's1', ghostId: null },
+      { type: 'scope.update', scopeId: 's4', ghostId: null },
+      { type: 'ghost.delete', ghostId: 'g1' },
+    ]);
+  });
+});
+
+describe('package drift', () => {
+  const entry = { persona: '개발자', tools: ['read', 'bash'], skills: ['anti-slop', 'absent'], missingSkills: ['absent'], look: { avatarId: null, body: '#3d5cf5', shape: 'squircle' as const }, version: 2 };
+  const installed = ghost({ persona: '개발자', tools: ['bash', 'read'], skills: ['anti-slop'], look: { avatarId: null, body: '#3d5cf5', shape: 'squircle' }, source: { package: 'dev', version: 2 } });
+
+  it('reads an untouched Ghost as its package, ignoring order and skills this Host lacks', () => {
+    expect(packageDrift(installed, entry)).toBeNull();
+  });
+
+  it('names a newer package version before any local edit', () => {
+    expect(packageDrift({ ...installed, persona: '고침', source: { package: 'dev', version: 1 } }, entry)).toBe('update');
+  });
+
+  it('notices an edited persona, tool list or look', () => {
+    expect(packageDrift({ ...installed, persona: '고침' }, entry)).toBe('edited');
+    expect(packageDrift({ ...installed, tools: ['read'] }, entry)).toBe('edited');
+    expect(packageDrift({ ...installed, look: { avatarId: null, body: '#000000', shape: 'squircle' } }, entry)).toBe('edited');
+  });
+});
+
+describe('settings roster', () => {
   it('excludes deleted Ghosts, keeps retired Ghosts editable and puts the main first', () => {
     const roster = settingsRoster([
       ghost({ id: 'gone', deletedAt: 3 }),

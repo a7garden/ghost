@@ -36,6 +36,8 @@ import { Orchestration } from './features/Orchestration';
 import { workbenchPath, workbenchScope } from './features/workbenchRoute';
 import type { Attention } from './features/WorkbenchAttention';
 import { GhostSettings } from './features/GhostSettings';
+import { GhostCatalog, GhostInstall, GhostMake } from './features/GhostStore';
+import { ghostAddPath } from './features/ghostRoutes';
 import { MobilePairing } from './features/MobilePairing';
 import { VaultView } from './features/VaultView';
 import { MailView } from './features/mail/MailView';
@@ -206,7 +208,9 @@ function Shell() {
 
   // Ghost pages: the ghost on screen and the conversation on screen.
   const ghostSegment = section === 'ghosts' ? path.split('/')[2] : null;
-  const openGhost = ghostSegment ? ghosts.find(ghost => encodeURIComponent(ghost.id) === ghostSegment) ?? null : null;
+  // /ghosts/add is the package catalog (and /ghosts/add/<package> one package); /ghosts/new makes a Ghost by hand.
+  const ghostCatalog = ghostSegment === 'add', ghostMaking = ghostSegment === 'new';
+  const openGhost = ghostSegment && !ghostCatalog && !ghostMaking ? ghosts.find(ghost => encodeURIComponent(ghost.id) === ghostSegment) ?? null : null;
   const routeConversationId = params.get('conversation');
   const switchGhost = (id: string) => navigate(`/ghosts/${encodeURIComponent(id)}`);
 
@@ -219,7 +223,7 @@ function Shell() {
   // On a phone an agent or the launch pad is a screen of its own; the project route is the roster.
   const codingDetail = embeddedSessionId !== null || (codingOpen && params.has('launch'));
   const projectOpen = section === 'scopes' && selectedScope !== undefined && !params.has('new') && Boolean(state?.scopes.some(scope => scope.id === selectedScope));
-  const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'mail' || section === 'coding' || projectOpen;
+  const ownsGeometry = section === 'settings' || (section === 'ghosts' && !ghostCatalog && !ghostMaking) || section === 'mail' || section === 'coding' || projectOpen;
 
   const go = (target: string) => () => navigate(target);
   const ghostName = (id: string) => ghosts.find(ghost => ghost.id === id)?.name ?? 'Ghost';
@@ -237,7 +241,7 @@ function Shell() {
   })) : [];
   const commandItems: CommandItem[] = state ? [
     { id: 'new-work', label: '일 맡기기', group: '실행', onSelect: go('/work?new=1') },
-    { id: 'new-ghost', label: '새 Ghost', group: '실행', onSelect: go('/settings?tab=team&new=1') },
+    { id: 'new-ghost', label: 'Ghost 추가', group: '실행', onSelect: go(ghostAddPath) },
     { id: 'home', label: routeLabels.home, group: '이동', onSelect: go('/') },
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },
@@ -271,7 +275,7 @@ function Shell() {
   const settingsSections: SettingsSection[] = [
     { id: 'team', label: 'Ghost', icon: Users, content: <GhostSettings onChat={switchGhost}
       onSelect={id => navigate(`/settings?tab=team&ghost=${encodeURIComponent(id)}`)}
-      selectedGhostId={params.get('ghost') ?? undefined} createRequested={params.get('new') === '1'} onCreateClosed={clearCreateRequest}/> },
+      selectedGhostId={params.get('ghost') ?? undefined}/> },
     { id: 'duty', label: '근무 시간', icon: BriefcaseBusiness, content: <DutySettings/> },
     { id: 'vault', label: '금고', icon: KeyRound, content: <VaultView/> },
     { id: 'devices', label: '기기', icon: Smartphone, content: <MobilePairing/> },
@@ -346,12 +350,15 @@ function Shell() {
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>
               : <WorkView state={state} navigate={navigate} filterGhostId={params.get('ghost')} createRequested={params.get('new') === '1'} onCreateClosed={clearCreateRequest}/>)}
-            {section === 'ghosts' && (openGhost
+            {section === 'ghosts' && (ghostCatalog
+              ? (path.split('/')[3] ? <GhostInstall key={path} state={state} name={decodeURIComponent(path.split('/')[3]!)} navigate={navigate}/> : <GhostCatalog state={state} navigate={navigate}/>)
+              : ghostMaking ? <GhostMake navigate={navigate}/>
+              : openGhost
               ? <GhostChat key={`${openGhost.id}:${routeConversationId ?? openGhost.directConversationId ?? 'new'}:${params.get('scope') ?? ''}`} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} threadId={params.get('thread')} navigate={navigate} initialScopeIds={params.getAll('scope').slice(0, 8)}/>
               : ghostNotFound)}
-            {section === 'scopes' && <ScopesView key={`${selectedScope ?? 'empty'}:${params.get('new') ?? ''}`} selectedScope={selectedScope} navigate={navigate}
+            {section === 'scopes' && <ScopesView key={`${selectedScope ?? 'empty'}:${params.get('new') ?? ''}:${params.get('ghost') ?? ''}`} selectedScope={selectedScope} navigate={navigate}
               section={params.get('view') ?? undefined} onSectionChange={view => navigate(`/scopes/${encodeURIComponent(selectedScope!)}?view=${view}`)}
-              onSelectScope={id => navigate(id ? `/scopes/${encodeURIComponent(id)}` : '/scopes')} createRequested={params.get('new') === '1'}
+              onSelectScope={id => navigate(id ? `/scopes/${encodeURIComponent(id)}` : '/scopes')} createRequested={params.get('new') === '1'} createGhostId={params.get('ghost') ?? undefined}
               onCreateClosed={() => {
                 const next = path.startsWith('/scopes/') ? path : '/scopes';
                 history.replaceState(history.state, '', `#${next}`);

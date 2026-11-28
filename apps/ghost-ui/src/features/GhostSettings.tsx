@@ -1,12 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, CircleSlash2, Crown, Lock, MessageCircle, Pause, Pencil, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
-import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, CODE_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, GHOST_TOOLS, HOST_TOOLS, MAIL_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
+import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, CODE_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, GHOST_TOOLS, HOST_TOOLS, MAIL_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostPackageEntry, type GhostState, type GhostTool, type ModelRef, type Scope, type SkillCatalog } from '@ghost/contract';
 import { Button, InlineError, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { DotAvatar } from '../components/DotAvatar';
 import { StateGlyph } from '../components/agent/StateGlyph';
 import { Modal } from '../components/Modal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ghostAddPath } from './ghostRoutes';
 import { GhostDesignEditor } from './GhostDesign';
 import { GhostMemory } from './GhostMemory';
 import { toneFor } from './ghostState';
@@ -46,8 +48,8 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
 /** 대화 종류에 따라 항상 쓰는 도구. 선택 목록에 없고 끌 수 없다. */
 const alwaysTools = ['소유자에게 묻기', '위임한 Ghost에게 묻기', '자식 일에 답하기', '일 완료 보고', '일 상태 보고', '결과물 읽기', '실행 기록 보기', '관측 근거 읽기', '검토 판정'];
 const states = [
-  { value: 'active', label: '활성', icon: Power },
-  { value: 'paused', label: '일시정지', icon: Pause },
+  { value: 'active', label: '사용 중', icon: Power },
+  { value: 'paused', label: '일시 중지', icon: Pause },
   { value: 'retired', label: '은퇴', icon: CircleSlash2 },
 ] as const;
 const ghostSplitQuery = '(min-width: 64rem)';
@@ -71,12 +73,10 @@ export function settingsRoster(ghosts: readonly Ghost[]): Ghost[] {
     .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.createdAt - b.createdAt);
 }
 
-export function GhostSettings({ onChat, onSelect, selectedGhostId, createRequested = false, onCreateClosed }: {
+export function GhostSettings({ onChat, onSelect, selectedGhostId }: {
   onChat(id: string): void;
   onSelect(id: string): void;
   selectedGhostId?: string;
-  createRequested?: boolean;
-  onCreateClosed?(): void;
 }) {
   const { store } = useHost();
   const { state } = useHostState(store);
@@ -87,7 +87,7 @@ export function GhostSettings({ onChat, onSelect, selectedGhostId, createRequest
   const needle = query.trim().toLocaleLowerCase();
   const shown = needle ? ghosts.filter(ghost => ghost.name.toLocaleLowerCase().includes(needle)) : ghosts;
   const selected = ghosts.find(ghost => ghost.id === selectedGhostId) ?? (split ? ghosts[0] : undefined);
-  const showingDetail = createRequested || selectedGhostId !== undefined;
+  const showingDetail = selectedGhostId !== undefined;
   const root = useRef<HTMLElement>(null);
   const detail = useRef<HTMLDivElement>(null);
   const didShowDetail = useRef(showingDetail);
@@ -101,10 +101,10 @@ export function GhostSettings({ onChat, onSelect, selectedGhostId, createRequest
       if (saved) document.getElementById(saved.row)?.focus({ preventScroll: true });
     } else {
       scroller.scrollTop = 0;
-      if (!split && !didShowDetail.current && !createRequested) detail.current?.focus({ preventScroll: true });
+      if (!split && !didShowDetail.current) detail.current?.focus({ preventScroll: true });
     }
     didShowDetail.current = showingDetail;
-  }, [split, showingDetail, selected?.id, createRequested]);
+  }, [split, showingDetail, selected?.id]);
 
   const rememberRoster = (row: string) => {
     if (split) return;
@@ -112,15 +112,10 @@ export function GhostSettings({ onChat, onSelect, selectedGhostId, createRequest
     history.replaceState({ ...history.state, ghostSettingsRoster: { scroll, query, row } }, '');
   };
   const select = (id: string) => {
-    if (split && !createRequested && id === selectedGhostId) return;
-    if (createRequested) onCreateClosed?.();
+    if (split && id === selectedGhostId) return;
     rememberRoster(`settings-ghost-${id}`);
     onSelect(id);
     if (!split) history.replaceState({ ...history.state, ghostSettingsFromRoster: true }, '');
-  };
-  const beginCreate = () => {
-    rememberRoster('settings-new-ghost');
-    location.hash = `${ghostRosterRoute}${selectedGhostId ? `&ghost=${encodeURIComponent(selectedGhostId)}` : ''}&new=1`;
   };
 
   return <section ref={root} className="ghost-settings-page" aria-label={uiTerms.ghostSettings} data-split={split || undefined}>
@@ -134,7 +129,7 @@ export function GhostSettings({ onChat, onSelect, selectedGhostId, createRequest
         {shown.map(ghost => <li key={ghost.id}>
           <button type="button" id={`settings-ghost-${ghost.id}`} aria-label={ghost.name}
             aria-describedby={`settings-ghost-${ghost.id}-state`}
-            aria-pressed={split ? !createRequested && ghost.id === selected?.id : undefined} className="roster__ghost"
+            aria-pressed={split ? ghost.id === selected?.id : undefined} className="roster__ghost"
             title={ghost.name} data-state={ghost.state} onClick={() => select(ghost.id)}>
             <span className="roster__portrait"><DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={32}/></span>
             <span className="roster__copy">
@@ -149,19 +144,15 @@ export function GhostSettings({ onChat, onSelect, selectedGhostId, createRequest
         </li>)}
       </ul>
       {!shown.length && state && <p className="roster__empty" role="status">{needle ? '일치하는 Ghost가 없습니다.' : '설정할 Ghost가 없습니다.'}</p>}
-      <button type="button" id="settings-new-ghost" className="roster__new" aria-pressed={split ? createRequested : undefined}
-        disabled={!state || createRequested} onClick={beginCreate}>
-        <Plus aria-hidden="true"/>새 Ghost
-      </button>
+      <a id="settings-new-ghost" className="roster__new" href={`#${ghostAddPath}`} onClick={() => rememberRoster('settings-new-ghost')}>
+        <Plus aria-hidden="true"/>Ghost 추가
+      </a>
     </div>}
     {(split || showingDetail) && <div ref={detail} className="ghost-settings-page__detail" tabIndex={-1}>
-      {!split && !compact && !createRequested && <a className="ghost-settings-page__back" href={`#${ghostRosterRoute}`} onClick={event => {
+      {!split && !compact && <a className="ghost-settings-page__back" href={`#${ghostRosterRoute}`} onClick={event => {
         if ((history.state as GhostSettingsHistory | null)?.ghostSettingsFromRoster) { event.preventDefault(); history.back(); }
       }}><ArrowLeft aria-hidden="true"/>Ghost 목록</a>}
-      {createRequested ? <GhostCreator onCancel={() => onCreateClosed?.()} onCreated={id => {
-        onCreateClosed?.();
-        onSelect(id);
-      }}/> : selected
+      {selected
         ? <GhostSheet key={selected.id} ghost={selected} onChat={() => onChat(selected.id)}/>
         : state && showingDetail && <p className="roster__empty" role="status">이 Ghost를 찾을 수 없습니다.</p>}
     </div>}
@@ -199,14 +190,30 @@ export function skillsCommand(ghostId: string, skills: readonly string[], name: 
   return { type: 'ghost.update', ghostId, skills: toggleSkill(skills, name, on) };
 }
 
-/** 삭제 is for a retired, non-default Ghost that is not already deleted. Pure; tests pin it. */
-export function canDeleteGhost(ghost: Ghost): boolean {
-  return ghost.state === 'retired' && !ghost.isDefault && ghost.deletedAt === null;
+/** 제거 is for every Ghost but the main one. Pure; tests pin it. */
+export function canRemoveGhost(ghost: Ghost): boolean {
+  return !ghost.isDefault && ghost.deletedAt === null;
 }
 
-/** The exact command the delete confirm sends. Pure; tests pin it. */
-export function deleteCommand(ghostId: string): { type: 'ghost.delete'; ghostId: string } {
-  return { type: 'ghost.delete', ghostId };
+/**
+ * What 제거 sends, in order: each project the Ghost receives goes back to the main Ghost, then the Ghost goes.
+ * The Host refuses removal while a project still points at it, so the order matters. Pure; tests pin it.
+ */
+export function removalCommands(ghostId: string, scopes: readonly Pick<Scope, 'id' | 'ghostId'>[]): Command[] {
+  return [
+    ...scopes.filter(scope => scope.ghostId === ghostId).map(scope => ({ type: 'scope.update' as const, scopeId: scope.id, ghostId: null })),
+    { type: 'ghost.delete', ghostId },
+  ];
+}
+
+/** Whether the Ghost's persona, look, tools or skills have left its package, or the package moved on. Pure; tests pin it. */
+export function packageDrift(ghost: Pick<Ghost, 'persona' | 'tools' | 'skills' | 'look' | 'source'>, entry: Pick<GhostPackageEntry, 'persona' | 'tools' | 'skills' | 'look' | 'version' | 'missingSkills'>): 'update' | 'edited' | null {
+  if (ghost.source && entry.version > ghost.source.version) return 'update';
+  const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every(item => b.includes(item));
+  // Skills this Host lacks are left out at install and kept by 되돌리기, so neither side counts them.
+  const present = (skills: readonly string[]) => skills.filter(skill => !entry.missingSkills.includes(skill));
+  const look = (value: Ghost['look']) => [value.body, value.shape, value.face, value.mark].join('|');
+  return ghost.persona === entry.persona && same(ghost.tools, entry.tools) && same(present(ghost.skills), present(entry.skills)) && look(ghost.look) === look(entry.look) ? null : 'edited';
 }
 
 /** When and why a Ghost looks again on its own. */
@@ -232,6 +239,7 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
   const [designing, setDesigning] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
+  const [packageEntry, setPackageEntry] = useState<GhostPackageEntry>();
   const sandbox = state?.sandboxes.find(item => item.ghostId === ghost.id);
   const plan = state?.autonomy?.find(item => item.ghostId === ghost.id);
   const adaptation = state?.adaptations?.find(item => item.ghostId === ghost.id);
@@ -242,6 +250,13 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
     client.skills().then(found => { if (alive) setCatalog(found); }).catch(() => { if (alive) setCatalog(null); });
     return () => { alive = false; };
   }, [client]);
+  useEffect(() => {
+    if (!ghost.source) return;
+    let alive = true;
+    const name = ghost.source.package;
+    client.ghostPackages().then(found => { if (alive) setPackageEntry(found.packages.find(item => item.name === name)); }).catch(() => {});
+    return () => { alive = false; };
+  }, [client, ghost.source?.package, ghost.source?.version]);
   return <div className="ghost-sheet" aria-busy={saving}>
     <header className="ghost-sheet__identity">
       <button type="button" className="ghost-sheet__portrait" aria-label={`${ghost.name} 꾸미기`} title="꾸미기" onClick={() => setDesigning(true)}>
@@ -251,13 +266,14 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
         <NameField key={ghost.name} name={ghost.name} onSave={name => update({ name })}/>
         <div className="ghost-sheet__marks">
           {ghost.isDefault && <span className="main-mark"><Crown aria-hidden="true"/>메인</span>}
+          {ghost.source && <span className="ghost-sheet__source">{packageEntry?.title ?? ghost.source.package} 패키지</span>}
           <GhostStateWord state={ghost.state}/>
         </div>
       </div>
       <Button type="button" variant="outline" className="ghost-sheet__chat" onClick={onChat}><MessageCircle aria-hidden="true"/>대화</Button>
     </header>
     {error && <div className="ghost-sheet__feedback" role="status"><InlineError>{error}</InlineError></div>}
-
+    {ghost.source && <Panel title="패키지"><PackageRow ghost={ghost} entry={packageEntry} saving={saving}/></Panel>}
     <Panel title={uiTerms.persona}><PersonaNote key={ghost.persona} persona={ghost.persona} onSave={persona => update({ persona })}/></Panel>
     <Panel title="모델"><ModelRoute ghost={ghost} save={save}/></Panel>
     <Panel title="환경 적응">
@@ -269,25 +285,22 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
     <Panel title="붙임"><GhostAttachments key={JSON.stringify(ghost.attachments)} ghost={ghost}/></Panel>
     <Panel title="기억"><GhostMemory ghost={ghost}/></Panel>
     <Panel title="운영">
-      <SettingsRow label="상태" description={ghost.isDefault ? '메인 Ghost는 활성 상태를 유지합니다.' : undefined}>
-        {ghost.isDefault ? <span className="ghost-sheet__locked"><Lock aria-hidden="true"/>활성</span>
-          : <StateSwitch value={ghost.state} disabled={saving} onChange={next => void update({ state: next })}/>}
-      </SettingsRow>
+      {ghost.isDefault
+        ? <SettingsRow label="상태" description="메인 Ghost는 늘 사용 중입니다."><span className="ghost-sheet__locked"><Lock aria-hidden="true"/>사용 중</span></SettingsRow>
+        : <SettingsRow label="사용" description={ghost.state === 'active' ? undefined : '끄면 말을 걸거나 일을 맡길 수 없습니다. 기억과 설정은 그대로입니다.'}>
+          <Switch checked={ghost.state === 'active'} disabled={saving} aria-label="사용"
+            onCheckedChange={next => void update({ state: next ? 'active' : 'paused' })}/>
+        </SettingsRow>}
       <SettingsRow label="스스로 일하기" description={planLine(plan)}>
         <Switch checked={plan?.enabled !== false} disabled={saving} aria-label="스스로 일하기"
           onCheckedChange={next => void save({ type: 'autonomy.set', ghostId: ghost.id, enabled: next })}/>
       </SettingsRow>
-      {!ghost.isDefault && <SettingsRow label="메인 Ghost" description="새 대화와 일을 처음 받는 Ghost">
-        <Button type="button" variant="secondary" size="sm" disabled={saving || ghost.state !== 'active'} onClick={() => void save({ type: 'ghost.set_default', ghostId: ghost.id })}>
-          <Crown aria-hidden="true"/>메인으로 지정
-        </Button>
-      </SettingsRow>}
       <SettingsRow label="PC 직접 실행" description="이 Ghost가 보호 장치 없이 이 Mac의 파일과 명령을 직접 실행합니다. Mac 전체와 인터넷에 영향을 줄 수 있습니다. 끄면 진행 중인 PC 작업도 멈춥니다.">
         <Switch checked={ghost.hostExecution === true} disabled={saving} aria-label="PC 직접 실행 허용"
           onCheckedChange={next => void update({ hostExecution: next })}/>
       </SettingsRow>
-      {canDeleteGhost(ghost) && <SettingsRow label="Ghost 삭제" description="목록에서 제거합니다. 지난 맡긴 일의 기록은 남습니다.">
-        <Button type="button" variant="destructive" size="sm" onClick={() => setDeleting(true)}><Trash2 aria-hidden="true"/>삭제</Button>
+      {canRemoveGhost(ghost) && <SettingsRow label="Ghost 제거" description="받던 프로젝트는 메인으로 돌아갑니다. 지난 일의 기록은 남습니다.">
+        <Button type="button" variant="destructive" size="sm" onClick={() => setDeleting(true)}><Trash2 aria-hidden="true"/>제거</Button>
       </SettingsRow>}
     </Panel>
     {sandbox && sandbox.state !== 'none' && <Panel title="샌드박스"><SandboxStrip ghostId={ghost.id} state={sandbox.state} detail={sandbox.detail}/></Panel>}
@@ -378,22 +391,49 @@ export function SkillBoard({ catalog, skills, onChange }: {
   </div>;
 }
 
-/** 삭제 confirm: the title says it all; a conflict shows the server message in place. */
-function DeleteDialog({ ghost, onClose }: { ghost: Ghost; onClose(): void }) {
+/** 패키지 row: which package and version, and 되돌리기/업데이트 when the Ghost has left it. Re-applying keeps model, PC grant, notes and memory. */
+function PackageRow({ ghost, entry, saving }: { ghost: Ghost; entry: GhostPackageEntry | undefined; saving: boolean }) {
   const { client } = useHost();
+  const [confirming, setConfirming] = useState(false);
+  const drift = entry ? packageDrift(ghost, entry) : null;
+  const version = `v${ghost.source!.version}${drift === 'update' ? ` → v${entry!.version}` : ''}`;
+  const description = !entry ? '이 Host에서 패키지를 찾을 수 없습니다.'
+    : drift === 'update' ? '새 버전이 있습니다.'
+    : drift === 'edited' ? '페르소나·모습·도구·스킬 중 일부를 고쳤습니다.'
+    : undefined;
+  return <>
+    <SettingsRow label={`${entry?.title ?? ghost.source!.package} · ${version}`} description={description}>
+      {drift && <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={() => setConfirming(true)}>
+        <RotateCcw aria-hidden="true"/>{drift === 'update' ? '업데이트' : '패키지대로 되돌리기'}
+      </Button>}
+    </SettingsRow>
+    {confirming && <ConfirmDialog title={drift === 'update' ? `${ghost.name} 업데이트` : '패키지대로 되돌리기'} confirmLabel={drift === 'update' ? '업데이트' : '되돌리기'}
+      tone="default" onConfirm={() => client.send({ type: 'ghost.apply_package', ghostId: ghost.id })} onClose={() => setConfirming(false)}>
+      페르소나·모습·도구·스킬을 패키지대로 바꿉니다. 모델, PC 직접 실행, 환경 적응과 기억은 그대로입니다.
+    </ConfirmDialog>}
+  </>;
+}
+
+/** 제거 confirm: names what happens to the Ghost's projects; a refusal shows the Host's reason in place. */
+function DeleteDialog({ ghost, onClose }: { ghost: Ghost; onClose(): void }) {
+  const { store, client } = useHost();
+  const { state } = useHostState(store);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const remove = () => {
+  const owned = state?.scopes.filter(scope => scope.ghostId === ghost.id) ?? [];
+  const remove = async () => {
     setBusy(true); setError('');
-    void client.send(deleteCommand(ghost.id))
-      .then(onClose)
-      .catch(reason => { setError(reason instanceof Error ? reason.message : 'Ghost를 삭제하지 못했습니다. 다시 시도해 주세요.'); setBusy(false); });
+    try {
+      for (const command of removalCommands(ghost.id, state?.scopes ?? [])) await client.send(command);
+      onClose();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Ghost를 제거하지 못했습니다. 다시 시도해 주세요.'); setBusy(false); }
   };
-  return <Modal title={`${ghost.name} 삭제`} onClose={onClose} className="sm:max-w-[420px]">
-    {error && <InlineError>{error}</InlineError>}
+  return <Modal title={`${ghost.name} 제거`} onClose={onClose} className="sm:max-w-[420px]">
+    {owned.length > 0 && <p className="m-0">{owned.map(scope => scope.name).join(', ')} 프로젝트는 메인이 받습니다.</p>}
+    {error && <div className="mt-3"><InlineError>{error}</InlineError></div>}
     <div className="mt-4 flex justify-end gap-2">
       <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={onClose}>취소</Button>
-      <Button type="button" variant="destructive" size="sm" disabled={busy} onClick={remove}>삭제</Button>
+      <Button type="button" variant="destructive" size="sm" disabled={busy} onClick={() => void remove()}>제거</Button>
     </div>
   </Modal>;
 }
@@ -419,17 +459,6 @@ function NameField({ name, onSave }: { name: string; onSave(name: string): Promi
       if (event.key === 'Escape') { cancelling.current = true; setDraft(name); event.currentTarget.blur(); }
     }}/>;
 }
-
-/** 활성 · 일시정지 · 은퇴 as one capsule with a sliding thumb. The main Ghost stays active. */
-function StateSwitch({ value, disabled, onChange }: { value: GhostState; disabled: boolean; onChange(next: GhostState): void }) {
-  const index = states.findIndex(item => item.value === value);
-  return <div className="state-switch" role="radiogroup" aria-label="상태" data-value={value} style={{ '--index': index } as CSSProperties}>
-    <span className="state-switch__thumb" aria-hidden="true"/>
-    {states.map(item => <button key={item.value} type="button" role="radio" aria-checked={item.value === value} disabled={disabled && item.value !== value}
-      onClick={() => item.value !== value && onChange(item.value)}>{item.value === 'active' && <Power aria-hidden="true"/>}{item.label}</button>)}
-  </div>;
-}
-
 
 /**
  * The persona — who this Ghost is and how it works (docs/concept.md) — reads as text first; 「편집」 opens it for editing,
@@ -562,33 +591,3 @@ function SandboxStrip({ ghostId, state, detail }: { ghostId: string; state: stri
   </div>;
 }
 
-/** A new Ghost starts as a sheet of its own: the portrait it will get, its name and its persona. */
-function GhostCreator({ onCancel, onCreated }: { onCancel(): void; onCreated(id: string): void }) {
-  const { client } = useHost();
-  const [name, setName] = useState(''), [persona, setPersona] = useState('');
-  const [error, setError] = useState(''), [saving, setSaving] = useState(false);
-  const create = async () => {
-    if (!name.trim() || !persona.trim() || saving) return;
-    setSaving(true); setError('');
-    try {
-      const created = await client.send<{ ghostId?: string }>({ type: 'ghost.create', name: name.trim(), persona });
-      if (created.ghostId) onCreated(created.ghostId); else onCancel();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Ghost를 만들지 못했습니다.'); setSaving(false); }
-  };
-  return <form className="ghost-sheet ghost-sheet--new" onSubmit={event => { event.preventDefault(); void create(); }}>
-    <header className="ghost-sheet__identity">
-      <span className="ghost-sheet__portrait" aria-hidden="true"><DotAvatar profileId={`new:${name}`} size={48}/></span>
-      <div className="ghost-sheet__who">
-        <input className="ghost-sheet__name" aria-label="이름" placeholder="이름" value={name} maxLength={128} autoFocus required disabled={saving} onChange={event => setName(event.target.value)}/>
-      </div>
-    </header>
-    <Panel title={uiTerms.persona}>
-      <div className="persona-note"><textarea aria-label={uiTerms.persona} placeholder="첫 줄은 한 줄 소개. 이어서 말투, 좋은 결과의 기준, 혼자 정할 것과 물을 것" value={persona} rows={4} maxLength={8192} required disabled={saving} onChange={event => setPersona(event.target.value)}/></div>
-    </Panel>
-    {error && <InlineError>{error}</InlineError>}
-    <div className="ghost-sheet__footer">
-      <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={onCancel}>취소</Button>
-      <Button type="submit" size="sm" disabled={saving || !name.trim() || !persona.trim()}>{saving ? '만드는 중…' : '만들기'}</Button>
-    </div>
-  </form>;
-}

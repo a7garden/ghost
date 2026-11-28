@@ -351,17 +351,17 @@ export class Ledger {
     if (ghost.isDefault) this.db.query("UPDATE ghosts SET is_default = 0 WHERE is_default = 1 AND id <> ?").run(ghost.id);
     this.db
       .query(
-        `INSERT INTO ghosts (id, name, persona, look, model, is_default, state, tools, fallbacks, skills, deleted_at, direct_conversation_id, created_at, updated_at, host_execution, attachments)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO ghosts (id, name, persona, look, model, is_default, state, tools, fallbacks, skills, deleted_at, direct_conversation_id, created_at, updated_at, host_execution, attachments, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, persona = excluded.persona, look = excluded.look,
            model = excluded.model, is_default = excluded.is_default, state = excluded.state, tools = excluded.tools,
            fallbacks = excluded.fallbacks, skills = excluded.skills, deleted_at = excluded.deleted_at,
-           direct_conversation_id = excluded.direct_conversation_id, updated_at = excluded.updated_at, host_execution = excluded.host_execution, attachments = excluded.attachments`,
+           direct_conversation_id = excluded.direct_conversation_id, updated_at = excluded.updated_at, host_execution = excluded.host_execution, attachments = excluded.attachments, source = excluded.source`,
       )
       .run(
         ghost.id, ghost.name, ghost.persona, json(ghost.look), json(ghost.model), ghost.isDefault ? 1 : 0, ghost.state, json(ghost.tools),
         json(ghost.fallbacks), json(ghost.skills), ghost.deletedAt, ghost.directConversationId, ghost.createdAt, ghost.updatedAt,
-        ghost.hostExecution ? 1 : 0, json(ghost.attachments),
+        ghost.hostExecution ? 1 : 0, json(ghost.attachments), ghost.source == null ? null : JSON.stringify(ghost.source),
       );
     this.emit({ type: "ghost", ghost });
   }
@@ -1375,6 +1375,7 @@ function toGhost(row: Row): Ghost {
     directConversationId: String(row.direct_conversation_id),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+    source: parseNullable<Ghost["source"]>(row.source),
   };
 }
 

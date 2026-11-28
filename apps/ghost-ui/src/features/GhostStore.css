@@ -1,0 +1,94 @@
+@layer components {
+/* Ghost 추가: the portrait is the app icon; one framed group of rows, never a card per package. */
+.ghost-store__list {
+  margin: 0; padding: 0; list-style: none;
+  border: 1px solid var(--ghost-line); border-radius: var(--radius-control); background: var(--ghost-surface);
+  overflow: hidden;
+}
+.ghost-store__list > li + li { border-top: 1px solid var(--ghost-line); }
+.ghost-store__row, .ghost-store__make {
+  display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 14px;
+  min-height: 76px; padding: 12px 16px 12px 12px; color: inherit; text-decoration: none;
+  transition: background-color var(--duration-fast) ease;
+}
+.ghost-store__row:focus-visible, .ghost-store__make:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
+.ghost-store__portrait, .ghost-store__make-mark { display: grid; width: 52px; height: 52px; place-items: center; }
+.ghost-store__copy { display: grid; min-width: 0; gap: 2px; }
+.ghost-store__title { color: var(--ghost-ink); font-size: 15px; font-weight: 620; line-height: 1.3; }
+.ghost-store__intro { color: var(--ghost-ink2); font-size: var(--text-ui); line-height: 1.45; }
+.ghost-store__traits { color: var(--ghost-ink3); font-size: var(--text-caption); }
+.ghost-store__state { color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 600; white-space: nowrap; }
+.ghost-store__arrow { width: 16px; height: 16px; color: var(--ghost-ink3); }
+.ghost-store__group { margin-top: var(--ghost-space-6); }
+.ghost-store__label { margin: 0 0 8px; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 600; }
+.ghost-store__make { margin-top: var(--ghost-space-4); border-radius: var(--radius-control); }
+.ghost-store__make-mark > svg {
+  box-sizing: border-box; width: 40px; height: 40px; padding: 10px;
+  border: 1px dashed var(--ghost-line-strong); border-radius: 50%; color: var(--ghost-ink2);
+}
+.ghost-store__errors { margin-top: var(--ghost-space-6); color: var(--ghost-ink2); font-size: var(--text-caption); }
+.ghost-store__errors ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.ghost-store__errors code { font-family: var(--font-mono); font-size: var(--text-mono); color: var(--ghost-ink); }
+@media (hover: hover) {
+  .ghost-store__row:hover, .ghost-store__make:hover { background: var(--ghost-hover); }
+}
+
+/* One package: identity, then what installing changes, in the order the owner decides it. */
+.ghost-install__head { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 18px; padding-block: 8px 20px; }
+.ghost-install__portrait { display: grid; width: 72px; height: 72px; place-items: center; }
+.ghost-install__who { display: grid; min-width: 0; gap: 4px; }
+.ghost-install__name {
+  box-sizing: border-box; width: 100%; min-width: 0; margin: 0; padding: 2px 6px; margin-inline-start: -6px;
+  border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink); background: none; outline: none;
+  font: 650 var(--text-headingLg)/var(--text-headingLg--line-height) var(--font-sans);
+}
+input.ghost-install__name:hover { background: var(--ghost-hover); }
+input.ghost-install__name:focus-visible { background: var(--ghost-hover); box-shadow: inset 0 -2px var(--ghost-ink3); }
+.ghost-install__intro { margin: 0; color: var(--ghost-ink2); font-size: var(--text-bodyLg); line-height: 1.5; }
+
+.ghost-install__facts { margin: 0; border-top: 1px solid var(--ghost-line); }
+.ghost-install__fact {
+  display: grid; grid-template-columns: 116px minmax(0, 1fr); align-items: baseline; gap: 16px;
+  padding-block: 14px; border-bottom: 1px solid var(--ghost-line);
+}
+.ghost-install__fact > dt { color: var(--ghost-ink3); font-size: var(--text-ui); font-weight: 600; }
+.ghost-install__fact > dd { display: grid; justify-items: start; gap: 6px; min-width: 0; margin: 0; color: var(--ghost-ink); font-size: var(--text-body); }
+.ghost-install__note { color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.45; }
+.ghost-install__note[data-tone='warning'] { color: var(--ghost-amber-ink); }
+.ghost-install__tools { line-height: 1.6; }
+.ghost-install__tools > [data-privileged] { color: var(--ghost-amber-ink); font-weight: 600; }
+.ghost-install__mono { font-family: var(--font-mono); font-size: var(--text-mono); }
+.ghost-install__persona { margin: 0; color: var(--ghost-ink2); line-height: 1.65; white-space: pre-wrap; }
+.ghost-install__grant { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; }
+.ghost-install__projects { display: grid; width: 100%; gap: 0; margin: 0; padding: 0; border: 0; min-width: 0; }
+.ghost-install__project {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  min-height: 34px; padding-inline: 2px; cursor: pointer;
+}
+.ghost-install__suggested { color: var(--ghost-ink3); font-size: var(--text-caption); }
+.ghost-install__projects .ghost-install__note { margin-top: 6px; }
+.ghost-install__expand {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 8px; margin-inline-start: -8px;
+  border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink2); background: none; font: 550 var(--text-ui)/1 var(--font-sans); cursor: pointer;
+}
+.ghost-install__expand > svg { width: 14px; height: 14px; }
+.ghost-install__expand:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
+/* The sheet pads its bottom (64px, 32px on phones); like the connection banner, the footer undoes it to sit on the edge. */
+.ghost-install__actions {
+  position: sticky; bottom: -64px; display: flex; flex-wrap: wrap; gap: 8px;
+  padding-block: 14px 16px; margin-top: -1px; border-top: 1px solid var(--ghost-line); background: var(--ghost-canvas);
+}
+@media (max-width: 55.999rem) {
+  .ghost-install__actions { bottom: -32px; }
+}
+.ghost-install > .ghost-install__actions { position: static; padding-block: 0 20px; border-top: 0; }
+@media (max-width: 36rem) {
+  .ghost-install__head { grid-template-columns: 56px minmax(0, 1fr); gap: 14px; }
+  .ghost-install__portrait { width: 56px; height: 56px; }
+  .ghost-install__fact { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .ghost-install__actions > button { flex: 1; }
+}
+@media (pointer: coarse) {
+  .ghost-install__project { min-height: 44px; }
+}
+}

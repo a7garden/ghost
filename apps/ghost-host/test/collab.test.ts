@@ -685,7 +685,7 @@ describe("peer questions", () => {
     const crossRoot = await call(s, s.child, "ask_peer", { work_id: foreignRoot.id, question: "Q?" }, "cross-q");
     expect(crossRoot.isError).toBe(true);
     expect(content(crossRoot)).toContain("outside this Work's root");
-    const cousin = s.core.works.delegate(s.sibling.id, { ghostId: s.childGhost.id, title: "Cousin", brief: "B" });
+    const cousin = s.core.works.delegate(s.parent.id, { ghostId: s.childGhost.id, title: "Cousin", brief: "B" });
     await s.core.idle();
     const sameGhost = await call(s, s.child, "ask_peer", { work_id: cousin.id, question: "Q?" }, "same-ghost-q");
     expect(sameGhost.isError).toBe(true);

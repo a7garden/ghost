@@ -117,9 +117,9 @@ export function sentMail(ledger: Ledger, workId: string) {
 }
 
 /** A Core over a fresh ledger with a fake engine attached. */
-export function harness(path = ":memory:", artifacts: ArtifactStore = new MemoryArtifacts()) {
+export function harness(path = ":memory:", artifacts: ArtifactStore = new MemoryArtifacts(), packagesRoot: string | null = null) {
   const ledger = new Ledger(path);
-  const core = new Core({ ledger, artifacts, sandbox: noSandbox, secrets: new MemorySecrets(), log: () => {} });
+  const core = new Core({ ledger, artifacts, sandbox: noSandbox, secrets: new MemorySecrets(), log: () => {}, packagesRoot });
   const engine = new FakeEngine();
   core.attach(engine);
   return { ledger, core, engine, artifacts };

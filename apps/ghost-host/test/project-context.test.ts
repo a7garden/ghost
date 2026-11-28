@@ -324,7 +324,7 @@ test("slot deletion and creation reverts reject default and live reviewer refere
 
 test("Ghost and activity owner mutations are revisioned and reversible without discarding history", async () => {
   const { send, ledger, ghost } = fixture();
-  const teammateId = String((await send({ type: "ghost.create", name: "Teammate", persona: "", tools: [] })).ghostId);
+  const teammateId = String((await send({ type: "ghost.create", name: "Teammate", persona: "Teams up.", tools: [] })).ghostId);
   const before = ledger.ghost(teammateId);
   await send({ type: "ghost.update", ghostId: teammateId, name: "Renamed", attachments: [{ kind: "skill", name: "writing" }] });
   await send({ type: "config.revert", revisionId: ledger.configRevisions("ghost", teammateId).at(-1)!.id });

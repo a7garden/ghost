@@ -71,10 +71,8 @@
     color: var(--ghost-ink2);
     background: none;
     font: 560 15px/1.3 var(--font-sans);
-    cursor: pointer;
+    text-decoration: none;
   }
-  .roster__new:disabled { cursor: default; }
-  .roster__new[aria-pressed="true"] { background: var(--ghost-hover2); }
   .roster__new > svg { width: 16px; height: 16px; }
   .roster__empty { margin: 0; padding: 8px; color: var(--ghost-ink3); font-size: var(--text-ui); }
   .roster-search { min-height: 40px; }
@@ -83,7 +81,6 @@
   @media (pointer: coarse) {
     .roster-search { min-height: 44px; }
     .roster-search button { width: 44px; height: 44px; }
-    .ghost-sheet .state-switch button { min-height: 44px; padding-inline: 8px; }
     .roster-search input, .ghost-sheet .persona-note textarea { font-size: 16px; }
   }
 
@@ -128,7 +125,7 @@
   .ghost-sheet__name::placeholder { color: var(--ghost-ink3); }
   .ghost-sheet__marks { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
   .ghost-sheet__feedback { position: sticky; top: 8px; z-index: 3; background: var(--ghost-canvas); }
-  .ghost-state-word, .main-mark, .ghost-sheet__locked {
+  .ghost-state-word, .main-mark, .ghost-sheet__locked, .ghost-sheet__source {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -158,11 +155,6 @@
   }
   .ghost-panel .ghost-settings-row__control { justify-content: flex-end; }
   .ghost-panel .ghost-settings-row__description { overflow-wrap: anywhere; }
-  .ghost-panel .ghost-settings-row:has(.state-switch) { column-gap: 8px; }
-  @container ghost-settings-group (max-width: 19rem) {
-    .ghost-panel .ghost-settings-row:has(.state-switch) { grid-template-columns: minmax(0, 1fr); }
-    .ghost-panel .ghost-settings-row:has(.state-switch) .ghost-settings-row__control { justify-content: flex-start; }
-  }
 
   .ghost-panel .persona-note { border-radius: 0; background: none; box-shadow: none; }
   .ghost-panel .persona-note[data-reading] { grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 10px 0; }

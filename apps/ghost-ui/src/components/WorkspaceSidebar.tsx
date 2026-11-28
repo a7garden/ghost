@@ -1,25 +1,21 @@
-import { useEffect, useId, useRef, useState, type RefObject } from 'react';
+import { useEffect, useId, useRef, type RefObject } from 'react';
 import { Bot, Box, Compass, Folder, Home, Inbox, LayoutList, Mail, Plus, Settings2 } from 'lucide-react';
 import { Navigation, NavigationGroup, NavigationItem, ScrollRail } from '../ui';
 import type { Ghost, Scope, State } from '@ghost/contract';
 import { ghostPresence, idlePresence, liveWork, visibleGhosts } from '../features/ghostState';
-import { useSidebarPreferences } from '../features/sidebarPreferences';
 import type { Attention } from '../features/WorkbenchAttention';
 import { AttentionMark } from '../features/WorkbenchPane';
 import { workbenchPath } from '../features/workbenchRoute';
+import { ghostAddPath, newProjectPath } from '../features/ghostRoutes';
 import { PresenceAvatar } from './agent';
 import { RosterGhostMenu } from './RosterGhostMenu';
 import { routeLabels, uiTerms } from '../uiText';
 import type { HostStatus } from '../features/hostStatus';
-import { blurTouchSearchOnEnter } from '../ui/adaptive';
 import '../features/Roster.css';
 
-const FOLD_LIMIT = 8;
-
 /**
- * Destinations stay put; Ghosts and projects scroll beneath the sticky labels. The default
- * and pins lead one roster. On long rosters only the pool folds, leaving active Ghosts,
- * the open conversation, and project receivers in view. Projects sit under their receiver.
+ * Destinations stay put; Ghosts and projects scroll beneath the sticky labels. The main Ghost leads on its own,
+ * then the installed Ghosts under one 「Ghost」 label whose + installs another. Each Ghost's projects sit beneath it.
  */
 export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, projectSignals, attentionCount, status, navigate, openGhost }: {
   state: State | null;
@@ -46,58 +42,43 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, p
   const hostTrouble = status.state !== 'connected' && !status.quiet;
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const poolId = useId();
   useScrollEdges(scrollRef, contentRef);
   // Opening a Ghost from elsewhere (a card, search) brings its row into view.
   useEffect(() => {
     if (!openGhostId) return;
     scrollRef.current?.querySelector<HTMLElement>('.presence-row__main[aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
   }, [openGhostId]);
-  // Deleted and retired Ghosts leave the roster.
+  // Removed Ghosts leave the roster.
   const roster = visibleGhosts(state?.ghosts ?? []);
-  const { byGhost, orphans } = projectsByReceiver(scopes, roster);
-  const onlyMain = roster.length === 1 && roster[0]?.isDefault;
-  const { pinned, expanded, togglePinned, setExpanded } = useSidebarPreferences(roster.map(ghost => ghost.id));
-  const [query, setQuery] = useState('');
-  const presence = new Map(roster.map(ghost => [ghost.id, state ? ghostPresence(ghost, state) : idlePresence]));
-  const byId = new Map(roster.map(ghost => [ghost.id, ghost]));
-  const pinnedIds = new Set(pinned);
+  const byGhost = projectsByReceiver(scopes, roster);
   const main = roster.find(ghost => ghost.isDefault);
-  const fixed = main ? [main] : [];
-  for (const id of pinned) {
-    const ghost = byId.get(id);
-    if (ghost && !ghost.isDefault) fixed.push(ghost);
-  }
-  const pool = roster.filter(ghost => !ghost.isDefault && !pinnedIds.has(ghost.id));
-  const foldable = roster.length > FOLD_LIMIT && pool.length > 0;
-  // Never fold away the Ghost on screen, one with live activity, or the receiver of a project.
-  const shownPool = !foldable || expanded ? pool : pool.filter(ghost =>
-    ghost.id === openGhostId || presence.get(ghost.id)!.state !== 'idle' || byGhost.has(ghost.id));
-  const needle = query.trim().toLowerCase();
-  const filteredPool = shownPool.filter(ghost => !foldable || !expanded || !needle || ghost.name.toLowerCase().includes(needle)
-    || ghost.persona.split('\n')[0]!.toLowerCase().includes(needle)
-    || (byGhost.get(ghost.id) ?? []).some(scope => scope.name.toLowerCase().includes(needle)));
+  const installed = roster.filter(ghost => !ghost.isDefault);
+  const presence = new Map(roster.map(ghost => [ghost.id, state ? ghostPresence(ghost, state) : idlePresence]));
 
   const row = (ghost: Ghost) => {
     const now = presence.get(ghost.id)!;
     const working = counts.get(ghost.id) ?? 0;
     const open = () => openGhost(ghost.id);
-    return <RosterGhostMenu ghost={ghost} pinned={pinnedIds.has(ghost.id)} togglePinned={togglePinned} onOpen={open} navigate={navigate}>
-      <button type="button" className="presence-row__main" data-tone={now.state}
-        data-dimmed={ghost.state === 'paused' && now.state === 'idle' ? '' : undefined}
-        aria-current={ghost.id === openGhostId ? 'page' : undefined} onClick={open}
-        data-rail={now.state !== 'idle' || ghost.id === openGhostId ? 'ghost' : undefined}
-        data-rail-tone={now.state === 'attention' ? 'amber' : now.state === 'working' ? 'signal' : ghost.id === openGhostId ? 'muted' : undefined}
-        data-rail-label={now.line ? `${ghost.name} · ${now.line}` : ghost.name}>
-        <PresenceAvatar ghostId={ghost.id} state={now.state} size={26}/>
-        <span className="presence-row__copy">
-          <span className="presence-row__name"><span className="truncate">{ghost.name}</span>{ghost.isDefault && !onlyMain && <span className="presence-row__main-mark">메인</span>}</span>
-          {now.line ? <span className="presence-row__line" data-tone={now.state}>{now.line}</span>
-            : ghost.state === 'paused' && <span className="presence-row__line">일시 중지</span>}
-        </span>
-        {working > 0 && <span className="sidebar-count"><span className="sr-only">맡긴 일 진행 중 </span>{working}</span>}
-      </button>
-    </RosterGhostMenu>;
+    return <div className="sidebar-entry__head">
+      <RosterGhostMenu ghost={ghost} onOpen={open} navigate={navigate}>
+        <button type="button" className="presence-row__main" data-tone={now.state}
+          data-dimmed={ghost.state === 'paused' && now.state === 'idle' ? '' : undefined}
+          aria-current={ghost.id === openGhostId ? 'page' : undefined} onClick={open}
+          data-rail={now.state !== 'idle' || ghost.id === openGhostId ? 'ghost' : undefined}
+          data-rail-tone={now.state === 'attention' ? 'amber' : now.state === 'working' ? 'signal' : ghost.id === openGhostId ? 'muted' : undefined}
+          data-rail-label={now.line ? `${ghost.name} · ${now.line}` : ghost.name}>
+          <PresenceAvatar ghostId={ghost.id} state={now.state} size={26}/>
+          <span className="presence-row__copy">
+            <span className="presence-row__name"><span className="truncate">{ghost.name}</span>{ghost.isDefault && installed.length > 0 && <span className="presence-row__main-mark">메인</span>}</span>
+            {now.line ? <span className="presence-row__line" data-tone={now.state}>{now.line}</span>
+              : ghost.state === 'paused' && <span className="presence-row__line">일시 중지</span>}
+          </span>
+          {working > 0 && <span className="sidebar-count"><span className="sr-only">맡긴 일 진행 중 </span>{working}</span>}
+        </button>
+      </RosterGhostMenu>
+      <button type="button" className="sidebar-entry__add" aria-label={`${ghost.name}의 새 프로젝트`} title="새 프로젝트"
+        onClick={() => navigate(newProjectPath(ghost.id))}><Plus aria-hidden="true"/></button>
+    </div>;
   };
 
   const projectList = { selectedScope, signals: projectSignals, coding: section === 'coding', navigate };
@@ -106,13 +87,9 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, p
     const owned = byGhost.get(ghost.id);
     return <div key={ghost.id} className="sidebar-entry">
       {row(ghost)}
-      {owned && <SidebarProjectList {...projectList} scopes={owned} receiver={ghost.name}/>}
+      {(owned || (ghost.isDefault && section === 'coding')) && <SidebarProjectList {...projectList} scopes={owned ?? []} receiver={ghost.name} showUnscoped={ghost.isDefault}/>}
     </div>;
   };
-
-  const projects = <SidebarProjectGroup navigate={navigate}>
-    <SidebarProjectList {...projectList} scopes={orphans} showUnscoped/>
-  </SidebarProjectGroup>;
 
   return <>
     <Navigation label="작업실" className="ghost-sidebar min-h-0 flex-1">
@@ -132,22 +109,15 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, p
       <div className="sidebar-scroll-frame">
         <div ref={scrollRef} className="sidebar-scroll">
           <div ref={contentRef}>
-            {onlyMain ? fixed.map(entry) : roster.length > 0 && <NavigationGroup label={routeLabels.ghosts} className="sidebar-ghosts"
-              action={foldable && <button type="button" className="sidebar-pool-toggle" aria-expanded={expanded} aria-controls={poolId}
-                aria-label={expanded ? 'Ghost 목록 접기' : `Ghost 목록 펼치기 (${pool.length})`}
-                onClick={() => { setQuery(''); setExpanded(!expanded); }}>
-                <span aria-hidden="true" className="fold-mark"/>
-                {!expanded && <span className="tabular" aria-hidden="true">{pool.length}</span>}
-              </button>}>
-              {fixed.map(entry)}
-              {pool.length > 0 && <div className="sidebar-pool" id={poolId}>
-                {foldable && expanded && <input type="text" enterKeyHint="search" className="sidebar-search" aria-label="Ghost 찾기"
-                  placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}
-                  onKeyDown={event => { blurTouchSearchOnEnter(event); if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
-                {filteredPool.map(entry)}
-              </div>}
+            {main && <div className="sidebar-main">{entry(main)}</div>}
+            {state && <NavigationGroup label={routeLabels.ghosts} className="sidebar-ghosts"
+              action={installed.length > 0 && <button type="button" className="sidebar-group-action" aria-label="Ghost 추가" title="Ghost 추가"
+                onClick={() => navigate(ghostAddPath)}><Plus size={14} aria-hidden="true"/></button>}>
+              {installed.map(entry)}
+              {installed.length === 0 && <NavigationItem className="sidebar-add-ghost" onClick={() => navigate(ghostAddPath)}>
+                <Plus/><span>Ghost 추가</span>
+              </NavigationItem>}
             </NavigationGroup>}
-            {projects}
           </div>
         </div>
         <ScrollRail viewportRef={scrollRef} contentRef={contentRef}/>
@@ -207,21 +177,21 @@ export function SidebarProjectList({ scopes, receiver, coding, selectedScope, si
 }
 
 /**
- * Each roster Ghost's projects, in project order, and the projects whose receiver is not on the roster. A project
- * without a receiver belongs to the default Ghost, as the Host routes it. Pure; tests pin it.
+ * Each roster Ghost's projects, in project order. A project without a receiver, or whose receiver left the roster,
+ * belongs to the main Ghost, as the Host routes it. With no main Ghost on the roster those projects are not listed.
+ * Pure; tests pin it.
  */
-export function projectsByReceiver(scopes: readonly Scope[], roster: readonly Ghost[]): { byGhost: Map<Ghost['id'], Scope[]>; orphans: Scope[] } {
+export function projectsByReceiver(scopes: readonly Scope[], roster: readonly Ghost[]): Map<Ghost['id'], Scope[]> {
   const main = roster.find(ghost => ghost.isDefault)?.id;
   const onRoster = new Set(roster.map(ghost => ghost.id));
   const byGhost = new Map<Ghost['id'], Scope[]>();
-  const orphans: Scope[] = [];
   for (const scope of scopes) {
-    const receiver = scope.ghostId ?? main;
-    if (receiver === undefined || !onRoster.has(receiver)) { orphans.push(scope); continue; }
+    const receiver = scope.ghostId !== null && onRoster.has(scope.ghostId) ? scope.ghostId : main;
+    if (receiver === undefined) continue;
     const list = byGhost.get(receiver);
     if (list) list.push(scope); else byGhost.set(receiver, [scope]);
   }
-  return { byGhost, orphans };
+  return byGhost;
 }
 
 /** Marks a scroller with `data-more-below` while content continues past its bottom edge. */

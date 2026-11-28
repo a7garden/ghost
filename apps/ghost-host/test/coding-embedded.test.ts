@@ -388,8 +388,8 @@ test("explicit CLI agents are refused before a coding effect or session is creat
 test("a coding report releases only its own wait, not a live child Work", async () => {
   const f = setup();
   const { work, conversation } = await f.createWork();
-  const helper = f.core.createGhost({ name: "Helper", persona: "" });
-  f.core.works.delegate(work.id, { ghostId: helper.id, title: "Independent task", brief: "Still live", execution: { kind: "workspace" } });
+  // An installed (non-main) Ghost delegates only to itself; the child stays live either way.
+  f.core.works.delegate(work.id, { ghostId: work.ghostId, title: "Independent task", brief: "Still live", execution: { kind: "workspace" } });
   const { session } = await start(f, conversation);
   f.core.works.onIdle(work.id);
   f.sessions.settle(session, "done");

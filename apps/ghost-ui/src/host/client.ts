@@ -10,6 +10,7 @@ import type {
   CallTranscript,
   Command,
   CommandOf,
+  GhostPackageCatalog,
   CodingDialogAnswer,
   CodingEvent,
   CodingItem,
@@ -250,6 +251,11 @@ export class HostClient {
   /** Skills a Ghost may be given (owner only); 404 or empty when no skill root is configured. */
   skills(): Promise<SkillCatalog> {
     return this.json('/api/skills');
+  }
+
+  /** Installable Ghost packages and what installing each would mean on this Host. */
+  ghostPackages(): Promise<GhostPackageCatalog> {
+    return this.json('/api/ghost-packages');
   }
 
   createTerminal(spec: TerminalCreate): Promise<{ id: string }> {

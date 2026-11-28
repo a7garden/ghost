@@ -737,48 +737,6 @@ test("the model catalog follows the configured providers", async () => {
   expect(models.getProviders()).toHaveLength(0);
 });
 
-test("changing the main Ghost transfers real management authority without restarting conversations", async () => {
-  const { core, engine, ledger, root, ghostId, conversationId, faux } = await fixture(
-    (core) => createToolSet({ core, sandbox, memory: null, documents: null, skills: null }),
-  );
-  const helper = core.createGhost({ name: "Helper", persona: "Original helper.", tools: [] });
-  await core.idle();
-  const manage = async (actor: string, target: string, persona: string) => {
-    faux.setResponses([
-      fauxAssistantMessage(fauxToolCall("ghost_update", { ghost_id: target, persona }), { stopReason: "toolUse" }),
-      fauxAssistantMessage(fauxText("finished")),
-    ]);
-    const toolResult = nextMessage(engine, actor, "tool");
-    const settled = core.nextActivity(actor, core.activityCount(actor) + 1);
-    await core.sendMessage(actor, "Update the requested Ghost.", crypto.randomUUID());
-    await toolResult;
-    await settled;
-  };
-  try {
-    await manage(conversationId, helper.id, "Managed before the switch.");
-    expect(ledger.ghost(helper.id).persona).toBe("Managed before the switch.");
-
-    await execute(core, new Access({ kind: "owner" }), {
-      requestId: crypto.randomUUID(),
-      command: { type: "ghost.set_default", ghostId: helper.id },
-    }, { publicOrigin: "http://localhost", documents: null });
-    await core.idle();
-
-    await manage(conversationId, helper.id, "Unauthorized former main.");
-    expect(ledger.ghost(helper.id).persona).toBe("Managed before the switch.");
-    await manage(helper.directConversationId, ghostId, "Managed by the new main.");
-    expect(ledger.ghost(ghostId).persona).toBe("Managed by the new main.");
-    await manage(helper.directConversationId, helper.id, "Unauthorized self edit.");
-    expect(ledger.ghost(helper.id).persona).toBe("Managed before the switch.");
-  } finally {
-    core.stop();
-    await core.idle();
-    await engine.close();
-    ledger.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("the real model request offers only granted selectable tools after live permission changes", async () => {
   const { core, engine, ledger, root, faux } = await fixture(
     (core) => createToolSet({ core, sandbox, memory: null, documents: null, skills: null }),

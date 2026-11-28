@@ -585,7 +585,7 @@ describe("commands and access", () => {
 
     // Owner-equivalent: the device creates a Ghost like the owner can.
     const created = await execute(core, device, {
-      requestId: uuid(), command: { type: "ghost.create", name: "X", persona: "" },
+      requestId: uuid(), command: { type: "ghost.create", name: "X", persona: "Device helper." },
     }, context);
     expect(ledger.ghosts().some((row) => row.id === created.ghostId)).toBe(true);
     for (const workId of workIds) {

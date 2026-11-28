@@ -176,7 +176,7 @@ const fieldSpecs: Record<ConfigEntity, FieldSpec[]> = {
     { key: 'name', label: '이름', render: textOf },
     { key: 'persona', label: uiTerms.persona, render: textOf },
     { key: 'model', label: '모델', render: modelOf },
-    { key: 'isDefault', label: '기본 Ghost', render: named },
+    { key: 'isDefault', label: '메인 Ghost', render: named },
     { key: 'state', label: '상태', render: ghostStateText },
     { key: 'tools', label: '쓸 수 있는 도구', render: counted },
     { key: 'fallbacks', label: '대체 모델', render: modelList },
@@ -230,7 +230,8 @@ const revisionVerb = (revision: ConfigRevision): string => {
   if (reason.startsWith('config.revert')) return '되돌렸습니다';
   if (reason.endsWith('.create')) return '만들었습니다';
   if (reason.endsWith('.delete')) return '삭제했습니다';
-  if (reason === 'ghost.set_default') return '기본으로 정했습니다';
+  if (reason === 'ghost.set_default') return '메인으로 정했습니다';
+  if (reason === 'ghost.apply_package') return '패키지대로 맞췄습니다';
   if (reason === 'activity.pause') return isObject(revision.after) ? (revision.after.paused === true ? '껐습니다' : '켰습니다') : '삭제했습니다';
   if (reason.includes('registration')) return '만들었습니다';
   if (reason.includes('replacement')) return '다시 연결했습니다';

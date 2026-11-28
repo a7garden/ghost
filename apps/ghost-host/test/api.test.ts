@@ -7,8 +7,8 @@ import { join } from "node:path";
 import { Type } from "typebox";
 import {
   ArtifactRef,
+  APP_GHOST_TOOLS,
   CommandResponse,
-  DEFAULT_GHOST_TOOLS,
   LedgerEvent as LedgerEventSchema,
   Notification as NotificationSchema,
   ProviderCatalog,
@@ -334,8 +334,8 @@ describe("API server", () => {
       if (!ghost) throw new Error("the created Ghost is missing from state");
       return ghost.tools;
     };
-    expect(await readTools()).toEqual([...DEFAULT_GHOST_TOOLS]);
-    expect(DEFAULT_GHOST_TOOLS.some((tool) => tool.startsWith("host_"))).toBe(false);
+    expect(await readTools()).toEqual([...APP_GHOST_TOOLS]);
+    expect(APP_GHOST_TOOLS.some((tool) => tool.startsWith("host_"))).toBe(false);
     const narrowed = parse(CommandResponse, await (await runCommand({ type: "ghost.update", ghostId: tooledId, tools: ["work_list"] }, OWNER_TOKEN)).json());
     expect(narrowed.ok).toBe(true);
     expect(await readTools()).toEqual(["work_list"]);
@@ -426,7 +426,7 @@ describe("API server", () => {
       expect(body.ok ? "ok" : body.error.message).toBe(`${command.type} needs the owner`);
     }
     // Owner-equivalent elsewhere: the device creates a Ghost and a schedule like the owner can.
-    const created = parse(CommandResponse, await (await runCommand({ type: "ghost.create", name: "By Device", persona: "" }, deviceToken)).json());
+    const created = parse(CommandResponse, await (await runCommand({ type: "ghost.create", name: "By Device", persona: "Device-made." }, deviceToken)).json());
     expect(created.ok).toBe(true);
     if (!created.ok || typeof created.result.ghostId !== "string") throw new Error("ghost.create returned no ghostId");
     const ghostId = created.result.ghostId;

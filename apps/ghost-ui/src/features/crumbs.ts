@@ -1,5 +1,6 @@
 import type { State, Work } from '@ghost/contract';
 import { routeLabels, uiTerms } from '../uiText';
+import { ghostAddPath } from './ghostRoutes';
 
 /** One step of where a page sits; `path` is null for the page itself. */
 export interface Crumb { label: string; path: string | null }
@@ -57,6 +58,13 @@ export function crumbsFor(route: string, state: State | null): Crumb[] {
       ];
     }
     case 'ghosts': {
+      if (id === 'add') {
+        const name = path.split('/')[3];
+        if (!name) return [{ label: 'Ghost 추가', path: null }];
+        const installed = state?.ghosts.find(ghost => ghost.deletedAt === null && ghost.source?.package === decodeURIComponent(name));
+        return [{ label: 'Ghost 추가', path: ghostAddPath }, { label: installed?.name ?? '패키지', path: null }];
+      }
+      if (id === 'new') return [{ label: 'Ghost 추가', path: ghostAddPath }, { label: '직접 만들기', path: null }];
       const ghost = state?.ghosts.find(item => item.id === id);
       const conversationId = params.get('conversation');
       const base = `/ghosts/${encodeURIComponent(id ?? '')}${conversationId ? `?conversation=${encodeURIComponent(conversationId)}` : ''}`;

@@ -4,10 +4,11 @@ import type { Acceptance, Ghost, Work, WorkDetail } from "@ghost/contract";
 import { ExecutionTarget } from "@ghost/contract";
 import { defineExtension, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
-import { forbidden, invalid } from "../core/errors.ts";
+import { conflict, forbidden, invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
 import { workDetail } from "../core/state.ts";
 import { askOwnerTool, describeCodingRuns, describeWorkLine, errorResult, firstLine, requireAllowed, requireOrigin, workDecideTool, type Scope } from "./shared.ts";
+import { INSTALLED_DELEGATION_RULE } from "../packages/index.ts";
 
 const text = (message: string): ToolExecutionResult => ({ output: [{ type: "text", text: message }] });
 
@@ -72,6 +73,8 @@ export function createDirectTools(core: Core): Extension {
           throw forbidden(`the owner is off duty: do not start new Work on your own until they are back. ${planning}`);
         }
         const ghostId = args.ghost_id ?? scope.ghost.id;
+        // Hierarchy: an installed Ghost starts Work only for itself or the main Ghost. The owner's own work.create is not bound by it.
+        if (!scope.ghost.isDefault && ghostId !== scope.ghost.id && !core.ledger.ghost(ghostId).isDefault) throw conflict(INSTALLED_DELEGATION_RULE);
         const id = idFor(scope.conversation.id, api.callId);
         // Without an owner goal there is nothing to steer toward, so a Ghost on its own proposes a goal and starts nothing; a replay of an existing Work is untouched.
         if (args.initiative && !core.ledger.findWork(id) && !core.goals.goals().some((goal) => goal.state === "active")) {

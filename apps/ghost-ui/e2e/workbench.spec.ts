@@ -190,8 +190,8 @@ test('switches projects from the sidebar and lists a newly created project witho
   for (const name of ['오케스트레이션', '하네스 가져오기', '새 프로젝트', '프로젝트 목록']) {
     await expect(rail(page).getByText(name, { exact: true })).toHaveCount(0);
   }
-  await projects.getByRole('button', { name: '새 프로젝트', exact: true }).click();
-  await expect(page).toHaveURL(/#\/scopes\?new=1$/);
+  await projects.getByRole('button', { name: '도우미의 새 프로젝트', exact: true }).click();
+  await expect(page).toHaveURL(/#\/scopes\?new=1&ghost=/);
   await page.getByRole('textbox', { name: '프로젝트 이름' }).fill('새 작업대 프로젝트');
   const created = page.waitForResponse(response => response.url().endsWith('/api/commands') && response.request().postDataJSON()?.command?.type === 'scope.create');
   await page.getByRole('form', { name: '새 프로젝트' }).getByRole('button', { name: '저장', exact: true }).click();

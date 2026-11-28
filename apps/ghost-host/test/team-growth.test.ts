@@ -55,10 +55,10 @@ describe("the main Ghost grows the team", () => {
     await create({ name: "Scout", persona: "You scout sources.", reason: "조사 요청이 반복돼서 전담 Ghost를 만들었습니다." }, "create-1");
     expect((await create({ name: "Scout", persona: "You scout sources.", reason: "Changed input" }, "create-1")).isError).toBe(true);
     expect(t.ledger.ghosts().filter((ghost) => ghost.name === "Scout")).toHaveLength(1);
-    // A new call with a taken name is refused with the way forward.
-    await create({ name: "Scout", persona: "x", reason: "x" }, "create-2");
-    await ownerApproves(t, "create-2");
-    expect(textOf(await create({ name: "Scout", persona: "x", reason: "x" }, "create-2"))).toContain("already exists");
+    // A new call with a taken name is refused up front, with the way forward.
+    const taken = await create({ name: "Scout", persona: "x", reason: "x" }, "create-2");
+    expect(taken.isError).toBe(true);
+    expect(textOf(taken)).toContain("already exists");
     expect(t.ledger.ghosts().filter((ghost) => ghost.name === "Scout")).toHaveLength(1);
 
     expect(() => t.use(t.mateDirect, "ghost_create")).toThrow("not offered");

@@ -452,14 +452,12 @@ describe("ghost.delete", () => {
     deleteGhost(s.core, ghostId);
   };
 
-  test("refuses the default Ghost, an unretired Ghost, live Work and pending decisions", async () => {
+  test("refuses the default Ghost, live Work and pending decisions; any state deletes", async () => {
     const s = setup();
     expect(() => deleteGhost(s.core, s.ghost.id)).toThrow("cannot be deleted");
-    expect(() => deleteGhost(s.core, s.helper.id)).toThrow("retire");
 
     const work = s.core.works.createRoot({ ghostId: s.helper.id, title: "Live", brief: "B", originConversationId: s.helper.directConversationId });
     await s.core.idle();
-    updateGhost(s.core, s.helper.id, { state: "retired" });
     expect(() => deleteGhost(s.core, s.helper.id)).toThrow("still has live Work");
     s.core.works.cancel(work.id);
     await s.core.idle();
@@ -483,8 +481,9 @@ describe("ghost.delete", () => {
         s.ledger.putDecision({ ...decision, state: "denied", answer: null, resolvedAt: Date.now() });
       }
     });
+    // An active Ghost deletes outright in 3.0; the tombstone records the retired state.
     deleteGhost(s.core, s.helper.id);
-    expect(s.ledger.ghost(s.helper.id).deletedAt).not.toBeNull();
+    expect(s.ledger.ghost(s.helper.id)).toMatchObject({ deletedAt: expect.any(Number), state: "retired" });
   });
 
   test("deleting scrubs schedules and leaves projects intact; a repeat delete is a no-op", () => {

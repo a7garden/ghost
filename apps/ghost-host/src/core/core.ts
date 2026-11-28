@@ -1,4 +1,4 @@
-import { DEFAULT_GHOST_TOOLS, type ArtifactRef, type DocRef, type Conversation, type Ghost, type Notification } from "@ghost/contract";
+import { APP_GHOST_TOOLS, DEFAULT_GHOST_TOOLS, type ArtifactRef, type DocRef, type Conversation, type Ghost, type Notification } from "@ghost/contract";
 import type { Ledger } from "../ledger/ledger.ts";
 import type { CodingSessionsPort } from "../coding/ports.ts";
 import { CodingRuns } from "./coding.ts";
@@ -22,7 +22,9 @@ import { DutyClock } from "./duty.ts";
 import { Team } from "./team.ts";
 import { Goals, ownerMessageKey } from "./goals.ts";
 import { Calls } from "./calls.ts";
+import { GhostPackages } from "../packages/index.ts";
 import type { SourceStore } from "../stores/sources.ts";
+
 
 export interface CoreDeps {
   ledger: Ledger;
@@ -38,6 +40,8 @@ export interface CoreDeps {
   autonomy?: AutonomyDeps;
   /** Snapshots of pages read for Ghosts, so citations can be checked; null leaves citation checks failing closed. */
   sources?: SourceStore | null;
+  /** Owner package root (`<state root>/ghost-packages`); null offers built-in packages only. */
+  packagesRoot?: string | null;
 }
 
 /**
@@ -72,6 +76,8 @@ export class Core implements EngineEvents {
   readonly repeats: Repeats;
   readonly activitySources: ActivitySourcePort | null;
   readonly sources: SourceStore | null;
+  /** Installable packages: the built-ins plus the owner's `GHOST.md` files. */
+  readonly packages: GhostPackages;
   readonly log: (message: string, detail?: unknown) => void;
   private codingSessionsRef: CodingSessionsPort | null = null;
   private engineRef: Engine | null = null;
@@ -98,6 +104,7 @@ export class Core implements EngineEvents {
     this.schedules = new Schedules(this);
     this.activitySources = deps.activitySources ?? null;
     this.sources = deps.sources ?? null;
+    this.packages = new GhostPackages(deps.packagesRoot ?? null);
     this.activities = new Activities(this, this.activitySources);
     this.autonomy = new Autonomy(this, deps.autonomy);
     this.adaptations = new Adaptations(this);
@@ -250,10 +257,11 @@ export class Core implements EngineEvents {
   // Ghosts and conversations
 
   /**
-   * Create a Ghost with its main direct conversation. New Ghosts default to every selectable tool except host tools.
+   * Create a Ghost with its main direct conversation. The main Ghost starts from the full default
+   * tool set; every other Ghost starts from the installed-Ghost set without system configuration.
    * `id` comes from a tool call when the main Ghost creates one, so a replayed call finds the Ghost it made.
    */
-  createGhost(input: Pick<Ghost, "name" | "persona"> & Partial<Pick<Ghost, "id" | "model" | "look" | "isDefault" | "tools" | "fallbacks" | "skills" | "hostExecution" | "attachments">>): Ghost {
+  createGhost(input: Pick<Ghost, "name" | "persona"> & Partial<Pick<Ghost, "id" | "model" | "look" | "isDefault" | "tools" | "fallbacks" | "skills" | "hostExecution" | "attachments" | "source">>): Ghost {
     if (input.id) {
       const existing = this.ledger.ghosts().find((ghost) => ghost.id === input.id);
       if (existing) return existing;
@@ -262,15 +270,16 @@ export class Core implements EngineEvents {
     const now = Date.now();
     const id = input.id ?? newId();
     const conversationId = input.id ? idFor(input.id, "direct") : newId();
+    const isDefault = input.isDefault ?? this.ledger.defaultGhost() === null;
     const ghost: Ghost = {
       id,
       name: input.name,
       persona: input.persona,
       look: input.look ?? { avatarId: null },
       model: input.model ?? null,
-      isDefault: input.isDefault ?? this.ledger.defaultGhost() === null,
+      isDefault,
       state: "active",
-      tools: input.tools ?? [...DEFAULT_GHOST_TOOLS],
+      tools: input.tools ?? [...(isDefault ? DEFAULT_GHOST_TOOLS : APP_GHOST_TOOLS)],
       fallbacks: input.fallbacks ?? [],
       skills: input.skills ?? [],
       attachments: input.attachments ?? [],
@@ -279,6 +288,7 @@ export class Core implements EngineEvents {
       directConversationId: conversationId,
       createdAt: now,
       updatedAt: now,
+      source: input.source ?? null,
     };
     this.ledger.tx(() => {
       this.ledger.putGhost(ghost);

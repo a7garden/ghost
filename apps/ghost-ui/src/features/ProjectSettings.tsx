@@ -65,7 +65,8 @@ function BasicRows({ scope }: { scope: Scope }) {
   const { state } = useHostState(store);
   const [saved, setSaved] = useState<string | null>(null), [error, setError] = useState('');
   const timer = useRef<number | undefined>(undefined);
-  const ghosts = (state?.ghosts ?? []).filter(ghost => ghost.state === 'active' && !ghost.deletedAt);
+  const ghosts = (state?.ghosts ?? []).filter(ghost => ghost.state === 'active' && !ghost.deletedAt && !ghost.isDefault);
+  const mainId = state?.ghosts.find(ghost => ghost.isDefault)?.id;
   const save = async (key: string, patch: Partial<Pick<Scope, 'ghostId' | 'state' | 'paths' | 'vaultPath' | 'attachments'>>) => {
     setError('');
     try {
@@ -78,8 +79,8 @@ function BasicRows({ scope }: { scope: Scope }) {
     <div className="project-row__control">{control}</div>
   </div>;
   return <section className="project-rows" aria-label="기본 정보">
-    {row('ghost', '받을 Ghost', <select className="infra-select" aria-label="받을 Ghost" value={scope.ghostId ?? ''} onChange={event => void save('ghost', { ghostId: event.target.value || null })}>
-      <option value="">기본 Ghost</option>{ghosts.map(ghost => <option key={ghost.id} value={ghost.id}>{ghost.name}</option>)}
+    {row('ghost', '받을 Ghost', <select className="infra-select" aria-label="받을 Ghost" value={scope.ghostId && scope.ghostId !== mainId ? scope.ghostId : ''} onChange={event => void save('ghost', { ghostId: event.target.value || null })}>
+      <option value="">메인</option>{ghosts.map(ghost => <option key={ghost.id} value={ghost.id}>{ghost.name}</option>)}
     </select>)}
     {row('state', '상태', <select className="infra-select" aria-label="상태" value={scope.state} onChange={event => void save('state', { state: event.target.value as Scope['state'] })}>
       <option value="active">진행</option><option value="paused">멈춤</option>

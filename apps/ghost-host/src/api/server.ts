@@ -47,6 +47,7 @@ import { serveConnect } from "./connect.ts";
 import { serveShade } from "./shade.ts";
 import type { LocalAccounts } from "../integrations/local-accounts.ts";
 import type { LoginShelf } from "../integrations/login-shelf.ts";
+import { ghostPackageCatalog } from "../packages/index.ts";
 import type { Shade } from "../integrations/shade.ts";
 import { CloudflareAccessVerifier } from "./cloudflare-access.ts";
 import { goPage, TailscaleIdentity } from "./tailscale-identity.ts";
@@ -603,6 +604,14 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       try {
         if (!skills) throw new CommandError("unavailable", "skill folders are not configured");
         return json({ skills: skills.catalog() } satisfies SkillCatalog);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+
+    if (pathname === "/api/ghost-packages" && request.method === "GET") {
+      try {
+        return json(ghostPackageCatalog(core, skills));
       } catch (caught) {
         return failure(caught);
       }

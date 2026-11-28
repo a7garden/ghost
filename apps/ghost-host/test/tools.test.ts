@@ -290,12 +290,15 @@ describe("tools", () => {
     s.core.goals.create({ title: "스트링스 출시" });
     const main = s.core.createGhost({ name: "Main", persona: "Lead", isDefault: true });
     const helper = s.core.createGhost({ name: "Helper", persona: "You help." });
+    const mainDirect = s.ledger.conversation(main.directConversationId);
+    const piMain = asPi(s, mainDirect, "pi-main");
+    const mainCreate = toolOf(s, mainDirect, main, "work_create");
     const pi = asPi(s, s.direct, "pi-direct");
     const tool = toolOf(s, s.direct, s.ghost, "work_create");
-    await call(tool, { title: "Handed", brief: "Do it", ghost_id: helper.id, initiative: true }, apiOf(pi, "call-1"));
+    await call(mainCreate, { title: "Handed", brief: "Do it", ghost_id: helper.id, initiative: true }, apiOf(piMain, "call-1"));
     await call(tool, { title: "Own", brief: "Do it", initiative: true }, apiOf(pi, "call-2"));
     const reviewer = (title: string) => s.ledger.worksForState().find((work) => work.title === title)!.acceptance.reviewer;
-    expect(reviewer("Handed")).toEqual({ kind: "ghost", ghostId: s.ghost.id });
+    expect(reviewer("Handed")).toEqual({ kind: "ghost", ghostId: main.id });
     expect(reviewer("Own")).toEqual({ kind: "ghost", ghostId: main.id });
   });
 

@@ -336,10 +336,42 @@ wins). Everything else about a Ghost lives in **Ghost 설정** (설정 → Ghost
 portrait-and-name roster (searchable from eight Ghosts), then the selected Ghost's name
 edited in place, model route, 역할 지시, skills and grouped tool switch-pills. The route stays
 above potentially long role instructions so model settings remain immediately reachable. A group's
-label toggles its tools. State, default designation, the PC 직접 실행 grant and retired-Ghost deletion live in a
-separate 운영 group; the main Ghost shows its locked active state instead of disabled
-choices. The sandbox keeps its two-step reset. New Ghosts start on the same sheet.
+label toggles its tools. A packaged Ghost shows a 패키지 panel first: the package and version, with
+패키지대로 되돌리기 when its persona, look, tools or skills left the package and 업데이트 when the package
+moved on (both confirm, and keep model, PC grant, notes and memory). The 사용 switch, 스스로 일하기, the
+PC 직접 실행 grant and 제거 live in a separate 운영 group; the main Ghost shows its locked 사용 중 state
+instead. 제거 names the projects that return to the main before it sends anything. The sandbox keeps its
+two-step reset. The roster's last row is the 「Ghost 추가」 link, not a create form.
 There is no avatar library: stored sprite avatars stay selectable in 꾸미기, nothing creates new ones.
+
+## Ghost 3.0: main, installed Ghosts and 「Ghost 추가」 — 2026-11-28
+
+- **First judgment.** The owner adds a Ghost to change how a kind of work is done, so the screen answers
+  「what changes if I install this」 before 「install」. 2.x opened a blank name-and-persona form, which said
+  nothing about why a second Ghost would differ; the installation had one active Ghost.
+- **Structure.** Three candidates were compared: a settings tab with a catalog in the detail pane, a modal
+  over the current page, and a page of its own. Installing is a primary act whose result is a new Ghost to
+  talk to, so it is a page (`/ghosts/add`) reached from the sidebar's 「Ghost」 +, the phone roster's last
+  row, the settings roster and the command palette; one package is a named detail (`/ghosts/add/<name>`)
+  and Back returns to the list. 직접 만들기 (`/ghosts/new`) closes the list.
+- **Visual centre.** The package's portrait is its app icon: `look` ships with the package and carries over
+  to the installed Ghost, so the sidebar shows the same face. The catalog is one framed group of rows
+  (portrait, title, persona line one, what it asks beyond the main: PC 직접 실행 and privileged tool groups,
+  and the projects it would take), never a card per package.
+- **Install sheet.** Identity (portrait, the name editable in place as the heading, the introduction), then
+  facts on one label column in decision order: 맡을 프로젝트 (the main's projects with the package's kind
+  pre-checked; packages without a kind start folded behind 「+ 메인의 프로젝트 가져오기」), 모델 (the
+  model chooser, default 「기본 모델 따름」, with the package's hint beside it), PC 직접 실행 (a switch at the
+  package's request with its consequence in amber), 할 수 있는 일 (tool groups as words, privileged ones in
+  amber), 스킬 (and those this Host lacks, left out), 일하는 방식 (the rest of the persona). 설치 stays in a
+  sticky footer because the project list can be long. Success opens the new Ghost's conversation. If moving a
+  project fails after the Ghost exists, the sheet stays with the names that failed, 대화 열기 and 다시 옮기기.
+- **Sidebar.** The main Ghost and its projects lead on their own; installed Ghosts follow under 「Ghost」,
+  whose header + opens the catalog (an empty group shows a quiet 「Ghost 추가」 row instead). Each Ghost row
+  ends in a + for a new project it receives (hover and focus on fine pointers, always on touch); the Ghost's
+  context menu has 새 프로젝트 too. Pins, the folding pool and the roster filter are gone: one Ghost per way
+  of working keeps the list short. Projects whose receiver left the roster sit under the main.
+- **Phone.** The roster keeps waiting-first order, the main breaking ties, and ends with 「Ghost 추가」.
 
 ## Phone navigation
 

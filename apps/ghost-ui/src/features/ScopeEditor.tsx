@@ -9,11 +9,13 @@ import { DocAttachments } from './DocAttachments';
 import { LimitFields } from './LimitSettings';
 import { DEFAULT_LIMITS } from '@ghost/contract';
 
-export function ScopeEditor({ scope, onClose, onSaved }: { scope?: Scope; onClose(): void; onSaved(id: string): void }) {
+/** `ghostId` preselects the receiver of a new project; the main Ghost is the empty choice, as the Host routes it. */
+export function ScopeEditor({ scope, ghostId: initialGhostId, onClose, onSaved }: { scope?: Scope; ghostId?: string; onClose(): void; onSaved(id: string): void }) {
   const { store, client } = useHost();
   const { state } = useHostState(store);
   const [name, setName] = useState(scope?.name ?? '');
-  const [ghostId, setGhostId] = useState(scope?.ghostId ?? '');
+  const receiver = scope ? scope.ghostId : initialGhostId;
+  const [ghostId, setGhostId] = useState(receiver && !state?.ghosts.find(ghost => ghost.id === receiver)?.isDefault ? receiver : '');
   const [paths, setPaths] = useState(scope?.paths ?? []);
   const [vaultPath, setVaultPath] = useState(scope?.vaultPath ?? '');
   const [status, setStatus] = useState(scope?.state ?? 'active');
@@ -34,7 +36,7 @@ export function ScopeEditor({ scope, onClose, onSaved }: { scope?: Scope; onClos
   return <form className="infra-form" aria-label={scope ? '프로젝트 편집' : '새 프로젝트'} onSubmit={event => void save(event)}>
     <fieldset className="infra-form border-0 p-0 m-0" disabled={busy}>
       <TextField label="프로젝트 이름" required value={name} onChange={setName} maxLength={128}/>
-      <Choice label="받을 Ghost" value={ghostId} onChange={setGhostId} options={[{ value: '', label: '기본 Ghost' }, ...(state?.ghosts ?? []).filter(ghost => ghost.state === 'active' && !ghost.deletedAt).map(ghost => ({ value: ghost.id, label: ghost.name }))]}/>
+      <Choice label="받을 Ghost" value={ghostId} onChange={setGhostId} options={[{ value: '', label: '메인' }, ...(state?.ghosts ?? []).filter(ghost => ghost.state === 'active' && !ghost.deletedAt && !ghost.isDefault).map(ghost => ({ value: ghost.id, label: ghost.name }))]}/>
       <FolderList label="읽기 경로" values={paths} onChange={setPaths}/>
       <FolderField label="문서 금고 경로 (선택)" optional value={vaultPath} onChange={setVaultPath}/>
       <Choice label="상태" value={status} onChange={value => setStatus(value as Scope['state'])} options={[{ value: 'active', label: '진행' }, { value: 'paused', label: '멈춤' }]}/>

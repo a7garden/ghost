@@ -8,24 +8,6 @@
 .roster-search button { display: grid; flex: none; width: 28px; height: 28px; place-items: center; border: 0; background: none; color: inherit; cursor: pointer; }
 .roster-search button svg { width: 14px; height: 14px; }
 
-.state-switch { position: relative; display: inline-grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 3px; border-radius: var(--radius-pill); background: var(--ghost-hover); }
-.state-switch__thumb {
-  position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: var(--radius-pill);
-  background: var(--ghost-surface); box-shadow: var(--shadow-btn); transform: translateX(calc(var(--index) * 100%));
-  transition: transform var(--duration-base) var(--ease-spring), background-color var(--duration-base) ease;
-}
-.state-switch[data-value="paused"] .state-switch__thumb { background: var(--ghost-amber-tint); }
-.state-switch[data-value="retired"] .state-switch__thumb { background: var(--ghost-hover2); }
-.state-switch button {
-  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 0 10px; border: 0;
-  border-radius: var(--radius-pill); color: var(--ghost-ink3); background: none; font: 600 var(--text-caption)/1 var(--font-sans); white-space: nowrap; cursor: pointer;
-  transition: color var(--duration-fast) ease;
-}
-.state-switch button svg { width: 12px; height: 12px; }
-.state-switch button[aria-checked="true"] { color: var(--ghost-ink); }
-.state-switch[data-value="active"] button[aria-checked="true"] svg { color: var(--ghost-success); }
-.state-switch button:disabled { cursor: not-allowed; opacity: .45; }
-
 .model-choice {
   display: flex; width: 100%; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 0; border-radius: var(--radius-control);
   color: var(--ghost-ink); background: none; text-align: left; cursor: pointer; transition: background-color var(--duration-fast) ease;

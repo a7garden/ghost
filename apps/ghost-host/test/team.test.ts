@@ -9,7 +9,6 @@ import { execute } from "../src/core/commands.ts";
 import { Access } from "../src/core/access.ts";
 import type { Core } from "../src/core/core.ts";
 import { idFor } from "../src/core/ids.ts";
-import type { ConversationSetup } from "../src/core/ports.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import type { SandboxEnvFactory } from "../src/integrations/ports.ts";
 import { createToolSet } from "../src/tools/index.ts";
@@ -121,23 +120,6 @@ async function activityWork(f: Fixture): Promise<Work> {
   return work;
 }
 
-/** Pi as the Ghost sees it; `once` runs the owner's main switch inside the first awaited conversation open. */
-class SwitchingEngine extends FakeEngine {
-  fired = false;
-  constructor(
-    private readonly core: Core,
-    private readonly newMainId: string,
-  ) {
-    super();
-  }
-  override async open(setup: ConversationSetup) {
-    await super.open(setup);
-    if (this.fired) return;
-    this.fired = true;
-    await execute(this.core, new Access({ kind: "owner" }), { requestId: `switch:${this.newMainId}`, command: { type: "ghost.set_default", ghostId: this.newMainId } }, { publicOrigin: "http://localhost", documents: null });
-  }
-}
-
 /** Pi admitting a wake while the world moves: `change` runs after each wake submission lands. */
 class MidFlightEngine extends FakeEngine {
   change: (() => Promise<void> | void) | null = null;
@@ -168,7 +150,7 @@ const scheduled = (engine: FakeEngine, conversationId: string) => engine.to(conv
 describe("a settled teammate Work reaches the main through the autonomous wake", () => {
   test("a settled peer root pulls the main's next look instead of opening a model turn", async () => {
     const f = team();
-    const work = await peerWork(f, f.aliceDirect, f.bob);
+    const work = await peerWork(f, f.bobDirect, f.bob);
     f.core.works.fail(work.id, "stale credentials");
     await f.core.idle();
     await f.core.autonomy.tick(Date.now());
@@ -176,7 +158,7 @@ describe("a settled teammate Work reaches the main through the autonomous wake",
     // No new direct submission path: the connector never messages anyone about the outcome.
     expect(teamSignals(f.engine)).toHaveLength(0);
     // The owner-requested origin report stays immediate and unmetered.
-    const report = f.engine.to(f.aliceDirect.id).find((item) => item.requestId === `work:${work.id}:report:failed:1`);
+    const report = f.engine.to(f.bobDirect.id).find((item) => item.requestId === `work:${work.id}:report:failed:1`);
     expect(report?.origin).toBe("report");
     expect(report?.text).toContain("stale credentials");
     expect(report?.text).toContain(work.id);
@@ -222,8 +204,8 @@ describe("a settled teammate Work reaches the main through the autonomous wake",
 
   test("several changes coalesce into one look", async () => {
     const f = team();
-    const first = await peerWork(f, f.aliceDirect, f.bob);
-    const second = await peerWork(f, f.bobDirect, f.alice);
+    const first = await peerWork(f, f.bobDirect, f.bob);
+    const second = await peerWork(f, f.aliceDirect, f.alice);
     // Off duty, pulls stay pending and nothing installs a fallback, so the coalescing is observable.
     f.core.duty.switch(false);
     f.core.works.fail(first.id, "stale credentials");
@@ -246,7 +228,7 @@ describe("a settled teammate Work reaches the main through the autonomous wake",
     const f = team();
     const now = Date.now();
     f.ledger.putSetting(`autonomy:${f.main.id}`, { day: new Date(now).toLocaleDateString("en-CA"), wakesToday: f.core.ledger.limits().dailyWakes, nextAt: now - MINUTE });
-    const work = await peerWork(f, f.aliceDirect, f.bob);
+    const work = await peerWork(f, f.bobDirect, f.bob);
     f.core.works.fail(work.id, "stale credentials");
     await f.core.idle();
     await f.core.autonomy.tick(Date.now());
@@ -258,7 +240,7 @@ describe("a settled teammate Work reaches the main through the autonomous wake",
 
   test("an off-duty hour waits, a disabled main never generates proactively", async () => {
     const f = team();
-    const work = await peerWork(f, f.aliceDirect, f.bob);
+    const work = await peerWork(f, f.bobDirect, f.bob);
     f.core.duty.switch(false);
     f.core.works.fail(work.id, "stale credentials");
     await f.core.idle();
@@ -271,39 +253,17 @@ describe("a settled teammate Work reaches the main through the autonomous wake",
     expect(scheduled(f.engine, f.mainDirect.id)[0]!.text).toContain("stale credentials");
     // The owner switching the main's drive off suppresses every later proactive generation.
     f.core.autonomy.setEnabled(f.main.id, false);
-    const second = await peerWork(f, f.aliceDirect, f.bob);
+    const second = await peerWork(f, f.bobDirect, f.bob);
     f.core.works.block(second.id, "needs the owner's reconciliation");
     await f.core.team.blocked(f.ledger.work(second.id));
     await f.core.autonomy.tick(Date.now());
     expect(scheduled(f.engine, f.mainDirect.id)).toHaveLength(1);
     expect(planOf(f, f.main)).toMatchObject({ enabled: false, nextAt: null });
   });
-
-  test("the signal follows the current main, never a former one", async () => {
-    const f = team();
-    // Drain role-change seeding before the outcome, with proactive admission held off duty.
-    f.core.duty.switch(false);
-    const work = await peerWork(f, f.bobDirect, f.bob);
-    await execute(f.core, new Access({ kind: "owner" }), { requestId: "promote-alice", command: { type: "ghost.set_default", ghostId: f.alice.id } }, { publicOrigin: "http://localhost", documents: null });
-    await f.core.idle();
-    await f.core.autonomy.tick(Date.now());
-    f.core.works.fail(work.id, "stale credentials");
-    await f.core.idle();
-    await f.core.autonomy.tick(Date.now());
-    f.core.duty.switch(true);
-    await f.core.autonomy.tick(Date.now());
-    expect(scheduled(f.engine, f.mainDirect.id)).toHaveLength(0);
-    const wakes = scheduled(f.engine, f.aliceDirect.id);
-    expect(wakes).toHaveLength(1);
-    expect(wakes[0]!.origin).toBe("schedule");
-    expect(wakes[0]!.text).toContain(`"${work.title}" (${work.id})`);
-    expect(wakes[0]!.text).toContain("stale credentials");
-  });
-
   test("a change during admission remains due for one follow-up look", async () => {
     const f = team();
-    const settled = await peerWork(f, f.aliceDirect, f.bob);
-    const late = await peerWork(f, f.aliceDirect, f.bob);
+    const settled = await peerWork(f, f.bobDirect, f.bob);
+    const late = await peerWork(f, f.bobDirect, f.bob);
     f.core.duty.switch(false);
     // The teammate result settles while the main's wake is already being admitted.
     const hook = new MidFlightEngine();
@@ -335,8 +295,8 @@ describe("a settled teammate Work reaches the main through the autonomous wake",
 
   test("same-millisecond feedback is ordered by the durable ledger, not the clock", async () => {
     const f = team();
-    const first = await peerWork(f, f.aliceDirect, f.bob);
-    const late = await peerWork(f, f.aliceDirect, f.bob);
+    const first = await peerWork(f, f.bobDirect, f.bob);
+    const late = await peerWork(f, f.bobDirect, f.bob);
     const now = Date.now() + MINUTE;
     const clock = spyOn(Date, "now").mockReturnValue(now);
     try {
@@ -372,14 +332,14 @@ describe("a settled teammate Work reaches the main through the autonomous wake",
     const f = team();
     f.core.duty.switch(false);
     for (let i = 0; i < 45; i++) {
-      const work = await peerWork(f, f.aliceDirect, f.bob, { title: `Outcome ${i}` });
+      const work = await peerWork(f, f.bobDirect, f.bob, { title: `Outcome ${i}` });
       f.core.works.fail(work.id, `root finding ${i}`);
       await f.core.idle();
     }
     for (let tree = 0; tree < 2; tree++) {
-      const parent = await peerWork(f, f.aliceDirect, f.bob);
+      const parent = await peerWork(f, f.bobDirect, f.bob);
       for (let i = 0; i < 25; i++) {
-        const child = f.core.works.delegate(parent.id, { ghostId: f.alice.id, title: `Child churn ${i}`, brief: "One independent part" });
+        const child = f.core.works.delegate(parent.id, { ghostId: f.bob.id, title: `Child churn ${i}`, brief: "One independent part" });
         await f.core.idle();
         f.core.works.fail(child.id, "child-only finding");
         await f.core.idle();
@@ -401,7 +361,7 @@ describe("a settled teammate Work reaches the main through the autonomous wake",
     const f = team(path);
     // Off duty, the signal still writes durably; only the admission waits.
     f.core.duty.switch(false);
-    const work = await peerWork(f, f.aliceDirect, f.bob);
+    const work = await peerWork(f, f.bobDirect, f.bob);
     f.core.works.fail(work.id, "stale credentials");
     await f.core.idle();
     expect(teamSignals(f.engine)).toHaveLength(0);
@@ -430,7 +390,7 @@ describe("work_steer", () => {
 
   test("the main steers a running ordinary Work once per call", async () => {
     const f = team();
-    const work = await peerWork(f, f.aliceDirect, f.bob);
+    const work = await peerWork(f, f.bobDirect, f.bob);
     const instruction = "Skip the second source;\nthe export matters more";
     const assignee = f.ledger.ghost(work.ghostId);
     const result = await steer(f, work.id, instruction, "steer-1");
@@ -452,7 +412,7 @@ describe("work_steer", () => {
   test("the main may steer a waiting Work", async () => {
     const f = team();
     const parent = await peerWork(f, f.aliceDirect, f.alice);
-    const child = f.core.works.delegate(parent.id, { ghostId: f.bob.id, title: "Part", brief: "B" });
+    const child = f.core.works.delegate(parent.id, { ghostId: f.alice.id, title: "Part", brief: "B" });
     await f.core.idle();
     f.core.activity(parent.conversationId!, false, Date.now());
     await f.core.idle();
@@ -466,7 +426,7 @@ describe("work_steer", () => {
     const activity = await activityWork(f);
     expect((await steer(f, activity.id, "hurry", "s-activity")).isError).toBe(true);
 
-    const work = await peerWork(f, f.aliceDirect, f.bob);
+    const work = await peerWork(f, f.bobDirect, f.bob);
     const effect = f.core.effects.begin({ conversationId: work.conversationId!, callId: "purchase-1", tool: "browser_propose", input: { selector: "#buy" }, summary: "purchase outcome" });
     f.core.effects.unknown(effect.effect!.id, "the connection dropped");
     await f.core.idle();
@@ -477,7 +437,7 @@ describe("work_steer", () => {
     expect(f.ledger.work(work.id)).toEqual(blocked);
     expect(f.core.effects.unresolved(work.id)).toEqual(unresolved);
 
-    const expired = await peerWork(f, f.aliceDirect, f.bob, { deadline_minutes: 1 });
+    const expired = await peerWork(f, f.bobDirect, f.bob, { deadline_minutes: 1 });
     f.ledger.tx(() => f.ledger.putWork({ ...f.ledger.work(expired.id), deadlineAt: Date.now() - MINUTE }));
     const expiredBefore = f.ledger.work(expired.id);
     expect((await steer(f, expired.id, "hurry", "s-expired")).isError).toBe(true);
@@ -495,7 +455,7 @@ describe("work_steer", () => {
       ghostId: f.bob.id,
       title: "Checked task",
       brief: "Write the number down",
-      originConversationId: f.aliceDirect.id,
+      originConversationId: f.bobDirect.id,
       acceptance: { criteria: "", checks: [{ kind: "artifact_contains", name: "out.txt", text: "42" }], reviewer: null },
       deadlineAt: Date.now() + 30 * MINUTE,
     });
@@ -511,21 +471,9 @@ describe("work_steer", () => {
     expect(settled.state).toBe("done");
   });
 
-  test("steering rechecks the main role after the awaited open", async () => {
-    const f = team();
-    const work = await peerWork(f, f.aliceDirect, f.bob);
-    const engine = new SwitchingEngine(f.core, f.alice.id);
-    f.core.attach(engine);
-    const result = await steer(f, work.id, "switch happens first", "s-switch");
-    expect(result.isError).toBe(true);
-    expect(f.ledger.defaultGhost()?.id).toBe(f.alice.id);
-    expect(engine.to(work.conversationId!).some((item) => item.requestId === idFor(f.mainDirect.id, "s-switch"))).toBe(false);
-    expect(f.ledger.work(work.id)).toEqual(work);
-  });
-
   test("only the current main is offered or admits work_steer", async () => {
     const f = team();
-    const work = await peerWork(f, f.aliceDirect, f.bob);
+    const work = await peerWork(f, f.bobDirect, f.bob);
     expect(() => f.use(f.aliceDirect, "work_steer")).toThrow("not offered");
     const api = { conversationId: `pi-${f.alice.name}`, taskId: "task:s-peer", callId: "s-peer", output: () => {} } as unknown as ToolExecutionApi;
     const tools = createToolSet({ core: f.core, sandbox, memory: null, documents: null, skills: null });
@@ -542,7 +490,7 @@ describe("work_steer", () => {
 describe("main-only team visibility", () => {
   test("work_list and work_inspect widen for the current main only, resolved at execution", async () => {
     const f = team();
-    const aliceWork = await peerWork(f, f.aliceDirect, f.bob);
+    const aliceWork = await peerWork(f, f.aliceDirect, f.alice);
     const bobCreate = f.use(f.bobDirect, "work_create");
     await bobCreate({ title: "Bob's own", brief: "B", deadline_minutes: 30 }, "bob-own");
     await f.core.idle();
@@ -554,21 +502,8 @@ describe("main-only team visibility", () => {
     expect(aliceList).toContain("Team task");
     expect(aliceList).not.toContain("Bob's own");
     expect(textOf(await f.use(f.mainDirect, "work_inspect")({ work_id: aliceWork.id }, "insp-1"))).toContain("Collect the numbers");
-    expect(textOf(await f.use(f.bobDirect, "work_inspect")({ work_id: aliceWork.id }, "insp-2"))).toContain("Collect the numbers");
+    expect(textOf(await f.use(f.aliceDirect, "work_inspect")({ work_id: aliceWork.id }, "insp-2"))).toContain("Collect the numbers");
     expect((await f.use(f.aliceDirect, "work_inspect")({ work_id: bobWork.id }, "insp-unrelated")).isError).toBe(true);
-
-    // The owner hands the main designation to Bob: visibility moves with the role, not the Ghost.
-    await execute(f.core, new Access({ kind: "owner" }), { requestId: "promote-bob", command: { type: "ghost.set_default", ghostId: f.bob.id } }, { publicOrigin: "http://localhost", documents: null });
-    await f.core.idle();
-    // The former main is back to its own scope: nothing of the team's Work.
-    const formerList = textOf(await f.use(f.mainDirect, "work_list")({}, "list-4"));
-    expect(formerList).not.toContain("Team task");
-    expect(formerList).not.toContain("Bob's own");
-    expect((await f.use(f.mainDirect, "work_inspect")({ work_id: bobWork.id }, "insp-former")).isError).toBe(true);
-    const newList = textOf(await f.use(f.bobDirect, "work_list")({}, "list-5"));
-    expect(newList).toContain("Team task");
-    expect(newList).toContain("Bob's own");
-    expect(textOf(await f.use(f.bobDirect, "work_inspect")({ work_id: bobWork.id }, "insp-3"))).toContain("Bob's own");
   });
 });
 

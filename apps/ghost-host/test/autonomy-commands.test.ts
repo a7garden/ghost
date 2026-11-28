@@ -108,7 +108,7 @@ describe("owner autonomy commands", () => {
     try {
       expect(f.ledger.ghost(f.ghost.id).hostExecution).toBe(false);
       await expect(f.send({ type: "work.create", ghostId: f.ghost.id, title: "PC", brief: "Read", execution: { kind: "host", cwd: f.root } })).rejects.toThrow("not granted");
-      const created = await f.send({ type: "ghost.create", name: "PC", persona: "", hostExecution: true });
+      const created = await f.send({ type: "ghost.create", name: "PC", persona: "Runs on the PC.", hostExecution: true });
       expect(f.ledger.ghost(created.ghostId as string).hostExecution).toBe(true);
       await f.send({ type: "ghost.update", ghostId: f.ghost.id, hostExecution: true });
       await f.send({ type: "ghost.update", ghostId: f.ghost.id, name: "Renamed" });
@@ -124,7 +124,7 @@ describe("owner autonomy commands", () => {
     const f = fixture();
     try {
       const device = new Access({ kind: "device", deviceId: "phone", name: "Phone" });
-      const createdGhost = await execute(f.core, device, request({ type: "ghost.create", name: "PC", persona: "", hostExecution: true }), context);
+      const createdGhost = await execute(f.core, device, request({ type: "ghost.create", name: "PC", persona: "Runs on the PC.", hostExecution: true }), context);
       const pcGhostId = createdGhost.ghostId as string;
       expect(f.ledger.ghost(pcGhostId).hostExecution).toBe(true);
       await execute(f.core, device, request({ type: "ghost.update", ghostId: f.ghost.id, hostExecution: true }), context);

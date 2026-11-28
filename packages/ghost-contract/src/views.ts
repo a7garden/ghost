@@ -18,6 +18,7 @@ import {
   Device,
   Effect,
   Ghost,
+  GhostPackage,
   Id,
   Live,
   Message,
@@ -26,6 +27,7 @@ import {
   ProviderKind,
   Sandbox,
   Schedule,
+  SkillList,
   SkillName,
   Settings,
   Scope,
@@ -217,6 +219,23 @@ export const SkillCatalog = Type.Object({
   skills: Type.Array(Type.Object({ name: SkillName, description: Type.String({ maxLength: 2048 }) }), { maxItems: 512 }),
 });
 export type SkillCatalog = Static<typeof SkillCatalog>;
+
+/**
+ * GET /api/ghost-packages. Every installable package with what installing it means here: the Ghost it is already
+ * installed as, the main Ghost's projects it would take, and its skills this Host does not have (they are left out).
+ * `errors` names owner package files that failed to load.
+ */
+export const GhostPackageCatalog = Type.Object({
+  packages: Type.Array(Type.Object({
+    ...GhostPackage.properties,
+    installedGhostId: nullable(Id),
+    suggestedScopeIds: Type.Array(Id, { maxItems: 256 }),
+    missingSkills: SkillList,
+  }), { maxItems: 256 }),
+  errors: Type.Array(Type.Object({ path: Type.String({ maxLength: 4096 }), message: Type.String({ maxLength: 1024 }) }), { maxItems: 256 }),
+});
+export type GhostPackageCatalog = Static<typeof GhostPackageCatalog>;
+export type GhostPackageEntry = GhostPackageCatalog["packages"][number];
 
 /** GET /api/scopes/:id/pages?query= */
 export const PageSummary = Type.Object({

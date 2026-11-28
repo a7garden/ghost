@@ -125,7 +125,7 @@ test('model settings lead with provider setup when no model can be selected', as
   await expect(models.getByRole('textbox', { name: '제공자 검색' })).toBeVisible();
 });
 
-test('the roster shows the lone main Ghost without a pool or pin actions', async ({ page }, info) => {
+test('the roster shows the lone main Ghost unbadged with Ghost 추가 beside it', async ({ page }, info) => {
   await openScreen(page, { name: 'single Ghost roster', route: () => info.project.name === 'iphone' ? '/workspace' : '/', waits: () => ['비행 기록'], prepare: async page => {
     await page.route('**/api/state', async route => {
       const response = await route.fetch();
@@ -139,13 +139,13 @@ test('the roster shows the lone main Ghost without a pool or pin actions', async
   const main = roster.locator(phone ? 'button.roster-row' : '.presence-row__main').filter({ hasText: '도우미' });
   await expect(main).toBeVisible();
   await expect(main.locator('.presence-row__main-mark')).toHaveCount(0);
-  await expect(roster.locator('.sidebar-pool-toggle')).toHaveCount(0);
+  await expect(roster.getByText('Ghost 추가', { exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath('single-main-sidebar.png'), animations: 'disabled', caret: 'hide' });
   if (info.project.name === 'desktop') {
     await main.click({ button: 'right' });
     const menu = page.getByRole('menu', { name: '도우미 메뉴', exact: true });
     await expect(menu.getByRole('menuitem', { name: '대화 열기', exact: true })).toBeVisible();
-    await expect(menu.getByRole('menuitem', { name: /^고정/ })).toHaveCount(0);
+    await expect(menu.getByRole('menuitem', { name: '새 프로젝트', exact: true })).toBeVisible();
   }
 });
 

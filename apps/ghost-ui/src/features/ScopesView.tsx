@@ -63,8 +63,8 @@ function rowNext(state: State, digest: ScopeDigest | undefined): { term: string;
   return null;
 }
 
-export function ScopesView({ selectedScope, onSelectScope, createRequested, onCreateClosed, navigate, section, onSectionChange }: {
-  selectedScope?: string; onSelectScope?(id: string): void; createRequested?: boolean; onCreateClosed?(): void;
+export function ScopesView({ selectedScope, onSelectScope, createRequested, createGhostId, onCreateClosed, navigate, section, onSectionChange }: {
+  selectedScope?: string; onSelectScope?(id: string): void; createRequested?: boolean; createGhostId?: string; onCreateClosed?(): void;
   navigate(path: string): void; section?: string; onSectionChange?(section: string): void;
 }) {
   const { store, client } = useHost();
@@ -180,7 +180,7 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
     return () => { alive = false; clearTimeout(timer); };
   }, [scope?.id, scope?.vaultPath, search, reload, client, creating, active]);
   const closeCreate = () => { setCreating(false); onCreateClosed?.(); };
-  if (creating) return <Page width="reading"><PageHeader title="새 프로젝트"/><ScopeEditor onClose={closeCreate} onSaved={id => { setCreating(false); select(id); }}/></Page>;
+  if (creating) return <Page width="reading"><PageHeader title="새 프로젝트"/><ScopeEditor ghostId={createGhostId} onClose={closeCreate} onSaved={id => { setCreating(false); select(id); }}/></Page>;
   if (selectedScope && !scope) return <Page width="reading"><PageHeader title="프로젝트를 찾을 수 없습니다"/><Button variant="outline" onClick={() => select('')}>프로젝트 목록</Button></Page>;
   if (scope && state) {
     const canHandoff = Boolean(receiver) && scope.state !== 'paused';

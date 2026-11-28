@@ -1,6 +1,6 @@
 import { defineTool } from "./define.ts";
 import { Type } from "typebox";
-import { ADAPTATION_MAX_CHARS, Command, DESKTOP_TOOLS, DocRefs, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, parse, type Ghost } from "@ghost/contract";
+import { ADAPTATION_MAX_CHARS, CODE_TOOLS, Command, DESKTOP_TOOLS, DocRefs, FallbackList, FINANCE_TOOLS, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, SkillName, nullable, parse, type Ghost, type GhostSource } from "@ghost/contract";
 import { AssistantEntry, defineExtension, type EntryId, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
 import { fallbackListFor } from "../engine/fallback.ts";
@@ -10,6 +10,7 @@ import { digestOf, idFor } from "../core/ids.ts";
 import { NOTE_MAX } from "../core/decisions.ts";
 import { errorResult, scopeOf, type Scope } from "./shared.ts";
 import { planGhostConfiguration } from "../core/ghost-configuration.ts";
+import { ghostPackageCatalog, resolveGhostCreate, type ResolvedGhostCreateCommand } from "../packages/index.ts";
 import { reviseConfiguration } from "../core/configuration.ts";
 import { NoEffect } from "../core/effects.ts";
 
@@ -34,6 +35,7 @@ function renderGhost(core: Core, ghost: Ghost): string {
       fallbacksInUse: fallbackListFor(ghost, core.ledger.settings()),
       skills: ghost.skills,
       attachments: ghost.attachments,
+      source: ghost.source ?? null,
       persona: ghost.persona,
       notes: core.adaptations.get(ghost.id)?.notes ?? "",
       directConversationId: ghost.directConversationId,
@@ -80,10 +82,10 @@ export function requireMainCaller(core: Core, api: ToolExecutionApi): Scope {
   return scope;
 }
 
-/** `ghost_create`, `ghost_inspect`, `ghost_update` and `decision_settle`: main-only, never selectable, never granted to work or review conversations. */
+/** `ghost_create`, `ghost_packages`, `ghost_inspect`, `ghost_update` and `decision_settle`: main-only, never selectable, never granted to work or review conversations. */
 export function createMainTools(core: Core): Extension {
   interface ManagedChange {
-    command: Extract<Command, { type: "ghost.create" | "ghost.update" }>;
+    command: ResolvedGhostCreateCommand | Extract<Command, { type: "ghost.update" }>;
     entityId: string;
     ghostId: string;
     tool: "ghost_create" | "ghost_update";
@@ -92,6 +94,8 @@ export function createMainTools(core: Core): Extension {
     notesReason?: string;
     selfDirected?: boolean;
     fingerprint: string;
+    /** The package an installed Ghost records as its source; ghost.create only, resolved before planning. */
+    source?: GhostSource | null;
   }
   const identity = ({ fingerprint: _, ...input }: ManagedChange) => input;
   const plan = (input: ManagedChange) => {
@@ -122,7 +126,7 @@ export function createMainTools(core: Core): Extension {
         if (core.ledger.ghosts().some((ghost) => ghost.deletedAt === null && ghost.name === command.name.trim())) throw conflict("A Ghost with that name already exists");
         const { type: _, ...fields } = command;
         granted = macGrants(null, fields.tools, fields.hostExecution);
-        changed = core.createGhost({ ...fields, id: input.entityId, name: fields.name.trim() });
+        changed = core.createGhost({ ...fields, id: input.entityId, name: fields.name.trim(), ...(input.source ? { source: input.source } : {}) });
       } else {
         const { type: _, ghostId, ...patch } = command;
         const before = core.ledger.ghost(ghostId);
@@ -179,11 +183,12 @@ export function createMainTools(core: Core): Extension {
   const ghostCreate = defineTool({
     name: "ghost_create",
     description:
-      "Create a new Ghost only when its way of working must differ for all of its work: a different model, different tools or permissions, or a persona (voice and standard of good work) that would conflict with an existing Ghost's, as fiction differs from code; or when its memory must not mix with another's. Otherwise route the scope to the Ghost that already works that way, or give the Work a playbook (a skill). " +
-      "Write `persona` as who it is and how it works: line one is a one-line introduction shown in lists and search, then its voice, what good work means, what it decides alone and what it asks, and what it never does. Facts about one project belong in that scope's documents; a role procedure belongs in a skill. Tools default to every tool except Mac host tools. Main Ghost only; the owner is told about every new Ghost.",
+      "Add a Ghost by installing a package (`package`, the names ghost_packages lists): its persona, look, tools, skills and PC-execution request arrive together and the Ghost records the package as its source. Prefer a package whenever one fits the work, and check ghost_packages first. Make a Ghost by hand (`name` and `persona`, no `package`) only when no package fits: when its way of working must differ for all of its work — a different model, different tools or permissions, or a persona (voice and standard of good work) that would conflict with an existing Ghost's, as fiction differs from code — or when its memory must not mix with another's. Otherwise route the scope to the Ghost that already works that way, or give the Work a playbook (a skill). " +
+      "Write `persona` as who it is and how it works: line one is a one-line introduction shown in lists and search, then its voice, what good work means, what it decides alone and what it asks, and what it never does. Facts about one project belong in that scope's documents; a role procedure belongs in a skill. Without a package, name and persona are required and tools default to the installed-Ghost set: no Mac host tools and no system-configuration tools. Main Ghost only; the owner is told about every new Ghost.",
     parameters: Type.Object({
-      name: Type.String({ minLength: 1, maxLength: 128 }),
-      persona: Type.String({ minLength: 1, maxLength: 8192 }),
+      package: Type.Optional(SkillName),
+      name: Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "The Ghost's name; with a package, defaults to the package's title" })),
+      persona: Type.Optional(Type.String({ minLength: 1, maxLength: 8192, description: "Who it is and how it works; with a package, defaults to the package's persona" })),
       reason: Type.String({ minLength: 1, maxLength: 1000, description: "Why this Ghost should exist, in the owner's language" }),
       model: Type.Optional(nullable(ModelRef)),
       fallbacks: Type.Optional(FallbackList),
@@ -200,7 +205,10 @@ export function createMainTools(core: Core): Extension {
         const { reason, host_execution, ...fields } = args;
         const command = parse(Command, { ...fields, type: "ghost.create", ...(host_execution === undefined ? {} : { hostExecution: host_execution }) });
         if (command.type !== "ghost.create") throw invalid("Invalid Ghost creation command");
-        return text(change(scope, api, { command, entityId: idFor(scope.conversation.id, api.callId), ghostId: scope.ghost.id, tool: "ghost_create", reason: reason.trim(), fingerprint: "" }));
+        // Resolve the package into explicit fields before planning, so the owner's approval card
+        // shows the real tools and PC grant the package asks for.
+        const resolved = resolveGhostCreate(core, command);
+        return text(change(scope, api, { command: resolved.command, source: resolved.source, entityId: idFor(scope.conversation.id, api.callId), ghostId: scope.ghost.id, tool: "ghost_create", reason: reason.trim(), fingerprint: "" }));
       } catch (error) {
         return errorResult(error);
       }
@@ -227,7 +235,7 @@ export function createMainTools(core: Core): Extension {
     name: "ghost_update",
     description:
       "Change another Ghost's name, persona (who it is and how it works; line one is its introduction in lists), notes about this environment, model, fallback models, skills, look, state, tool allow-list (host tools included) or direct PC execution, and re-apply its conversations. " +
-      "Correct its notes when its results show it keeps working the wrong way here. Main Ghost only; the main designation and credentials stay with the owner. Grant PC execution or host tools only when a concrete task needs them; the owner is told about every such grant.",
+      "Correct its notes when its results show it keeps working the wrong way here. Main Ghost only; credentials stay with the owner. Grant PC execution or host tools only when a concrete task needs them; the owner is told about every such grant.",
     parameters: Type.Object({
       ghost_id: Type.String({ minLength: 1, description: "The Ghost to update" }),
       name: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
@@ -384,5 +392,47 @@ export function createMainTools(core: Core): Extension {
     },
   });
 
-  return defineExtension({ name: "ghost.main", tools: [ghostCreate, ghostInspect, ghostUpdate, decisionSettle, workSteer] });
+  const ghostPackages = defineTool({
+    name: "ghost_packages",
+    description:
+      "List every installable Ghost package with what installing it means here: its title, version and one-line persona, the privileged access it asks for (직접 PC 실행, coding agents, PC control, Mac host tools, finance tools), whether it is already installed (and as which Ghost), and which of the current main projects it would take over. " +
+      "Read this before making a Ghost by hand: installing a package with ghost_create (package) is the preferred way to add a way of working. Main Ghost only.",
+    parameters: Type.Object({}),
+    replay: "safe",
+    async execute(_args, api) {
+      try {
+        requireMainCaller(core, api);
+        const catalog = ghostPackageCatalog(core, null);
+        const ghosts = new Map(core.ledger.ghosts().map((ghost) => [ghost.id, ghost]));
+        const rows = catalog.packages.map((pkg) => {
+          const installed = pkg.installedGhostId === null ? null : ghosts.get(pkg.installedGhostId) ?? null;
+          const asks = [
+            ...(pkg.hostExecution ? ["PC 직접 실행"] : []),
+            ...(pkg.tools.some((tool) => CODE_TOOLS.includes(tool)) ? ["coding agents"] : []),
+            ...(pkg.tools.some((tool) => DESKTOP_TOOLS.includes(tool)) ? ["PC control"] : []),
+            ...(pkg.tools.some((tool) => HOST_TOOLS.includes(tool)) ? ["Mac host tools"] : []),
+            ...(pkg.tools.some((tool) => FINANCE_TOOLS.includes(tool)) ? ["finance tools"] : []),
+          ];
+          const projects = pkg.suggestedScopeIds.map((scopeId) => core.ledger.scope(scopeId).name);
+          return [
+            `- ${pkg.name} v${pkg.version} ${pkg.title} — ${pkg.persona.split("\n")[0]}`,
+            `  asks: ${asks.length > 0 ? asks.join(", ") : "no privileged access"}`,
+            `  installed: ${installed === null ? "no" : `yes, as ${installed.name} (${installed.id})`}`,
+            projects.length > 0 ? `  would take projects: ${projects.join(", ")}` : "  would take projects: none of the current ones",
+          ].join("\n");
+        });
+        const broken = catalog.errors.map((error) => `- ${error.path}: ${error.message}`);
+        return text(
+          [
+            rows.length > 0 ? `Installable packages (install with ghost_create package=<name>):\n${rows.join("\n")}` : "No packages are available on this Host.",
+            ...broken.length > 0 ? [`Owner package files that failed to load:\n${broken.join("\n")}`] : [],
+          ].join("\n\n"),
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  });
+
+  return defineExtension({ name: "ghost.main", tools: [ghostCreate, ghostPackages, ghostInspect, ghostUpdate, decisionSettle, workSteer] });
 }

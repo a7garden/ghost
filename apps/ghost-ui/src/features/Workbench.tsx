@@ -423,7 +423,7 @@ export function Workbench({ scopes, works, ghosts, compact, scopeId, detail, ses
     </button>}/>;
 
   const projectRoster = compact && projectSheetOpen ? visibleGhosts(ghosts) : [];
-  const { byGhost, orphans } = projectsByReceiver(projectSheetOpen ? scopes : [], projectRoster);
+  const byGhost = projectsByReceiver(projectSheetOpen ? scopes : [], projectRoster);
   const sheetProjectList = {
     coding: true, selectedScope: selected, signals,
     navigate: (path: string) => { setProjectSheetOpen(false); navigate(path); },
@@ -543,7 +543,7 @@ export function Workbench({ scopes, works, ghosts, compact, scopeId, detail, ses
                 <SidebarProjectList {...sheetProjectList} scopes={owned} receiver={ghost.name}/>
               </NavigationGroup>;
             })}
-            <SidebarProjectList {...sheetProjectList} scopes={orphans} showUnscoped/>
+            <SidebarProjectList {...sheetProjectList} scopes={[]} showUnscoped/>
           </SidebarProjectGroup>
         </Navigation>
       </DialogContent>

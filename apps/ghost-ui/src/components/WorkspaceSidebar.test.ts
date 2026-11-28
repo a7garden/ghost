@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import type { Decision, Ghost, State, Work } from '@ghost/contract';
 import { WorkspaceSidebar, projectsByReceiver } from './WorkspaceSidebar';
 
@@ -50,23 +50,19 @@ function render(overrides: Partial<Parameters<typeof WorkspaceSidebar>[0]> = {})
   }));
 }
 
-const roster = (html: string) => html.slice(html.indexOf('class="ghost-navigation-group sidebar-ghosts"'));
+/** The installed Ghosts' group, after the main Ghost's own block. */
+const installedGroup = (html: string) => html.slice(html.indexOf('class="ghost-navigation-group sidebar-ghosts"'));
 
-const storeSidebar = (value: unknown) => vi.stubGlobal('localStorage', {
-  getItem: (key: string) => key === 'ghost-ui:sidebar' ? JSON.stringify(value) : null,
-  setItem() {},
-});
-
-afterEach(() => { vi.unstubAllGlobals(); });
-
-it('lists the main Ghost first with its badge and only workspace destinations as pages', () => {
+it('leads with the main Ghost, badged, ahead of the installed Ghosts and only workspace destinations as pages', () => {
   const html = render();
   expect(html.match(/aria-current="page"/g)).toHaveLength(1);
   expect(html).toContain('<span class="sr-only">확인 필요 </span>2');
   expect(html.match(/맡긴 일/g)).toHaveLength(1);
-  const ghosts = roster(html);
-  expect(ghosts.indexOf('sage')).toBeLessThan(ghosts.indexOf('milo'));
-  expect(ghosts.slice(ghosts.indexOf('sage'), ghosts.indexOf('</button>', ghosts.indexOf('sage')))).toContain('메인');
+  const main = html.slice(html.indexOf('class="sidebar-main"'), html.indexOf('class="ghost-navigation-group sidebar-ghosts"'));
+  expect(main).toContain('sage');
+  expect(main).toContain('메인');
+  expect(main).not.toContain('milo');
+  expect(installedGroup(html)).toContain('milo');
   expect(html.match(/메인/g)).toHaveLength(1);
 });
 
@@ -84,34 +80,30 @@ it('marks the open Ghost while any of its conversations is on screen', () => {
   expect(current.slice(0, current.indexOf('</button>'))).toContain('sage');
 });
 
-it('shows the sole main Ghost without roster labels or a redundant role badge', () => {
+it('shows the sole main Ghost without a role badge and offers Ghost 추가 in the empty group', () => {
   const html = render({ state: team(['도우미']) });
   expect(html).toContain('도우미');
-  expect(html).not.toContain('sidebar-ghosts');
   expect(html).not.toContain('presence-row__main-mark');
-  expect(html).not.toContain('Ghost 목록');
-  expect(html).toContain('프로젝트');
+  expect(installedGroup(html)).toContain('Ghost 추가');
+  expect(html).not.toContain('>프로젝트<');
 });
 
 const project = (id: string, ghostId: string | null): State['scopes'][number] =>
   ({ id, name: `프로젝트-${id}`, paths: [], vaultPath: null, createdAt: 1, ghostId, state: 'active', attachments: [], limits: {}, updatedAt: 1 });
 
-it('files each project under its receiving Ghost, unassigned ones under the main, and keeps a gone receiver\'s apart', () => {
+it('files each project under its receiving Ghost, and unassigned or gone receivers\' projects under the main', () => {
   const roster = [ghost('main', true), ghost('writer')];
-  const { byGhost, orphans } = projectsByReceiver([project('a', null), project('b', 'writer'), project('c', 'retired'), project('d', 'writer')], roster);
-  expect(byGhost.get('main')?.map(scope => scope.id)).toEqual(['a']);
+  const byGhost = projectsByReceiver([project('a', null), project('b', 'writer'), project('c', 'retired'), project('d', 'writer')], roster);
+  expect(byGhost.get('main')?.map(scope => scope.id)).toEqual(['a', 'c']);
   expect(byGhost.get('writer')?.map(scope => scope.id)).toEqual(['b', 'd']);
-  expect(orphans.map(scope => scope.id)).toEqual(['c']);
 });
 
-it('nests a project right under its Ghost, even when the folded pool would hide that Ghost', () => {
-  storeSidebar({ pinned: [], expanded: false });
-  const html = render({ state: team(['main', 'writer', 'idle', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6'], { scopes: [project('novel', 'writer')] }) });
-  const writer = html.indexOf('writer');
+it('nests a project right under its Ghost, before the next Ghost', () => {
+  const html = render({ state: team(['main', 'writer', 'zeta'], { scopes: [project('novel', 'writer')] }) });
+  const writer = html.indexOf('>writer<');
   expect(writer).toBeGreaterThan(-1);
   expect(html.indexOf('프로젝트-novel')).toBeGreaterThan(writer);
-  expect(html.indexOf('프로젝트-novel')).toBeLessThan(html.indexOf('프로젝트</p>'));
-  expect(html).not.toContain('>idle<');
+  expect(html.indexOf('프로젝트-novel')).toBeLessThan(html.indexOf('>zeta<'));
 });
 
 it('offers the unscoped workbench only when coding has unscoped agents', () => {
@@ -131,56 +123,16 @@ it('shows host trouble on the settings entry only once it is announced, toned by
   expect(render({ status: { state: 'offline', label: '연결 끊김' } })).toMatch(/data-tone="danger"[^>]*>연결 끊김/);
 });
 
-it('never renders retired or deleted Ghosts', () => {
+it('never renders retired or deleted Ghosts, and dims a paused one', () => {
   const html = render({ state: state({ ghosts: [
     ghost('milo'), ghost('sage', true), ghost('gone', false, { state: 'retired' }), ghost('tomb', false, { deletedAt: 123 }),
+    ghost('rest', false, { state: 'paused' }),
   ] }) });
   expect(html).toContain('milo');
   expect(html).toContain('sage');
   expect(html).not.toContain('gone');
   expect(html).not.toContain('tomb');
-  expect(html).not.toContain('sidebar-pool-toggle');
-});
-
-it('keeps small rosters together and shows the default first even with the long roster folded', () => {
-  storeSidebar({ pinned: [], expanded: false });
-  const ghosts = roster(render({ state: team(['도우미', '연구원', '기록가']) }));
-  expect(ghosts).not.toContain('sidebar-pool-toggle');
-  expect(ghosts).toContain('도우미');
-  expect(ghosts).toContain('기록가');
-  expect(ghosts).toContain('연구원');
-  expect(ghosts.indexOf('도우미')).toBeLessThan(ghosts.indexOf('기록가'));
-  expect(ghosts.indexOf('기록가')).toBeLessThan(ghosts.indexOf('연구원'));
-});
-
-it('pins Ghosts in pin order after the default and before the pool', () => {
-  storeSidebar({ pinned: ['g7', 'g2'], expanded: true });
-  const ghosts = roster(render({ state: team(['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8']) }));
-  expect(ghosts.indexOf('도우미')).toBeLessThan(ghosts.indexOf('g7'));
-  expect(ghosts.indexOf('g7')).toBeLessThan(ghosts.indexOf('g2'));
-  expect(ghosts.indexOf('g2')).toBeLessThan(ghosts.indexOf('g1'));
-});
-
-it('folds the pool from its header, keeping what needs the owner or is on screen', () => {
-  storeSidebar({ pinned: [], expanded: false });
-  const html = render({ state: team(['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9'], {
-    decisions: [decision('d1', 'g3')],
-    conversations: [{ id: 'conv-g5', ghostId: 'g5', kind: 'direct', workId: null, title: '대화', model: null, busy: true, createdAt: 1, lastActivityAt: 1 }],
-  }), openGhostId: 'g4' });
-  expect(html).toContain('aria-expanded="false"');
-  const pool = html.slice(html.indexOf('class="sidebar-pool"'));
-  for (const shown of ['g3', 'g4', 'g5']) expect(pool).toContain(shown);
-  for (const hidden of ['g1', 'g2', 'g6', 'g7', 'g8', 'g9']) expect(pool).not.toContain(hidden);
-  expect(html).not.toContain('Ghost 찾기');
-});
-
-it('an expanded roster past eight Ghosts grows a pool filter and marks paused Ghosts', () => {
-  storeSidebar({ pinned: [], expanded: true });
-  const ghosts10 = ['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9'];
-  const html = render({ state: team(ghosts10, { ghosts: ghosts10.map((name, index) => ghost(name, index === 0, index === 3 ? { state: 'paused' as const } : {})) }) });
-  expect(html).toContain('aria-expanded="true"');
-  expect(html).toContain('Ghost 찾기');
-  expect(html).toContain('data-dimmed');
+  expect(html.slice(html.indexOf('data-dimmed'))).toContain('rest');
 });
 
 it('clears owner-attention rings after a decision is resolved even while failed root and child work remain in history', () => {

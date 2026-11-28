@@ -44,8 +44,8 @@ details[open] > summary::before, [aria-expanded="true"] > .fold-mark { --fold-st
 :is(.verdict details, .timeline__result, .decision__request-more) > summary { display: inline-flex; align-items: center; }
 /* Small icon buttons keep their drawn size; under a finger the hit area grows to 44px. */
 @media (pointer: coarse) {
-  :is(.title-nav__step, .shell-icon-button, .deck__nav button, .sidebar-group-action, .sidebar-pool-toggle) { position: relative; }
-  :is(.title-nav__step, .shell-icon-button, .deck__nav button, .sidebar-group-action, .sidebar-pool-toggle)::after { content: ''; position: absolute; inset: -9px; }
+  :is(.title-nav__step, .shell-icon-button, .deck__nav button, .sidebar-group-action) { position: relative; }
+  :is(.title-nav__step, .shell-icon-button, .deck__nav button, .sidebar-group-action)::after { content: ''; position: absolute; inset: -9px; }
 }
 
 .artifact-tile {

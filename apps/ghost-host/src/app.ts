@@ -175,6 +175,7 @@ export async function openApp(config: Config): Promise<App> {
       codexCachePath: join(config.root, "codex-models.json"),
       activitySources: openedSources,
       sources: (openedSourceStore = new SourceStore(config.root)),
+      packagesRoot: join(config.root, "ghost-packages"),
     }));
     const documents = createDocuments(core);
     const skills = createSkills(config);

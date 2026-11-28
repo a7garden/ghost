@@ -37,6 +37,8 @@
   .roster-row__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .roster-row__subject { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--ghost-ink); font-size: var(--text-bodyLg); font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
   .roster-row__subject + .roster-row__name { color: var(--ghost-ink2); font-size: var(--text-caption); font-weight: 500; }
+  .roster-row--add { border-block-start: 1px solid var(--ghost-line); }
+  .roster-row--add .roster-row__name { color: var(--ghost-ink2); font-weight: 500; }
   .roster-row__value { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .roster-projects__head { display: flex; min-height: 44px; align-items: center; justify-content: space-between; }
   .roster-projects__head h2 { margin: 0; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 600; }
@@ -52,12 +54,22 @@
   }
 
   .ghost-sidebar .ghost-navigation-group__label { padding-block: 8px 4px; font-size: var(--text-caption); }
-  .ghost-sidebar :is(.sidebar-pool-toggle, .sidebar-group-action) { margin-block-start: 4px; }
+  .ghost-sidebar .sidebar-group-action { margin-block-start: 4px; }
   .ghost-sidebar .sidebar-ghosts > .ghost-navigation-group__items:not(:empty) { gap: 0; }
+  .sidebar-main { padding-block: 6px 4px; }
   .sidebar-entry { padding-block: 2px; }
-  .sidebar-pool { display: grid; }
-  .sidebar-pool .sidebar-search { margin-block: 4px; }
-  .ghost-sidebar .presence-row__main { width: 100%; }
+  .sidebar-entry__head { display: flex; align-items: center; gap: 2px; }
+  .ghost-sidebar .sidebar-entry__head > .presence-row__main { min-width: 0; flex: 1; }
+  /* Each Ghost's + starts a project it receives; it shows on hover and focus so the rows stay quiet. */
+  .sidebar-entry__add {
+    display: grid; flex: none; width: 24px; height: 24px; place-items: center; border: 0; border-radius: var(--radius-chip);
+    color: var(--ghost-ink3); background: none; cursor: pointer; opacity: 0; transition: opacity var(--duration-fast) ease;
+  }
+  .sidebar-entry__add > svg { width: 14px; height: 14px; }
+  .sidebar-entry__head:hover > .sidebar-entry__add, .sidebar-entry__add:focus-visible { opacity: 1; }
+  .sidebar-entry__add:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
+  .sidebar-entry__add:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
+  .ghost-sidebar .sidebar-add-ghost { color: var(--ghost-ink3); }
   .ghost-sidebar .presence-row__main[data-dimmed] .dot-avatar { filter: grayscale(.85); opacity: .6; }
   .ghost-sidebar .presence-row__name { color: var(--ghost-ink); font-size: 15px; font-weight: 560; }
   .ghost-sidebar .sidebar-count { font-size: var(--text-caption); }
@@ -81,5 +93,6 @@
   .ghost-sidebar :is(.presence-row__main, .sidebar-project):focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
   @media (pointer: coarse) {
     .sidebar-project, .ghost-sidebar .sidebar-project { min-height: 44px; align-items: center; }
+    .sidebar-entry__add { width: 36px; height: 44px; opacity: 1; }
   }
 }
