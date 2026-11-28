@@ -171,10 +171,11 @@ jobs:
         if: steps.guard.outputs.exists != 'true'
         run: |
           bun install --frozen-lockfile
-          for dir in apps/ghost-host apps/ghost-ui apps/ghost-desktop; do
+          # ghost-host is a root workspace; a second install there rewrites bun.lock.
+          for dir in apps/ghost-ui apps/ghost-desktop; do
             (
               cd "$dir"
-              if [ -f bun.lock ]; then bun install --frozen-lockfile; else bun install; fi
+              bun install --frozen-lockfile
             )
           done
 
