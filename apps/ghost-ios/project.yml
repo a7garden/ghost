@@ -19,6 +19,7 @@ targets:
           - CFBundleURLName: io.a7garden.ghost.pair
             CFBundleURLSchemes:
               - ghost
+        ITSAppUsesNonExemptEncryption: false
         NSCameraUsageDescription: PC 화면의 QR 코드를 스캔하거나 사진을 찍어 첨부할 때 카메라를 사용합니다.
         NSMicrophoneUsageDescription: Ghost와 음성으로 통화할 때 마이크를 사용합니다.
         NSPhotoLibraryAddUsageDescription: 받은 이미지를 사진 보관함에 저장할 때 사용합니다.

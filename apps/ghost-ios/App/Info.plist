@@ -29,6 +29,8 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>PC 화면의 QR 코드를 스캔하거나 사진을 찍어 첨부할 때 카메라를 사용합니다.</string>
 	<key>NSMicrophoneUsageDescription</key>
