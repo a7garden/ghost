@@ -42,7 +42,7 @@ CI는 로컬과 같은 `scripts/release.ts --publish`를 쓴다. CI에서는 배
 
 **iPhone 내부 TestFlight**
 - `ios-v<version>-<build>` 태그만 업로드한다. Mac 릴리스나 공증 성공 여부와 독립적이다.
-- App Store Connect API 키로 Xcode 자동 서명 후 내부 테스트 전용 IPA를 내보낸다. 번들 ID·버전·빌드와 `aps-environment=production`을 패키지에서 확인한 뒤 App Store Connect로 보낸다.
+- Developer 역할의 App Store Connect API 키로 개발 아카이브와 업로드를 처리한다. IPA는 `io.a7garden.ghost` 전용 배포 프로파일과 Apple Distribution 인증서로 서명한다. 내부 테스트 전용 IPA의 번들 ID·버전·빌드와 `aps-environment=production`을 확인한 뒤 업로드한다.
 - 올릴 빌드 번호는 `project.yml`과 `project.pbxproj`에 함께 올린다. 이미 업로드한 번호는 재사용할 수 없다. 기존 개발용 IPA와 Host OTA 경로는 그대로 둔다.
 
 **중복 게시 방지**: guard 단계가 태그의 Release 존재를 확인한다. 게시됐든 업로드 중인 드래프트든 Release가 있으면 잡 전체를 스킵하므로 Mac의 `--publish`가 올리는 드래프트를 건드리지 않는다. 실패한 실행이 남긴 드래프트는 소유자가 지운다. CI는 태그가 이미 원격에 있는 상태에서 시작하므로 `GHOST_RELEASE_TAG_PUSHED=1`로 release.ts의 「태그 없음」 가드 대신 「태그가 이 커밋을 가리킴」을 확인한다.
@@ -76,7 +76,9 @@ CI는 로컬과 같은 `scripts/release.ts --publish`를 쓴다. CI에서는 배
 1. [Ghost Actions 시크릿](https://github.com/a7garden/ghost/settings/secrets/actions)에 Apple 배포·공증 자격을 등록한다. `project-oxi` 조직의 값은 개인 저장소 `a7garden/ghost`에 상속되지 않는다.
 2. 업데이터 키는 설치본의 공개 키와 일치하는 기존 `GHOST_UPDATER_KEY`를 쓴다. 바꾸면 기존 앱이 업데이트를 거부한다.
 3. 서명 자격 등록 후 다음 버전 태그를 push해 `mac-release`의 빌드·게시와 설치된 Host의 자동 업데이트를 확인한다.
-4. App Store Connect에 `io.a7garden.ghost` 앱을 만들거나 기존 기록을 확인한다. `ASC_*`를 등록하고 내부 테스트 그룹의 자동 배포를 켠다. 첫 태그로 빌드가 그룹에 도달하는지 확인하고, iPhone의 TestFlight에서 최초 설치와 자동 업데이트를 켠다.
+4. [Ghost TestFlight](https://appstoreconnect.apple.com/apps/6840207174/testflight)의 `Ghost Internal` 그룹은 자동 배포로 설정했다. iPhone에서는 TestFlight로 처음 설치한 뒤 자동 업데이트를 켠다.
+
+2026-11-28: [iPhone 0.1.0 빌드 20](https://github.com/a7garden/ghost/actions/runs/46089015375)이 서명·검증을 통과했고 Apple이 업로드를 수락했다. Mac은 유효한 Developer ID Application 인증서가 이미 5개라 새 인증서 발급 한도에 도달했다. 기존 인증서는 철회하지 않았다.
 
 ## 5. 남은 결정 / 참고
 
