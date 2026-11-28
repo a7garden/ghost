@@ -1,6 +1,5 @@
-// Builds a Ghost release on this Mac and, with --publish, tags it and uploads it
-// as a GitHub Release. Installed Hosts see it on their next check and offer it
-// to the owner; nothing installs without the owner pressing 「설치」.
+// Builds a Ghost release and, with --publish, uploads it as a GitHub Release.
+// Installed Hosts with automatic updates enabled install it when idle.
 //
 //   bun scripts/release.ts            build + verify into dist/release/<version>/
 //   bun scripts/release.ts --publish  also tag v<version> and create the Release
@@ -115,6 +114,7 @@ if (publish) {
   if (run("git", ["status", "--porcelain"], { capture: true })) throw new Error("--publish needs a clean working tree");
   const remoteTag = run("git", ["ls-remote", "--tags", remote, `refs/tags/${tag}^{}`, `refs/tags/${tag}`], { capture: true });
   if (tagPushed) {
+    if (process.env.GITHUB_REF_NAME !== tag) throw new Error(`expected GitHub release tag ${tag}`);
     // An annotated tag lists its peeled commit (^{}) too; either line naming this commit is enough.
     if (!remoteTag.split("\n").some(line => line.startsWith(fullCommit))) throw new Error(`tag ${tag} on ${remote} does not name ${commit}`);
   } else if (remoteTag) throw new Error(`tag ${tag} already exists on ${remote}`);
@@ -210,7 +210,8 @@ step(`shell ${shellVersion}`);
 const desktop = join(repoRoot, "apps/ghost-desktop");
 run(tauri, ["build", "--bundles", "app"], { cwd: desktop, env: { ...signerEnv, APPLE_SIGNING_IDENTITY: identity } });
 const bundle = join(desktop, "src-tauri/target/release/bundle/macos");
-cpSync(join(bundle, "Ghost.app.tar.gz"), join(out, "Ghost.app.tar.gz"));
+const shellArchive = join(out, "Ghost.app.tar.gz");
+cpSync(join(bundle, "Ghost.app.tar.gz"), shellArchive);
 cpSync(join(bundle, "Ghost.app.tar.gz.sig"), join(out, "Ghost.app.tar.gz.sig"));
 run("codesign", ["--verify", "--deep", "--strict", join(bundle, "Ghost.app")]);
 
@@ -291,6 +292,28 @@ step("verify");
 const manifestBytes = readFileSync(manifestPath);
 if (!verifyMinisign(pubkey, readFileSync(`${manifestPath}.sig`, "utf8"), manifestBytes)) throw new Error("manifest signature does not verify against the release public key");
 const parsed = parseManifest(manifestBytes);
+if (!verifyMinisign(pubkey, parsed.shell.signature, readFileSync(shellArchive))) throw new Error("Mac updater signature does not verify");
+if (tagPushed) {
+  // Check the exact bundle clients receive, not just the pre-archive app.
+  const shellCheck = join(out, "shell-check");
+  mkdirSync(shellCheck);
+  try {
+    run("/usr/bin/tar", ["-xzf", shellArchive, "-C", shellCheck, "--no-same-owner"]);
+    const app = join(shellCheck, "Ghost.app");
+    run("codesign", ["--verify", "--deep", "--strict", app]);
+    const signature = run("/bin/sh", ["-c", 'codesign -dv --verbose=4 "$1" 2>&1', "codesign", app], { capture: true });
+    const fields = signature.split("\n");
+    if (fields.find(line => line.startsWith("Authority=")) !== `Authority=${identity}`
+      || !fields.includes(`TeamIdentifier=${process.env.APPLE_TEAM_ID}`)
+      || !signature.includes("(runtime)") || !fields.some(line => line.startsWith("Timestamp="))) {
+      throw new Error("Mac app must have the configured Developer ID, hardened runtime and a secure timestamp");
+    }
+    run("xcrun", ["stapler", "validate", app]);
+    run("spctl", ["--assess", "--type", "execute", "--verbose=2", app]);
+  } finally {
+    rmSync(shellCheck, { recursive: true, force: true });
+  }
+}
 const archiveBytes = readFileSync(hostArchive);
 if (sha256(hostArchive) !== parsed.host.sha256 || archiveBytes.length !== parsed.host.bytes) throw new Error("host archive does not match the manifest");
 if (!skipIos && (!parsed.ios || sha256(ipa) !== parsed.ios.sha256 || statSync(ipa).size !== parsed.ios.bytes
@@ -305,7 +328,10 @@ for (const bundle of [HOST_BUNDLE, "Ghost Control.app"]) run("codesign", ["--ver
 run(join(stage, "ghost"), ["version"], { capture: true, env: { GHOST_ROOT: join(out, "version-check") } });
 rmSync(stage, { recursive: true, force: true });
 
-const assets = [hostArchive, join(out, "Ghost.app.tar.gz"), join(out, "Ghost.app.tar.gz.sig"), manifestPath, `${manifestPath}.sig`].concat(skipIos ? [] : [ipa]);
+const assets = [hostArchive, shellArchive, join(out, "Ghost.app.tar.gz.sig"), manifestPath, `${manifestPath}.sig`].concat(skipIos ? [] : [ipa]);
+const checksums = join(out, "SHA256SUMS");
+writeFileSync(checksums, assets.map(path => `${sha256(path)}  ${relative(out, path)}\n`).join(""));
+assets.push(checksums);
 console.log(`\nbuilt ${out}\n${assets.map(path => `  ${relative(out, path)}`).join("\n")}`);
 
 // ── Publish ────────────────────────────────────────────────────────────────

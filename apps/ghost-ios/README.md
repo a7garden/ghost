@@ -9,8 +9,7 @@ open apps/ghost-ios/Ghost.xcodeproj
 ```
 
 `Ghost` scheme을 선택한다. 실제 iPhone 설치에는 Xcode의 Signing & Capabilities에서
-본인의 개발 팀을 선택해야 한다. iOS 17 이상을 대상으로 한다. 배포·서명 인증서를
-자동 설치하거나 App Store에 업로드하지 않는다.
+본인의 개발 팀을 선택해야 한다. iOS 17 이상을 대상으로 한다.
 
 빌드와 릴리스 IPA는 유료 개발 팀(Apple Developer Program)의 자동 개발 프로파일로
 서명하며, 프로젝트의 `App/Ghost.entitlements`(`aps-environment=development`)가
@@ -29,9 +28,11 @@ package이며 `swift test`로 페어링 URL·origin 파싱, 연결 요청 재시
 
 ## 업데이트
 
-호스트가 제공하는 웹 UI 변경은 앱 재설치 없이 반영된다. 네이티브 코드가 바뀌면
-개발용으로 서명한 IPA를 GitHub Release에 올린다. iPhone의 설정 › 업데이트 › 「앱 업데이트」를
-누르거나 Mac의 같은 화면에서 QR 코드를 표시해 iPhone으로 스캔하면 OTA로 설치한다.
+호스트가 제공하는 웹 UI 변경은 앱 재설치 없이 반영된다. 내부 TestFlight 배포는
+`ios-v<version>-<build>` 태그가 실행한다. [배포 설정](../../docs/release-workflow-design.md)에서
+App Store Connect와 내부 그룹을 준비한 뒤, iPhone의 TestFlight에서 최초 설치하고 자동 업데이트를 켠다.
+
+개발용 IPA를 쓰는 기기는 설정 › 업데이트 › 「앱 업데이트」 또는 Mac 앱의 QR 코드로 OTA 설치한다.
 
 OTA 빌드는 개발용 프로비저닝 프로파일을 사용한다. 설치할 기기의 UDID가 프로파일에
 등록되어 있어야 하며, 프로파일은 매년 만료되므로 갱신해야 한다. 릴리스 스크립트는
@@ -71,7 +72,7 @@ Keychain에 저장된다.
 알림은 APNs alert로 전달된다. 기기는 알림 권한 승인 뒤 토큰을 `device.push_register`로
 등록한다. APNs 환경은 빌드 구성과 관계없이 서명 프로파일의 `aps-environment`로 정한다.
 `development`는 sandbox, `production`은 production이며, 내장 프로파일이 없는
-App Store·TestFlight 앱도 production이다. 이 빌드는 sandbox APNs로 전달되며, 실제
+App Store·TestFlight 앱도 production이다. 개발용 빌드는 sandbox APNs로 전달되며, 실제
 수신 수용에는 호스트 `config.json`의 `apns` 설정(Apple 포털에서 발급한 팀 ID·키 ID·
 `.p8` 키 경로·topic)과 등록된 실기기에서의 권한 승인·원격 알림 확인이 필요하다. 키
 파일과 토큰은 저장소 밖에서만 관리한다.

@@ -1,6 +1,6 @@
 # GitHub 릴리스 워크플로 설계 (2026-11-11)
 
-목적: 태그 push → GitHub Actions(macOS 러너) 빌드 → GitHub Release 게시 → 설치된 맥 앱이 자동 업데이트,까지 전 체인이 저장소와 GitHub Secrets만으로 닫히도록 한다. 아이폰은 소유자 결정(2026-11-11)에 따라 TestFlight로 배포하며, Apple 개발자 팀 활성화가 확인될 때까지 "활성화 대기" 단계로 둔다.
+Mac 릴리스는 `v<version>` 태그로 GitHub Releases에, iPhone 빌드는 별도 `ios-v<version>-<build>` 태그로 내부 TestFlight에 배포한다.
 
 ## 1. 현황 (근거)
 
@@ -30,20 +30,20 @@
 
 ## 2. 설계 — `.github/workflows/release.yml`
 
-**맥 자동 업데이트 체인 (닫힘)**
+**Mac 자동 배포 및 업데이트**
 ```
 git tag v<x.y.z> push
   → [mac-release] macos-latest: bun scripts/release.ts --publish (GHOST_SKIP_IOS=1)
-      검사 → 빌드 → Developer ID·minisign 서명 → Release(draft → latest, 에셋 5개)
+      검사 → 빌드 → Developer ID·minisign 서명 → Mac 앱 공증·검증 → Release(draft → latest)
   → 설치된 Host의 주기 체크: /releases/latest 조회(토큰) → 매니페스트 검증
   → idle 대기 → 설치 → launchd 재기동 (롤백 가드)
 ```
-기존 자체 업데이트 코드 변경 0 — CI는 `scripts/release.ts --publish`를 그대로 재사용하므로 로컬과 완전히 같은 검증·서명·게시 경로를 지난다. 에셋은 `ghost-<version>-darwin-arm64.tar.gz`, `Ghost.app.tar.gz(.sig)`, `ghost-release.json(.sig)` 5개(IPA 제외).
+CI는 로컬과 같은 `scripts/release.ts --publish`를 쓴다. CI에서는 배포할 `Ghost.app.tar.gz`를 실제로 풀어 Developer ID, 공증 티켓, Gatekeeper를 확인해야 게시할 수 있다. 릴리스에는 Host 묶음, Mac 앱과 그 서명, 매니페스트와 그 서명, `SHA256SUMS`가 포함된다.
 
-**iOS — ios-testflight 잡 (활성화 대기)**
-- `needs: mac-release` + `if: always() && needs.mac-release.result == 'success' && vars.IOS_TESTFLIGHT_ENABLED == 'true'` — 맥 릴리스와 독립, 실패해도 맥 릴리스는 이미 게시된 뒤.
-- 잡 내용: App Store Connect API 키로 자동 서명 archive → `app-store-connect` 방식 export → `xcrun altool --upload-app`로 TestFlight 업로드.
-- ASC는 같은 build number(`CURRENT_PROJECT_VERSION`) 재업로드를 거부: ios 네이티브가 바뀐 릴리스는 버전을 먼저 올린다(기존 문서 규칙 동일). TestFlight가 이후 배포·업데이트를 담당하므로 Host의 QR/OTA 경로는 신규 배포에 사용하지 않는다(기존 설치 기기용으로만 존속).
+**iPhone 내부 TestFlight**
+- `ios-v<version>-<build>` 태그만 업로드한다. Mac 릴리스나 공증 성공 여부와 독립적이다.
+- App Store Connect API 키로 Xcode 자동 서명 후 내부 테스트 전용 IPA를 내보낸다. 번들 ID·버전·빌드와 `aps-environment=production`을 패키지에서 확인한 뒤 App Store Connect로 보낸다.
+- 올릴 빌드 번호는 `project.yml`과 `project.pbxproj`에 함께 올린다. 이미 업로드한 번호는 재사용할 수 없다. 기존 개발용 IPA와 Host OTA 경로는 그대로 둔다.
 
 **중복 게시 방지**: guard 단계가 태그의 Release 존재를 확인한다. 게시됐든 업로드 중인 드래프트든 Release가 있으면 잡 전체를 스킵하므로 Mac의 `--publish`가 올리는 드래프트를 건드리지 않는다. 실패한 실행이 남긴 드래프트는 소유자가 지운다. CI는 태그가 이미 원격에 있는 상태에서 시작하므로 `GHOST_RELEASE_TAG_PUSHED=1`로 release.ts의 「태그 없음」 가드 대신 「태그가 이 커밋을 가리킴」을 확인한다.
 
@@ -59,26 +59,25 @@ git tag v<x.y.z> push
 
 | 이름 | 종류 | 내용 |
 | --- | --- | --- |
-| `MACOS_CERTIFICATE_P12` | secret | Developer ID Application 인증서 `.p12`(base64) |
-| `MACOS_CERTIFICATE_PASSWORD` | secret | `.p12` 내보내기 비밀번호 |
-| `KEYCHAIN_PASSWORD` | secret | CI 임시 키체인용 임의 문자열 |
+| `APPLE_CERTIFICATE` | secret | Developer ID Application 인증서와 키의 암호화된 `.p12`(base64) |
+| `APPLE_CERTIFICATE_PASSWORD` | secret | `.p12` 내보내기 비밀번호 |
+| `APPLE_SIGNING_IDENTITY` | secret | `Developer ID Application: … (TEAMID)` 전체 이름 |
+| `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` | secret | 공증용 Apple 계정, 앱 전용 암호, 팀 ID |
 | `GHOST_UPDATER_KEY` | secret | `~/.tauri/ghost.key` 내용(minisign 개인키) — 유실 시 설치 앱 전체가 업데이트 불가 |
 | `GHOST_UPDATER_KEY_PASSWORD` | secret | 키 비밀번호(없으면 빈 값) |
 | `GEIST_DEPLOY_KEY` | secret | `a7garden/geist` 전용 읽기 키. 다른 저장소나 사용자 계정 권한 없음 |
 | `ASC_API_KEY_ID` / `ASC_API_KEY_ISSUER` / `ASC_API_KEY_P8` | secret | App Store Connect API 키(팀 활성화 후 발급, base64) |
-| `GHOST_SIGNING_IDENTITY` | variable | `Developer ID Application: … (TEAMID)` 전체 이름 |
-| `IOS_TESTFLIGHT_ENABLED` | variable | 팀 활성화 확인 후 `true` |
-| `IOS_TEAM_ID` | variable | 기본 `W5SAS95CBV` |
+| `IOS_TEAM_ID` | variable | TestFlight 서명 팀을 기본값과 다르게 지정할 때만 설정 |
 
 ## 4. 소유자가 할 일
 
-1. Developer ID `.p12` 내보내기 → `MACOS_CERTIFICATE_P12`·`MACOS_CERTIFICATE_PASSWORD`·`KEYCHAIN_PASSWORD`·`GHOST_SIGNING_IDENTITY` 등록.
-2. `GHOST_UPDATER_KEY`(+필요 시 password) 등록 — 개인키를 다루는 등록은 소유자가 직접.
+1. [Ghost Actions 시크릿](https://github.com/a7garden/ghost/settings/secrets/actions)에 Apple 배포·공증 자격을 등록한다. `project-oxi` 조직의 값은 개인 저장소 `a7garden/ghost`에 상속되지 않는다.
+2. 업데이터 키는 설치본의 공개 키와 일치하는 기존 `GHOST_UPDATER_KEY`를 쓴다. 바꾸면 기존 앱이 업데이트를 거부한다.
 3. 서명 자격 등록 후 다음 버전 태그를 push해 `mac-release`의 빌드·게시와 설치된 Host의 자동 업데이트를 확인한다.
-4. 팀 활성화 후: ASC API 키 발급 → `ASC_*` 등록 → `IOS_TESTFLIGHT_ENABLED=true` → 첫 TestFlight 업로드 확인(ASC 웹에서 내부 테스터 자동 배포 1회 설정).
+4. App Store Connect에 `io.a7garden.ghost` 앱을 만들거나 기존 기록을 확인한다. `ASC_*`를 등록하고 내부 테스트 그룹의 자동 배포를 켠다. 첫 태그로 빌드가 그룹에 도달하는지 확인하고, iPhone의 TestFlight에서 최초 설치와 자동 업데이트를 켠다.
 
 ## 5. 남은 결정 / 참고
 
 - 비용: 비공개 저장소의 macOS 러너는 분 단위 과금(1회 빌드 수십 분). 로컬 `--publish`를 쓰면 guard가 CI를 스킵해 중복 과금 없음.
-- iOS 미포함 릴리스의 유효성: Host의 `verifyReleaseDirectory`는 에셋에 실린 파일만 검증하므로 IPA 없는 릴리스도 설치 가능. 기존 설치 기기의 iPhone OTA는 마지막 dev-signed IPA(2.8.1)로 유지되다가 TestFlight로 전환.
-- 롤백: GitHub UI에서 워크플로 비활성화하면 기존 로컬 절차 그대로. release.ts 변경은 `GHOST_SKIP_IOS` 미설정 시 동작 불변.
+- GitHub Mac 릴리스에는 iPhone IPA를 넣지 않는다. 개발용 OTA가 필요하면 로컬 릴리스 경로를 사용한다.
+- 롤백: GitHub에서 워크플로를 끄면 자동 빌드만 중단된다. Mac의 로컬 릴리스 경로는 유지된다.

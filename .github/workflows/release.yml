@@ -12,14 +12,13 @@ name: Release
 # so a Mac publish that is still uploading its draft is never touched. A draft
 # left by a failed run stays until the owner deletes it.
 #
-# The iPhone IPA is NOT built here: TestFlight uploads live in the gated
-# ios-testflight job below (Apple 개발자 팀 활성화가 확인된 후 켠다).
+# Phone builds are independent: push ios-v<version>-<build> for TestFlight.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "ios-v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -27,6 +26,9 @@ concurrency:
 
 jobs:
   mac-release:
+    if: startsWith(github.ref_name, 'v')
+    permissions:
+      contents: write
     # Same build + checks + signing + publish as the Mac flow
     # (bun scripts/release.ts --publish), minus the iPhone IPA (GHOST_SKIP_IOS=1).
     runs-on: macos-latest
@@ -52,15 +54,26 @@ jobs:
 
       # The release builds Geist from a pinned commit, not from its latest checkout.
       # Use a read-only deploy key for the private repository, not a user token.
-      - name: Geist 읽기 키 확인
+      - name: 릴리스 자격 확인
         if: steps.guard.outputs.exists != 'true'
         env:
           GEIST_DEPLOY_KEY: ${{ secrets.GEIST_DEPLOY_KEY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GHOST_UPDATER_KEY: ${{ secrets.GHOST_UPDATER_KEY }}
         run: |
-          if [ -z "$GEIST_DEPLOY_KEY" ]; then
-            echo "::error::Ghost Actions에 a7garden/geist 읽기 전용 deploy key(GEIST_DEPLOY_KEY)를 등록하세요."
-            exit 1
-          fi
+          missing=0
+          for name in GEIST_DEPLOY_KEY APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID GHOST_UPDATER_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing release secret: $name"
+              missing=1
+            fi
+          done
+          test "$missing" -eq 0
       - uses: actions/checkout@v4
         if: steps.guard.outputs.exists != 'true'
         with:
@@ -102,25 +115,51 @@ jobs:
       - name: Developer ID 인증서 임시 키체인에 가져오기
         if: steps.guard.outputs.exists != 'true'
         env:
-          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          cert="$RUNNER_TEMP/ghost-developer-id.p12"
-          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$cert"
+          set -euo pipefail
+          umask 077
+          cert="$(mktemp "$RUNNER_TEMP/ghost-developer-id.XXXXXXXX")"
+          trap 'rm -f -- "$cert"' EXIT
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$cert"
           keychain="$RUNNER_TEMP/ghost-release.keychain-db"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          keychain_password="$(openssl rand -hex 32)"
+
+          # The macOS security tool can read commands on stdin. Neither the PKCS#12
+          # password nor the temporary keychain password belongs in process arguments.
+          keychain_command() {
+            local arg
+            for arg; do
+              if [[ "$arg" == *$'\n'* || "$arg" == *$'\r'* ]]; then
+                echo "::error::Keychain arguments must be single-line" >&2
+                return 1
+              fi
+              arg=${arg//\\/\\\\}
+              arg=${arg//\"/\\\"}
+              printf '"%s" ' "$arg"
+            done
+            printf '\n'
+          }
+          keychain_command create-keychain -p "$keychain_password" "$keychain" | security -qi
+          security list-keychains -d user -s "$keychain"
           security default-keychain -s "$keychain"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
-          security import "$cert" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$keychain"
-          security find-identity -v -p codesigning "$keychain"
+          keychain_command unlock-keychain -p "$keychain_password" "$keychain" | security -qi
+          security set-keychain-settings -lut 10800 "$keychain"
+          keychain_command import "$cert" -k "$keychain" -t agg -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign | security -qi
+          keychain_command set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" | security -qi
+          if ! security find-identity -v -p codesigning "$keychain" | grep -F "\"$APPLE_SIGNING_IDENTITY\"" >/dev/null; then
+            echo "::error::The imported Developer ID does not match APPLE_SIGNING_IDENTITY"
+            exit 1
+          fi
 
       - name: 업데이터 키 준비 (minisign)
         if: steps.guard.outputs.exists != 'true'
         env:
           GHOST_UPDATER_KEY: ${{ secrets.GHOST_UPDATER_KEY }}
         run: |
+          umask 077
           mkdir -p ~/.tauri
           printf '%s' "$GHOST_UPDATER_KEY" > ~/.tauri/ghost.key
           chmod 600 ~/.tauri/ghost.key
@@ -143,81 +182,100 @@ jobs:
         if: steps.guard.outputs.exists != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          GHOST_SIGNING_IDENTITY: ${{ vars.GHOST_SIGNING_IDENTITY }}
+          GHOST_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GEIST_REPO: ${{ github.workspace }}/geist
           GHOST_SKIP_IOS: "1"  # iPhone IPA는 ios-testflight 잡이 담당 (팀 활성화 후)
           GHOST_RELEASE_TAG_PUSHED: "1"  # 이 실행을 시작한 태그가 이미 원격에 있다
           GHOST_UPDATER_KEY_PASSWORD: ${{ secrets.GHOST_UPDATER_KEY_PASSWORD }}
         run: bun scripts/release.ts --publish
 
+      - name: 임시 서명 자격 정리
+        if: ${{ always() && steps.guard.outputs.exists != 'true' }}
+        run: |
+          keychain="$RUNNER_TEMP/ghost-release.keychain-db"
+          if [ -f "$keychain" ]; then security delete-keychain "$keychain"; fi
+          rm -f -- "$HOME/.tauri/ghost.key" "$HOME/.tauri/ghost.key.pub"
+
   ios-testflight:
-    # Apple 개발자 팀 활성화가 확인되면 저장소 변수 IOS_TESTFLIGHT_ENABLED="true"로 켠다.
-    # 현재는 Personal Team이라 TestFlight 업로드가 불가능하므로(docs/local-operations.md),
-    # 이 잡은 기본적으로 스킵되며 맥 릴리스는 이 잡과 무관하게 진행된다(needs 방향: mac → ios).
-    needs: mac-release
-    if: ${{ always() && needs.mac-release.result == 'success' && vars.IOS_TESTFLIGHT_ENABLED == 'true' }}
+    if: startsWith(github.ref_name, 'ios-v')
     runs-on: macos-latest
     timeout-minutes: 60
     env:
       TEAM_ID: ${{ vars.IOS_TEAM_ID || 'W5SAS95CBV' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: App Store Connect API 키 준비
+      - name: TestFlight 태그·빌드 일치 확인
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          build_tag="$(xcodebuild -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost \
+            -configuration Release -sdk iphoneos -showBuildSettings -json |
+            jq -er '.[] | select(.target == "Ghost") | .buildSettings | "ios-v\(.MARKETING_VERSION)-\(.CURRENT_PROJECT_VERSION)"')"
+          if [ "$GITHUB_REF_NAME" != "$build_tag" ]; then
+            echo "::error::The TestFlight tag must match the Xcode version and build: $build_tag"
+            exit 1
+          fi
+
+      - name: 내부 TestFlight 빌드 서명·검증·업로드
         env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_KEY_ISSUER: ${{ secrets.ASC_API_KEY_ISSUER }}
           ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
         run: |
-          mkdir -p "$HOME/private_keys"
-          echo "$ASC_API_KEY_P8" | base64 --decode > "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
-          chmod 600 "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
+          set -euo pipefail
+          for name in ASC_API_KEY_ID ASC_API_KEY_ISSUER ASC_API_KEY_P8; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing TestFlight secret: $name"
+              exit 1
+            fi
+          done
+          umask 077
+          work="$(mktemp -d "$RUNNER_TEMP/ghost-testflight.XXXXXXXX")"
+          trap 'rm -rf -- "$work"' EXIT
+          export API_PRIVATE_KEYS_DIR="$work"
+          key="$work/AuthKey_${ASC_API_KEY_ID}.p8"
+          printf '%s' "$ASC_API_KEY_P8" | base64 --decode > "$key"
+          unset ASC_API_KEY_P8
+          auth=(-allowProvisioningUpdates -authenticationKeyPath "$key"
+            -authenticationKeyID "$ASC_API_KEY_ID" -authenticationKeyIssuerID "$ASC_API_KEY_ISSUER")
+          archive="$work/Ghost.xcarchive"
+          xcodebuild -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$archive" -derivedDataPath "$work/derived" \
+            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic "${auth[@]}" archive
+          cat > "$work/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>testFlightInternalTestingOnly</key><true/>
+          </dict></plist>
+          PLIST
+          plutil -lint "$work/export.plist"
+          xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$work/export.plist" \
+            -exportPath "$work/export" "${auth[@]}"
 
-      # ASC는 같은 build number(CFBundleVersion) 재업로드를 거부한다: ios 네이티브가
-      # 바뀐 릴리스는 project.yml·project.pbxproj의 CURRENT_PROJECT_VERSION을 먼저
-      # 올려야 한다(docs/local-operations.md 버전 올림 규칙과 동일).
-      - name: 아카이브 (App Store Connect 업로드용 자동 서명)
-        env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_KEY_ISSUER: ${{ secrets.ASC_API_KEY_ISSUER }}
-        run: |
-          key="$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
-          xcodebuild -quiet -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost \
-            -configuration Release -destination "generic/platform=iOS" \
-            -archivePath build/Ghost.xcarchive -derivedDataPath build/DerivedData \
-            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic \
-            -allowProvisioningUpdates -authenticationKeyPath "$key" \
-            -authenticationKeyID "$ASC_API_KEY_ID" -authenticationKeyIssuer "$ASC_API_KEY_ISSUER" \
-            archive
-
-      - name: IPA export (app-store-connect 방식)
-        env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_KEY_ISSUER: ${{ secrets.ASC_API_KEY_ISSUER }}
-        run: |
-          key="$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
-          {
-            echo '<?xml version="1.0" encoding="UTF-8"?>'
-            echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-            echo '<plist version="1.0"><dict>'
-            echo '  <key>method</key><string>app-store-connect</string>'
-            echo "  <key>teamID</key><string>${TEAM_ID}</string>"
-            echo '  <key>signingStyle</key><string>automatic</string>'
-            echo '  <key>uploadSymbols</key><true/>'
-            echo '</dict></plist>'
-          } > build/export.plist
-          plutil -lint build/export.plist
-          xcodebuild -quiet -exportArchive -archivePath build/Ghost.xcarchive \
-            -exportOptionsPlist build/export.plist -exportPath build \
-            -allowProvisioningUpdates -authenticationKeyPath "$key" \
-            -authenticationKeyID "$ASC_API_KEY_ID" -authenticationKeyIssuer "$ASC_API_KEY_ISSUER"
-
-      - name: TestFlight 업로드
-        env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_KEY_ISSUER: ${{ secrets.ASC_API_KEY_ISSUER }}
-        run: |
-          # 참고: 실행 러너의 Xcode에서 altool 업로드가 제거된 경우
-          # `xcrun altool` 대신 Transporter CLI 또는 fastlane pilot upload로 교체한다.
-          # (팀 활성화 시점에 러너 Xcode 버전을 확인할 것)
-          xcrun altool --upload-app --type ios -f build/Ghost.ipa \
-            --apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_KEY_ISSUER"
+          ipa="$work/export/Ghost.ipa"
+          /usr/bin/unzip -q "$ipa" -d "$work/check"
+          app="$work/check/Payload/Ghost.app"
+          codesign --verify --deep --strict "$app"
+          codesign -d --entitlements :- "$app" > "$work/entitlements.plist"
+          if [ "$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' "$work/entitlements.plist")" != production ]; then
+            echo "::error::The TestFlight IPA must use production APNs"
+            exit 1
+          fi
+          version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")"
+          build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Info.plist")"
+          test "$GITHUB_REF_NAME" = "ios-v$version-$build"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = io.a7garden.ghost
+          xcrun altool --upload-app -f "$ipa" --type ios --apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_KEY_ISSUER"
