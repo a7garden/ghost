@@ -118,10 +118,10 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: |
+        run: &import_apple_certificate |
           set -euo pipefail
           umask 077
-          cert="$(mktemp "$RUNNER_TEMP/ghost-developer-id.XXXXXXXX")"
+          cert="$(mktemp "$RUNNER_TEMP/ghost-signing.XXXXXXXX")"
           trap 'rm -f -- "$cert"' EXIT
           printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$cert"
           keychain="$RUNNER_TEMP/ghost-release.keychain-db"
@@ -150,7 +150,7 @@ jobs:
           keychain_command import "$cert" -k "$keychain" -t agg -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign | security -qi
           keychain_command set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" | security -qi
           if ! security find-identity -v -p codesigning "$keychain" | grep -F "\"$APPLE_SIGNING_IDENTITY\"" >/dev/null; then
-            echo "::error::The imported Developer ID does not match APPLE_SIGNING_IDENTITY"
+            echo "::error::The imported Apple signing identity does not match the configured identity"
             exit 1
           fi
 
@@ -223,14 +223,22 @@ jobs:
             exit 1
           fi
 
+      - name: Apple Distribution 인증서 임시 키체인에 가져오기
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.IOS_DISTRIBUTION_IDENTITY }}
+        run: *import_apple_certificate
+
       - name: 내부 TestFlight 빌드 서명·검증·업로드
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_KEY_ISSUER: ${{ secrets.ASC_API_KEY_ISSUER }}
           ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          IOS_DISTRIBUTION_PROFILE: ${{ secrets.IOS_DISTRIBUTION_PROFILE }}
         run: |
           set -euo pipefail
-          for name in ASC_API_KEY_ID ASC_API_KEY_ISSUER ASC_API_KEY_P8; do
+          for name in ASC_API_KEY_ID ASC_API_KEY_ISSUER ASC_API_KEY_P8 IOS_DISTRIBUTION_PROFILE; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing TestFlight secret: $name"
               exit 1
@@ -243,6 +251,16 @@ jobs:
           key="$work/AuthKey_${ASC_API_KEY_ID}.p8"
           printf '%s' "$ASC_API_KEY_P8" | base64 --decode > "$key"
           unset ASC_API_KEY_P8
+          profile="$work/distribution.mobileprovision"
+          printf '%s' "$IOS_DISTRIBUTION_PROFILE" | base64 --decode > "$profile"
+          unset IOS_DISTRIBUTION_PROFILE
+          security cms -D -i "$profile" > "$work/profile.plist"
+          profile_id="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$work/profile.plist")"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$work/profile.plist")" = "$TEAM_ID.io.a7garden.ghost"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:aps-environment' "$work/profile.plist")" = production
+          profile_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          mkdir -p "$profile_dir"
+          cp "$profile" "$profile_dir/$profile_id.mobileprovision"
           auth=(-allowProvisioningUpdates -authenticationKeyPath "$key"
             -authenticationKeyID "$ASC_API_KEY_ID" -authenticationKeyIssuerID "$ASC_API_KEY_ISSUER")
           archive="$work/Ghost.xcarchive"
@@ -256,14 +274,18 @@ jobs:
           <plist version="1.0"><dict>
             <key>method</key><string>app-store-connect</string>
             <key>teamID</key><string>${TEAM_ID}</string>
-            <key>signingStyle</key><string>automatic</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict>
+              <key>io.a7garden.ghost</key><string>${profile_id}</string>
+            </dict>
             <key>manageAppVersionAndBuildNumber</key><false/>
             <key>testFlightInternalTestingOnly</key><true/>
           </dict></plist>
           PLIST
           plutil -lint "$work/export.plist"
           xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$work/export.plist" \
-            -exportPath "$work/export" "${auth[@]}"
+            -exportPath "$work/export"
 
           ipa="$work/export/Ghost.ipa"
           /usr/bin/unzip -q "$ipa" -d "$work/check"

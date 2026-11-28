@@ -67,6 +67,8 @@ CI는 로컬과 같은 `scripts/release.ts --publish`를 쓴다. CI에서는 배
 | `GHOST_UPDATER_KEY_PASSWORD` | secret | 키 비밀번호(없으면 빈 값) |
 | `GEIST_DEPLOY_KEY` | secret | `a7garden/geist` 전용 읽기 키. 다른 저장소나 사용자 계정 권한 없음 |
 | `ASC_API_KEY_ID` / `ASC_API_KEY_ISSUER` / `ASC_API_KEY_P8` | secret | App Store Connect API 키(팀 활성화 후 발급, base64) |
+| `IOS_DISTRIBUTION_CERTIFICATE` / `IOS_DISTRIBUTION_CERTIFICATE_PASSWORD` / `IOS_DISTRIBUTION_IDENTITY` | secret | iPhone 배포용 Apple Distribution `.p12`(base64), 암호, 서명 이름 |
+| `IOS_DISTRIBUTION_PROFILE` | secret | `io.a7garden.ghost` 전용 App Store Connect 프로파일(base64) |
 | `IOS_TEAM_ID` | variable | TestFlight 서명 팀을 기본값과 다르게 지정할 때만 설정 |
 
 ## 4. 소유자가 할 일
