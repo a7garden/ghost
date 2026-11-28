@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, symlinkSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { UpdateStatus } from "@ghost/contract";
 import { CommandError } from "../core/errors.ts";
@@ -347,6 +347,28 @@ export class Updater {
     return promise;
   }
 
+  private pruneReleases(previous: string, current: string): void {
+    const layout = detectLayout(this.options.execPath);
+    if (layout?.name !== current || this.installing) return;
+    const releases = join(layout.base, "releases");
+    try {
+      for (const entry of readdirSync(releases, { withFileTypes: true })) {
+        const name = entry.name;
+        if (!entry.isDirectory() || name === current || name === previous) continue;
+        const match = /^(\d+\.\d+\.\d+)-([0-9a-f]{7,40})$/.exec(name);
+        if (!match || !newer(this.identity.version, match[1]!)) continue;
+        const directory = join(releases, name);
+        try {
+          const metadata = join(directory, "release.json");
+          if (!lstatSync(metadata, { throwIfNoEntry: false })?.isFile()) continue;
+          const release = JSON.parse(readFileSync(metadata, "utf8"));
+          if (release?.format !== "ghost-release-files/1" || release.version !== match[1] || release.commit !== match[2]) continue;
+          rmSync(directory, { recursive: true, force: true });
+        } catch (error) { this.log(`이전 Host 릴리스를 정리하지 못했습니다: ${name}`, error); }
+      }
+    } catch (error) { this.log("이전 Host 릴리스 목록을 읽지 못했습니다.", error); }
+  }
+
   confirmStartup(): void {
     const resultPath = join(this.options.root, "update", "result.json");
     try {
@@ -371,6 +393,9 @@ export class Updater {
       rmSync(resultPath, { force: true });
       rmSync(join(this.options.root, "update", "pending"), { force: true });
       rmSync(join(this.options.root, "update", "attempts"), { force: true });
+      if (result.outcome === "installed" && pending?.previous === result.from && pending.target === result.to) {
+        this.pruneReleases(result.from, result.to);
+      }
     } catch (error) { this.log("업데이트 시작 결과를 확인하지 못했습니다.", error); }
   }
 

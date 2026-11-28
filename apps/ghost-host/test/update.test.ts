@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import fixture from "./fixtures/update-signature.json";
@@ -173,15 +173,34 @@ describe("installation", () => {
 describe("startup confirmation", () => {
   test.each(["installed", "failed", "rolled_back"])("records %s durably", async (outcome) => {
     const f = await setup();
+    const releases = join(f.base, "releases");
+    const addRelease = (version: string, commit: string) => {
+      const directory = join(releases, `${version}-${commit}`);
+      atomicWrite(join(directory, "release.json"), JSON.stringify({ format: "ghost-release-files/1", version, commit }));
+      return directory;
+    };
+    const previous = "2.0.0-abcdef1";
+    const rollback = addRelease("2.0.0", "abcdef1");
+    const obsolete = addRelease("1.9.0", "abcdef2");
+    const future = addRelease("2.2.0", "abcdef3");
+    const unknown = join(releases, "1.8.0-abcdef4");
+    mkdirSync(unknown);
+    const alias = join(releases, "1.7.0-abcdef5");
+    symlinkSync(unknown, alias);
+    const backup = join(f.base, "backups", "pre-update", "backup.json");
+    atomicWrite(backup, "{}");
     const target = outcome === "installed" ? f.oldName : "2.2.0-new123";
-    atomicWrite(join(f.root, "update", "pending"), `previous yes ${target}\n`);
+    atomicWrite(join(f.root, "update", "pending"), `${previous} yes ${target}\n`);
     atomicWrite(join(f.root, "update", "attempts"), "2\n");
-    if (outcome === "rolled_back") atomicWrite(join(f.root, "update", "result.json"), JSON.stringify({ outcome, from: "previous", to: target, at: 123 }));
+    if (outcome === "rolled_back") atomicWrite(join(f.root, "update", "result.json"), JSON.stringify({ outcome, from: previous, to: target, at: 123 }));
+    expect(existsSync(obsolete)).toBe(true);
     f.updater.confirmStartup();
     expect(f.updater.status().lastResult?.outcome).toBe(outcome);
     expect(existsSync(join(f.root, "update", "pending"))).toBe(false);
     expect(existsSync(join(f.root, "update", "attempts"))).toBe(false);
     expect(existsSync(join(f.root, "update", "result.json"))).toBe(false);
+    expect(existsSync(obsolete)).toBe(outcome !== "installed");
+    for (const retained of [f.old, rollback, future, unknown, alias, backup]) expect(existsSync(retained)).toBe(true);
     const restarted = new Updater(f.updaterOptions); expect(restarted.status().lastResult?.outcome).toBe(outcome); await restarted.close();
   });
 });
