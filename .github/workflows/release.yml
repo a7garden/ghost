@@ -50,27 +50,32 @@ jobs:
         with:
           fetch-depth: 0  # release.ts checks the tag's commit is on a pushed branch
 
-      # Geist is built from a pinned commit of the owner's repository
-      # (apps/ghost-host/scripts/stage-desktop.sh reads GEIST_REPO). The source
-      # lives on the private mini Gitea, unreachable from runners, so CI checks
-      # out the GitHub mirror a7garden/geist (docs/release-workflow-design.md).
+      # The release builds Geist from a pinned commit, not from its latest checkout.
+      # Use a read-only deploy key for the private repository, not a user token.
+      - name: Geist 읽기 키 확인
+        if: steps.guard.outputs.exists != 'true'
+        env:
+          GEIST_DEPLOY_KEY: ${{ secrets.GEIST_DEPLOY_KEY }}
+        run: |
+          if [ -z "$GEIST_DEPLOY_KEY" ]; then
+            echo "::error::Ghost Actions에 a7garden/geist 읽기 전용 deploy key(GEIST_DEPLOY_KEY)를 등록하세요."
+            exit 1
+          fi
       - uses: actions/checkout@v4
         if: steps.guard.outputs.exists != 'true'
         with:
           repository: a7garden/geist
-          token: ${{ secrets.GEIST_MIRROR_PAT }}
+          ssh-key: ${{ secrets.GEIST_DEPLOY_KEY }}
+          persist-credentials: false
           path: geist
           fetch-depth: 0
 
       - name: geist 미러 사전 확인 (pinned commit 존재 여부)
         if: steps.guard.outputs.exists != 'true'
         run: |
-          test -d geist/.git || {
-            echo "::error::GEIST_MIRROR_PAT 시크릿이 없거나 a7garden/geist 미러에 접근할 수 없습니다. docs/release-workflow-design.md의 '소유자가 할 일'을 참고하세요."
-            exit 1
-          }
+          test -d geist/.git
           git -C geist cat-file -e 'baffff23696b55bf82ad1c6b527e7659a182a4b1^{commit}' || {
-            echo "::error::geist 미러에 pinned commit baffff2가 없습니다. 미러를 갱신하세요."
+            echo "::error::a7garden/geist의 이력에 pinned commit baffff2가 없습니다."
             exit 1
           }
 

@@ -26,7 +26,7 @@
 - `docs/local-operations.md:96`: 팀 W5SAS95CBV를 Apple이 `Personal Team`으로 취급해 실기기 archive·푸시 프로필 생성이 실패한 기록. `:237` 무료 팀 프로필은 7일 만료.
 - 소유자 결정(2026-11-11): 배포는 TestFlight, 팀 활성화까지는 활성화 대기. TestFlight가 업데이트 통지·설치를 담당하므로 IPA는 App Store Connect 업로드용으로 빌드한다.
 
-**기존 CI**: 없음(`.github/` 부재). **Geist 소스**: 미니 서버 Gitea `garden/geist` 전용(git-sync 구성에 GitHub 원격 없음) → GitHub 러너가 직접 접근 불가.
+**Geist 소스**: 비공개 GitHub `a7garden/geist`가 정본이다. mini Gitea `garden/geist`는 보존한다.
 
 ## 2. 설계 — `.github/workflows/release.yml`
 
@@ -51,7 +51,7 @@ git tag v<x.y.z> push
 - `GHOST_SKIP_IOS=1` 환경변수 추가: iOS 빌드 섹션 건너뜀, 매니페스트 `ios` 필드 생략(parseManifest상 ios는 선택이라 Host 검증 통과), 검증·에셋 목록에서 IPA 제외. 환경변수 미설정 시 로컬 동작은 한 글자도 바뀌지 않는다.
 - 수정은 조건 분기 5곳(선언, 섹션 감싸기, 매니페스트 스프레드, 검증 가드, 에셋 목록)뿐.
 
-**Geist**: 비공개 GitHub 미러 `a7garden/geist`를 checkout해 `GEIST_REPO`로 지정 — `stage-desktop.sh` 무변경. 미리 pinned commit 존재를 확인하고, 미러/토큰이 없으면 명확한 오류로 실패(조용한 저하 없음).
+**Geist**: `a7garden/geist`를 읽기 전용 SSH deploy key로 checkout해 `GEIST_REPO`로 지정한다. 워크플로는 이 키를 checkout 뒤 남기지 않으며, 고정 커밋이 이력에 없으면 빌드 전에 중단한다.
 
 **시크릿**: 값은 저장소에 절대 두지 않는다. 아래 이름만 워크플로가 참조.
 
@@ -64,7 +64,7 @@ git tag v<x.y.z> push
 | `KEYCHAIN_PASSWORD` | secret | CI 임시 키체인용 임의 문자열 |
 | `GHOST_UPDATER_KEY` | secret | `~/.tauri/ghost.key` 내용(minisign 개인키) — 유실 시 설치 앱 전체가 업데이트 불가 |
 | `GHOST_UPDATER_KEY_PASSWORD` | secret | 키 비밀번호(없으면 빈 값) |
-| `GEIST_MIRROR_PAT` | secret | `a7garden/geist` 미러 읽기용 fine-grained PAT(contents:read) |
+| `GEIST_DEPLOY_KEY` | secret | `a7garden/geist` 전용 읽기 키. 다른 저장소나 사용자 계정 권한 없음 |
 | `ASC_API_KEY_ID` / `ASC_API_KEY_ISSUER` / `ASC_API_KEY_P8` | secret | App Store Connect API 키(팀 활성화 후 발급, base64) |
 | `GHOST_SIGNING_IDENTITY` | variable | `Developer ID Application: … (TEAMID)` 전체 이름 |
 | `IOS_TESTFLIGHT_ENABLED` | variable | 팀 활성화 확인 후 `true` |
@@ -72,15 +72,13 @@ git tag v<x.y.z> push
 
 ## 4. 소유자가 할 일
 
-1. `a7garden/geist` 비공개 미러 생성(미니 Gitea mirror push 또는 수동 push) → fine-grained PAT 발급 → `GEIST_MIRROR_PAT` 등록.
-2. Developer ID `.p12` 내보내기 → `MACOS_CERTIFICATE_P12`·`MACOS_CERTIFICATE_PASSWORD`·`KEYCHAIN_PASSWORD`·`GHOST_SIGNING_IDENTITY` 등록.
-3. `GHOST_UPDATER_KEY`(+필요 시 password) 등록 — 개인키를 다루는 등록은 소유자가 직접.
-4. Secrets 등록 후 첫 태그(예: 다음 버전 `v2.8.2`) push로 검증 — Actions 로그에서 release.ts가 로컬과 같은 단계를 통과하는지 확인.
-5. 팀 활성화 후: ASC API 키 발급 → `ASC_*` 등록 → `IOS_TESTFLIGHT_ENABLED=true` → 첫 TestFlight 업로드 확인(ASC 웹에서 내부 테스터 자동 배포 1회 설정).
+1. Developer ID `.p12` 내보내기 → `MACOS_CERTIFICATE_P12`·`MACOS_CERTIFICATE_PASSWORD`·`KEYCHAIN_PASSWORD`·`GHOST_SIGNING_IDENTITY` 등록.
+2. `GHOST_UPDATER_KEY`(+필요 시 password) 등록 — 개인키를 다루는 등록은 소유자가 직접.
+3. 서명 자격 등록 후 다음 버전 태그를 push해 `mac-release`의 빌드·게시와 설치된 Host의 자동 업데이트를 확인한다.
+4. 팀 활성화 후: ASC API 키 발급 → `ASC_*` 등록 → `IOS_TESTFLIGHT_ENABLED=true` → 첫 TestFlight 업로드 확인(ASC 웹에서 내부 테스터 자동 배포 1회 설정).
 
 ## 5. 남은 결정 / 참고
 
-- Geist 확보 방식: GitHub 비공개 미러(권장, 표준) 대신 러너에 Tailscale을 얹고 미니 Gitea를 직접 읽는 방법도 가능하나 인증·의존성이 늘어난다.
 - 비용: 비공개 저장소의 macOS 러너는 분 단위 과금(1회 빌드 수십 분). 로컬 `--publish`를 쓰면 guard가 CI를 스킵해 중복 과금 없음.
 - iOS 미포함 릴리스의 유효성: Host의 `verifyReleaseDirectory`는 에셋에 실린 파일만 검증하므로 IPA 없는 릴리스도 설치 가능. 기존 설치 기기의 iPhone OTA는 마지막 dev-signed IPA(2.8.1)로 유지되다가 TestFlight로 전환.
 - 롤백: GitHub UI에서 워크플로 비활성화하면 기존 로컬 절차 그대로. release.ts 변경은 `GHOST_SKIP_IOS` 미설정 시 동작 불변.
