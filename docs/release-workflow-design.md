@@ -75,10 +75,12 @@ CI는 로컬과 같은 `scripts/release.ts --publish`를 쓴다. CI에서는 배
 
 1. [Ghost Actions 시크릿](https://github.com/a7garden/ghost/settings/secrets/actions)에 Apple 배포·공증 자격을 등록한다. `project-oxi` 조직의 값은 개인 저장소 `a7garden/ghost`에 상속되지 않는다.
 2. 업데이터 키는 설치본의 공개 키와 일치하는 기존 `GHOST_UPDATER_KEY`를 쓴다. 바꾸면 기존 앱이 업데이트를 거부한다.
-3. 서명 자격 등록 후 다음 버전 태그를 push해 `mac-release`의 빌드·게시와 설치된 Host의 자동 업데이트를 확인한다.
+3. `v<Host 버전>` 태그를 push한다. Actions 완료 후 공개 산출물의 서명·해시·공증을 독립 검증하고 운영 Host의 `lastResult`를 확인한다.
 4. [Ghost TestFlight](https://appstoreconnect.apple.com/apps/6840207174/testflight)의 `Ghost Internal` 그룹은 자동 배포로 설정했다. iPhone에서는 TestFlight로 처음 설치한 뒤 자동 업데이트를 켠다.
 
-2026-11-28: [iPhone 0.1.0 빌드 20](https://github.com/a7garden/ghost/actions/runs/46089015375)이 서명·검증을 통과했고 Apple이 업로드를 수락했다. Mac은 유효한 Developer ID Application 인증서가 이미 5개라 새 인증서 발급 한도에 도달했다. 기존 인증서는 철회하지 않았다.
+2026-11-28: [iPhone 0.1.0 빌드 20](https://github.com/a7garden/ghost/actions/runs/46089015375)이 서명·검증을 통과했고 Apple이 업로드를 수락했다.
+
+Mac [v2.50.3](https://github.com/a7garden/ghost/releases/tag/v2.50.3)은 기존 Developer ID로 [GitHub Actions](https://github.com/a7garden/ghost/actions/runs/46100425729)에서 자동 게시했다. 내려받은 산출물의 체크섬, signed manifest, Mac 앱 minisign·코드 서명·공증 티켓·Gatekeeper를 확인했다. 운영 Host에서 수동 설치 요청 없이 업데이트 확인만 호출해 2.50.0에서 2.50.3으로 전환됐고, `lastResult=installed`, runtime ready, Ghost 31개 ID와 대화 674개·조회된 맡긴 일 200개가 보존됐다. 네이티브 셸은 변경되지 않아 0.2.4를 유지했다.
 
 ## 5. 남은 결정 / 참고
 
