@@ -1016,7 +1016,16 @@ describe("guarded Mac host", () => {
       expect(Date.now() - started).toBeLessThan(3000);
       const pid = Number(timed.output.trim());
       expect(pid).toBeGreaterThan(0);
-      expect(() => process.kill(pid, 0)).toThrow();
+      // SIGKILL stops execution before the orphan is reaped; a zombie still answers kill(pid, 0).
+      const reapDeadline = Date.now() + 1000;
+      for (;;) {
+        const status = Bun.spawnSync(["/bin/ps", "-o", "stat=", "-p", String(pid)], { stderr: "pipe" });
+        const state = status.stdout.toString().trim();
+        if (state.startsWith("Z") || (status.exitCode === 1 && !state && !status.stderr.length)) break;
+        expect(status.exitCode).toBe(0);
+        if (Date.now() >= reapDeadline) throw new Error(`Timed-out descendant is still alive (pid ${pid}, state ${state})`);
+        await Bun.sleep(20);
+      }
       const huge = await runHostCommand({
         program: "/usr/bin/yes",
         args: ["abcdef"],

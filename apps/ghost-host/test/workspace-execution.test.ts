@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -96,19 +96,30 @@ describe.skipIf(!darwin)("workspace execution boundary", () => {
     expect(existsSync(outside)).toBe(false);
   });
 
-  test("refuses reading the Ghost state root and ~/.ssh, allows the toolchain", async () => {
+  test("refuses reading the Ghost state root and an existing file under ~/.ssh", async () => {
     const f = fixture();
     const env = await f.sandbox.envFor(f.work({ kind: "workspace" }));
     cleanups.push(() => env.cleanup(BACKGROUND_CONTEXT));
     const state = await shell(env, `ls ${f.state}`);
     expect(state.exitCode).not.toBe(0);
     expect(state.stderr).toContain("sandbox:");
-    // HOME is private inside the process; name the owner's real credential path explicitly.
-    const sshPath = join(homedir(), ".ssh", "config");
+    // Use a synthetic credential so we prove denial even on a clean CI account.
+    const sshDir = join(homedir(), ".ssh");
+    const created = mkdirSync(sshDir, { recursive: true, mode: 0o700 });
+    if (created) cleanups.push(() => {
+      try { rmdirSync(created); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOTEMPTY") throw error; }
+    });
+    const probe = mkdtempSync(join(sshDir, "ghost-seatbelt-test-"));
+    cleanups.push(() => rmSync(probe, { recursive: true, force: true }));
+    const sshPath = join(probe, "config");
+    const marker = "synthetic SSH config";
+    writeFileSync(sshPath, marker, { mode: 0o600 });
     const ssh = await shell(env, `cat '${sshPath.replaceAll("'", "'\\''")}'`);
     expect(ssh.exitCode).not.toBe(0);
     expect(ssh.stderr).toContain("sandbox:");
     expect(ssh.stderr).toContain("secret");
+    expect(ssh.stdout).not.toContain(marker);
     // In-process file operations agree with the kernel's answer.
     const read = await env.readTextFile(join(f.state, "ledger.db"), context);
     expect(read.ok).toBe(false);
